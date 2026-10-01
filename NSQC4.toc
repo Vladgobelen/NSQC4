@@ -2,10 +2,14 @@
 ## Title: NSQC4
 ## Notes: NSQC4
 ## Author: Vladgobelen
-## Version: 4.0
+## Version: 1.1
 ## SavedVariables: nsDbc4
 
+Core\ChatHandler.lua
+Guild\KickInactive.lua
+Guild\AutoPromote.lua
+Guild\Demote.lua
 GP\GP.lua
 GP\AUK.lua
-VERSION.lua
 GP\BossLoot.lua
+VERSION.lua
