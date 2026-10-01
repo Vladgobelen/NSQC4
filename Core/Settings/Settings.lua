@@ -38,4 +38,5 @@ NSQC4.Settings.MODULES = {
     { key = "promote", label = "Повышение" },
     { key = "demote",  label = "Понижение" },
     { key = "kick",    label = "Кик неактивных" },
+    { key = "boobs",   label = "Сиськи" },
 }

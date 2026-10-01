@@ -12,6 +12,7 @@ Core\Settings\OptionsPanel.lua
 Guild\KickInactive.lua
 Guild\AutoPromote.lua
 Guild\Demote.lua
+Guild\Boobs.lua
 GP\GP.lua
 GP\AUK.lua
 GP\BossLoot.lua
