@@ -1,3 +1,9 @@
+local function InitModule()
+    if not NSQC4.Settings.IsModuleEnabled("gp") then return end
+
+
+    
+
 GpDb = {}
 GpDb.__index = GpDb
 
@@ -2631,3 +2637,22 @@ _G.NSQC4_GP_TEST = function()
 end
 
 print("|cff00ff00[NSQC4-TEST]|r GP.lua выполняется до конца. NSQC4_GP_TEST зарегистрирована.")
+
+
+
+
+
+
+
+
+
+
+end -- конец функции настроек
+
+local f = CreateFrame("Frame")
+f:RegisterEvent("ADDON_LOADED")
+f:SetScript("OnEvent", function(self, event, addon)
+    if addon ~= "NSQC4" then return end
+    self:UnregisterEvent("ADDON_LOADED")
+    InitModule()
+end)

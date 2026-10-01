@@ -93,33 +93,31 @@ function NSQC4.ChatHandler:OnChatMessage(event, ...)
 
     if event == "CHAT_MSG_ADDON" then
         prefix, text, channel, sender = ...
-        -- Фильтр ADDON по префиксу
         if not prefix or prefix:sub(1, #self.addonPrefix) ~= self.addonPrefix then
             return
         end
     else
         text, sender = ...
-        -- Фильтр текстовых команд по "-"
         if not text or text == "" then return end
         if text:sub(1, #self.textPrefix) ~= self.textPrefix then
-            -- Если нет catch-all — выходим сразу
             if not self.triggers["*"] then return end
         end
     end
 
-    if not text or text == "" then return end
+    if not text then return end
+
+    -- Защита от text без слов (только пробелы)
+    local firstWordRaw = text:match("^(%S+)")
+    if not firstWordRaw then return end
 
     local shortType = event:match("^CHAT_MSG_(.+)$")
-
-    -- Первое слово (lowercase)
-    local firstWord = text:match("^(%S+)"):lower()
-
-    -- Составной ключ: "<тип>:<первое слово>"
-    local key = shortType .. ":" .. firstWord
+    local firstWord = firstWordRaw:lower()
 
     if self.debug then
-        print("|cff00ff00[ChatHandler]|r", event, "| key=" .. key, "| sender=" .. tostring(sender))
+        print("|cff00ff00[ChatHandler]|r", event, "| key=" .. shortType .. ":" .. firstWord, "| sender=" .. tostring(sender))
     end
+
+    local key = shortType .. ":" .. firstWord
 
     -- 1. O(1) — прямой lookup
     local list = self.triggers[key]
@@ -129,7 +127,7 @@ function NSQC4.ChatHandler:OnChatMessage(event, ...)
         end
     end
 
-    -- 2. ADDON по префиксу (если ключ не совпал)
+    -- 2. ADDON по префиксу
     if event == "CHAT_MSG_ADDON" and prefix then
         local pkey = "ADDON:" .. prefix:lower()
         local plist = self.triggers[pkey]

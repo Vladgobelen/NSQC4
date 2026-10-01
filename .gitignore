@@ -26,3 +26,7 @@
 # Папка Guild и её содержимое
 !Guild/
 !Guild/**
+
+# Папка Media и её содержимое
+!Media/
+!Media/**

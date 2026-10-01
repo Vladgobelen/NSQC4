@@ -1,3 +1,20 @@
+local function InitModule()
+    if not NSQC4.Settings.IsModuleEnabled("kick") then return end
+
+
+
+
+
+
+
+
+
+
+
+
+NSQC4 = NSQC4 or {}
+if not NSQC4.Settings.IsModuleEnabled("kick") then return end
+
 -- ============================================================================
 -- NSQC4 / Guild / KickInactive
 -- Команда: "-кик [Ник]" в гильд-чате
@@ -158,3 +175,34 @@ NSQC4.ChatHandler:Register("GUILD:-кик", {
     func = NSQC4.RunGuildKick,
     stopOnMatch = true,
 })
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+end -- конец функции настроек
+
+local f = CreateFrame("Frame")
+f:RegisterEvent("ADDON_LOADED")
+f:SetScript("OnEvent", function(self, event, addon)
+    if addon ~= "NSQC4" then return end
+    self:UnregisterEvent("ADDON_LOADED")
+    InitModule()
+end)

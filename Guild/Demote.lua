@@ -1,3 +1,23 @@
+local function InitModule()
+    if not NSQC4.Settings.IsModuleEnabled("demote") then return end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NSQC4 = NSQC4 or {}
+if not NSQC4.Settings.IsModuleEnabled("demote") then return end
+
 -- ============================================================================
 -- NSQC4 / Guild / Demote
 -- Команда: "-понизить <Ник>" в гильд-чате
@@ -44,7 +64,32 @@ end
 -- ============================================================================
 -- РЕГИСТРАЦИЯ ТРИГГЕРА
 -- ============================================================================
-NSQC4.ChatHandler:Register("GUILD:-понизить", {
+NSQC4.ChatHandler:Register("GUILD:-принизить", {
     func = NSQC4.RunGuildDemote,
     stopOnMatch = true,
 })
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+end -- конец функции настроек
+
+local f = CreateFrame("Frame")
+f:RegisterEvent("ADDON_LOADED")
+f:SetScript("OnEvent", function(self, event, addon)
+    if addon ~= "NSQC4" then return end
+    self:UnregisterEvent("ADDON_LOADED")
+    InitModule()
+end)

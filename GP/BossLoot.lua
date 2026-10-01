@@ -1,3 +1,23 @@
+local function InitModule()
+    if not NSQC4.Settings.IsModuleEnabled("gp") then return end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NSQC4 = NSQC4 or {}
+if not NSQC4.Settings.IsModuleEnabled("gp") then return end
+
 -- ============================================================================
 -- NSQC4 Boss Loot → GP assign
 -- При открытии лута с босса РЛом — вывод предметов в чат и кнопки начисления ГП.
@@ -248,3 +268,46 @@ LootFrame_Show = function(...)
         end
     end
 end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+end -- конец функции настроек
+
+local f = CreateFrame("Frame")
+f:RegisterEvent("ADDON_LOADED")
+f:SetScript("OnEvent", function(self, event, addon)
+    if addon ~= "NSQC4" then return end
+    self:UnregisterEvent("ADDON_LOADED")
+    InitModule()
+end)
