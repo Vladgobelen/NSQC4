@@ -1,0 +1,10 @@
+## Interface: 30300
+## Title: NSQC4
+## Notes: NSQC4
+## Author: Vladgobelen
+## Version: 4.0
+## SavedVariables: nsDbc4
+
+main.lua
+GP\GP.lua
+GP\AUK.lua
