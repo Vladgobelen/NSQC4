@@ -5,6 +5,6 @@
 ## Version: 4.0
 ## SavedVariables: nsDbc4
 
-main.lua
 GP\GP.lua
 GP\AUK.lua
+VERSION.lua
