@@ -8,3 +8,4 @@
 GP\GP.lua
 GP\AUK.lua
 VERSION.lua
+GP\BossLoot.lua
