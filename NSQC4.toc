@@ -5,6 +5,7 @@
 ## Version: 1.3
 ## SavedVariables: nsDbc4
 
+Core\Compat.lua
 Core\Settings\Settings.lua
 Core\ChatHandler.lua
 Core\ChatCatcher.lua
