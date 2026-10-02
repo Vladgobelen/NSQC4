@@ -1054,7 +1054,7 @@ end
 function GpDb:_UpdateFromGuild()
     -- Временная отладка.
     -- Поставь false, когда найдём причину.
-    local DEBUG_GP = true
+    local DEBUG_GP = false
 
     self.gp_data = {}
     local totalWithGP = 0
@@ -1110,7 +1110,6 @@ function GpDb:_UpdateFromGuild()
 
             if DEBUG_GP then
                 print(string.format(
-                    "|cFF00FF00[GP DEBUG]|r Режим: raidOnly=%s, showAllGuild=%s, showOfflineOnly=%s, inRaid=%s",
                     tostring(raidOnlyMode),
                     tostring(showAllGuild),
                     tostring(showOfflineOnly),
@@ -1118,7 +1117,6 @@ function GpDb:_UpdateFromGuild()
                 ))
 
                 print(string.format(
-                    "|cFF00FF00[GP DEBUG]|r Начинаю парсинг гильдии. Игроков: %d",
                     GetNumGuildMembers()
                 ))
             end
@@ -1152,7 +1150,6 @@ function GpDb:_UpdateFromGuild()
                             local noteForLog = officerNote or "<nil>"
 
                             print(string.format(
-                                "|cFF00FF00[GP DEBUG]|r %s | note=[%s] | words=%d | id=%s | word3=%s | gp=%d",
                                 plainName,
                                 noteForLog,
                                 #words,
@@ -1179,7 +1176,6 @@ function GpDb:_UpdateFromGuild()
 
             if DEBUG_GP then
                 print(string.format(
-                    "|cFF00FF00[GP DEBUG]|r Разобрано игроков гильдии: %d",
                     debugCount
                 ))
             end
@@ -1210,7 +1206,6 @@ function GpDb:_UpdateFromGuild()
 
                             if DEBUG_GP then
                                 print(string.format(
-                                    "|cFF00FF00[GP DEBUG]|r RAID GUILD %s | gp=%d | playerID=%s",
                                     plainName,
                                     gp,
                                     tostring(guildInfo.playerID)
@@ -1237,7 +1232,6 @@ function GpDb:_UpdateFromGuild()
 
                             if DEBUG_GP then
                                 print(string.format(
-                                    "|cFF00FF00[GP DEBUG]|r RAID NON-GUILD %s | cachedGp=%d",
                                     plainName,
                                     cachedGp
                                 ))
@@ -1275,7 +1269,6 @@ function GpDb:_UpdateFromGuild()
 
                         if DEBUG_GP then
                             print(string.format(
-                                "|cFF00FF00[GP DEBUG]|r GUILD LIST %s | gp=%d | online=%s",
                                 plainName,
                                 gp,
                                 tostring(guildInfo.online)
@@ -1310,7 +1303,6 @@ function GpDb:_UpdateFromGuild()
 
                             if DEBUG_GP then
                                 print(string.format(
-                                    "|cFF00FF00[GP DEBUG]|r ONLY GP %s | gp=%d",
                                     plainName,
                                     gp
                                 ))
@@ -1849,7 +1841,6 @@ function GpDb:_CreateRaidSelectionWindow()
         self.raidWindow:Hide()
         
         if #nonGuildNicks > 0 then
-            print("|cFF00FF00[GP DEBUG]|r Список:", table.concat(nonGuildNicks, ", "))
         end
         
         if #nonGuildNicks > 0 then
