@@ -23,4 +23,9 @@ Guild\Boobs.lua
 GP\GP.lua
 GP\AUK.lua
 GP\BossLoot.lua
+GP\RaidTracker.lua
 VERSION.lua
+Interface\Mail.lua
+Interface\ChatButtons.lua
+Interface\AOClick.lua
+Interface\WorldMap.lua
