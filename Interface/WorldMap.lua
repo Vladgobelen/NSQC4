@@ -8,28 +8,95 @@ NSQC4 = NSQC4 or {}
 local function InitModule()
     if not NSQC4.Settings.IsModuleEnabled("ui_map") then return end
 
-    local hooked = false
+    -- ========================================================================
+    -- Шаги масштаба
+    -- ========================================================================
+    local scaleSteps = { 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0 }
+    local currentScaleIndex = 6   -- 100%
 
     -- ========================================================================
-    -- Хук на кнопку закрытия карты (через HookScript — не ломает Blizzard)
+    -- Меню масштаба
     -- ========================================================================
-    local function HookWorldMapCloseButton()
+    local dropdown = CreateFrame("Frame", "NSQC4WorldMapScaleDropdown", UIParent, "UIDropDownMenuTemplate")
+    dropdown.displayMode = "MENU"
+
+    local function OnScaleSelected(self)
+        local w = WorldMapFrame
+        if not w then return end
+        currentScaleIndex = self.value
+        w:SetScale(scaleSteps[currentScaleIndex])
+        CloseDropDownMenus()
+    end
+
+    local function InitializeScaleMenu(_, level)
+        for i, scale in ipairs(scaleSteps) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = math.floor(scale * 100) .. "%"
+            info.value = i
+            info.func = OnScaleSelected
+            info.checked = (i == currentScaleIndex)
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end
+
+    UIDropDownMenu_Initialize(dropdown, InitializeScaleMenu, "MENU")
+
+    -- ========================================================================
+    -- Хук на кнопку закрытия карты
+    -- ========================================================================
+    local function HookCloseButton()
         local btn = WorldMapFrameCloseButton
         if not btn then return false end
-        if hooked then return true end
+        if btn.nsQC4Hooked then return true end
+        btn.nsQC4Hooked = true
 
-        hooked = true
-
-        -- Регистрируем ПКМ и СКМ (Blizzard уже зарегистрировал ЛКМ)
+        -- Регистрируем ПКМ и СКМ (ЛКМ уже зарегистрирован Blizzard'ом)
         btn:RegisterForClicks("LeftButtonUp", "RightButtonUp", "MiddleButtonUp")
 
-        -- === Тултип через HookScript (не затираем Blizzard'овский) ===
+        -- Сохраняем Blizzard'овский OnClick
+        local oldOnClick = btn:GetScript("OnClick")
+
+        -- Перезаписываем своим
+        btn:SetScript("OnClick", function(self, button)
+            -- ПКМ — активируем перемещение карты
+            if button == "RightButton" then
+                local w = WorldMapFrame
+                if not w then return end
+                w:SetMovable(true)
+                w:EnableMouse(true)
+                w:SetClampedToScreen(true)
+                w:SetScript("OnMouseDown", function(frame, b)
+                    if b == "LeftButton" then frame:StartMoving() end
+                end)
+                w:SetScript("OnMouseUp", function(frame, b)
+                    if b == "LeftButton" then frame:StopMovingOrSizing() end
+                end)
+                print("|cff00ff00[NSQC4]|r Перемещение карты активировано (ЛКМ — тащить).")
+                return
+            end
+
+            -- СКМ — меню масштаба
+            if button == "MiddleButton" then
+                ToggleDropDownMenu(1, nil, dropdown, "cursor", 0, 0)
+                return
+            end
+
+            -- ЛКМ — вызываем Blizzard'овский обработчик (закрытие карты)
+            if type(oldOnClick) == "function" then
+                oldOnClick(self, button)
+            else
+                HideUIPanel(WorldMapFrame)
+            end
+        end)
+
+        -- Тултип
         btn:HookScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT", 0, 10)
-            GameTooltip:AddLine("Управление картой мира:", 1, 1, 0)
-            GameTooltip:AddLine("• ЛКМ — закрыть карту", 1, 1, 1)
-            GameTooltip:AddLine("• ПКМ — активировать перемещение", 1, 1, 1)
-            GameTooltip:AddLine("• Колесо — выбрать масштаб", 1, 1, 1)
+            GameTooltip:ClearLines()
+            GameTooltip:AddLine("Управление картой:", 1, 1, 0)
+            GameTooltip:AddLine("• ЛКМ — закрыть", 1, 1, 1)
+            GameTooltip:AddLine("• ПКМ — перемещение", 1, 1, 1)
+            GameTooltip:AddLine("• СКМ — масштаб", 1, 1, 1)
             GameTooltip:Show()
         end)
 
@@ -37,71 +104,19 @@ local function InitModule()
             GameTooltip:Hide()
         end)
 
-        -- === Масштабы ===
-        local scaleSteps = { 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0 }
-        local currentScaleIndex = 6
-
-        local dropdown = CreateFrame("Frame", "NSQC4WorldMapScaleDropdown", UIParent, "UIDropDownMenuTemplate")
-        dropdown.displayMode = "MENU"
-
-        local function OnScaleSelected(self)
-            local w = WorldMapFrame
-            if not w then return end
-            currentScaleIndex = self.value
-            w:SetScale(scaleSteps[currentScaleIndex])
-            CloseDropDownMenus()
-        end
-
-        local function InitializeScaleMenu(_, level)
-            for i, scale in ipairs(scaleSteps) do
-                local info = UIDropDownMenu_CreateInfo()
-                info.text = math.floor(scale * 100) .. "%"
-                info.value = i
-                info.func = OnScaleSelected
-                info.checked = (i == currentScaleIndex)
-                UIDropDownMenu_AddButton(info, level)
-            end
-        end
-
-        UIDropDownMenu_Initialize(dropdown, InitializeScaleMenu, "MENU")
-
-        -- === HookScript на OnClick — не затирает Blizzard'овский ===
-        btn:HookScript("OnClick", function(self, button)
-            local w = WorldMapFrame
-            if not w then return end
-
-            if button == "RightButton" then
-                w:SetMovable(true)
-                w:EnableMouse(true)
-                w:SetClampedToScreen(true)
-                w:HookScript("OnMouseDown", function(frame, btn)
-                    if btn == "LeftButton" then frame:StartMoving() end
-                end)
-                w:HookScript("OnMouseUp", function(frame, btn)
-                    if btn == "LeftButton" then frame:StopMovingOrSizing() end
-                end)
-
-            elseif button == "MiddleButton" then
-                ToggleDropDownMenu(1, nil, dropdown, "cursor", 0, 0)
-
-            -- ЛКМ — Blizzard сам обработает (закроет карту)
-            end
-        end)
-
         return true
     end
 
     -- ========================================================================
-    -- Инициализация: ждём, пока кнопка появится
+    -- Инициализация: ждём появления кнопки
     -- ========================================================================
-    if not HookWorldMapCloseButton() then
-        local waitFrame = CreateFrame("Frame")
-        waitFrame:SetScript("OnUpdate", function(self)
-            if HookWorldMapCloseButton() then
-                self:SetScript("OnUpdate", nil)
-            end
-        end)
-    end
+    local waitFrame = CreateFrame("Frame")
+    waitFrame:SetScript("OnUpdate", function(self)
+        if HookCloseButton() then
+            self:SetScript("OnUpdate", nil)
+            self:Hide()
+        end
+    end)
 end
 
 local f = CreateFrame("Frame")
