@@ -69,25 +69,56 @@ local function CreateMinimapButton()
     btn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
 
-        -- Заголовок
-        local verText = ""
-        if NSQC4_VERSION then
-            verText = TOOLTIP_COLOR_VERSION .. NSQC4_VERSION.major .. "." .. NSQC4_VERSION.minor
-        end
-        GameTooltip:AddLine(TOOLTIP_COLOR_TITLE .. TOOLTIP_COLOR_VERSION .. (NSQC4_VERSION and (NSQC4_VERSION.major .. "." .. NSQC4_VERSION.minor) or "?"))
+        -- 1. Версия + ОЗУ
+        local ver = NSQC4_VERSION and (NSQC4_VERSION.major .. "." .. NSQC4_VERSION.minor) or "?"
+        GameTooltip:AddLine("|cFF6495EDNSQC4|cFF808080-|cff00BFFF" .. ver ..
+            " |cffbbbbbbОЗУ: |cff00BFFF" ..
+            string.format("%.0f", GetAddOnMemoryUsage("NSQC4")) .. " |cffbbbbbbкб")
 
-        -- Актуальная версия
+        -- 2. Актуальная версия
         if NSQC4_LAST_VERSION then
-            GameTooltip:AddLine(TOOLTIP_COLOR_LATEST .. TOOLTIP_COLOR_VERSION .. NSQC4_LAST_VERSION.major .. "." .. NSQC4_LAST_VERSION.minor)
-        else
-            GameTooltip:AddLine(TOOLTIP_COLOR_UNKNOWN)
+            GameTooltip:AddLine("|cFF6495EDАктуальная версия: |cff00BFFF" ..
+                NSQC4_LAST_VERSION.major .. "." .. NSQC4_LAST_VERSION.minor)
         end
 
+        -- 3. Средний илвл (если модуль включён)
+        if NSQC4.Settings.IsModuleEnabled("itemlevel") and NSQC4.BS.GetAverageItemLevel then
+            GameTooltip:AddLine("|cFF6495EDСредний уровень предметов: |cff00BFFF" ..
+                NSQC4.BS.GetAverageItemLevel("player"))
+        end
+
+        -- 4. ГС (если аддон GS_Data есть)
+        local myName = UnitName("player")
+        if GS_Data and GS_Data[GetRealmName()] and GS_Data[GetRealmName()].Players[myName] then
+            GameTooltip:AddLine("|cFF6495EDGearScore: |cff00BFFF" ..
+                GS_Data[GetRealmName()].Players[myName].GearScore)
+        end
+
+        -- 5. ГП из третьего слова офицерской заметки
+        local gp = "0"
+        for i = 1, GetNumGuildMembers() do
+            local name, _, _, _, _, _, _, officerNote = GetGuildRosterInfo(i)
+            if name then
+                name = name:gsub("%-.+", "")
+                if name == myName then
+                    local words = {}
+                    for w in (officerNote or ""):gmatch("%S+") do table.insert(words, w) end
+                    if #words >= 3 then gp = words[3] end
+                    break
+                end
+            end
+        end
+        GameTooltip:AddLine("|cFF6495EDГП: |cff00BFFF" .. gp)
+
+        -- 6. Пустая строка
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(TOOLTIP_COLOR_HINT .. "ЛКМ — открыть окно")
-        GameTooltip:AddLine(TOOLTIP_COLOR_HINT .. "ПКМ — настройки")
-        GameTooltip:AddLine(TOOLTIP_COLOR_HINT .. "СКМ — гильдбанк")
-        GameTooltip:AddLine(TOOLTIP_COLOR_HINT .. "Перетащить — тащить мышью")
+
+        -- 7-9. Подсказки
+        GameTooltip:AddLine("|cffFF8C00ЛКМ|r — открыть окно")
+        GameTooltip:AddLine("|cffF4A460ПКМ|r — настройки")
+        GameTooltip:AddLine("|cff32CD32СКМ|r — гильдбанк")
+        GameTooltip:AddLine("|cff808080Shift+ЛКМ|r — перетащить")
+
         GameTooltip:Show()
     end)
     btn:SetScript("OnLeave", function() GameTooltip:Hide() end)

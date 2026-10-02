@@ -34,9 +34,13 @@ function NSQC4.Settings.SetModuleEnabled(name, enabled)
 end
 
 NSQC4.Settings.MODULES = {
-    { key = "gp",      label = "ГП / Аукцион / Лут" },
-    { key = "promote", label = "Повышение" },
-    { key = "demote",  label = "Понижение" },
-    { key = "kick",    label = "Кик неактивных" },
-    { key = "boobs",   label = "Сиськи" },
+    { key = "gp",        label = "ГП / Аукцион / Лут" },
+    { key = "promote",   label = "Повышение" },
+    { key = "demote",    label = "Понижение" },
+    { key = "kick",      label = "Кик неактивных" },
+    { key = "boobs",     label = "Сиськи" },
+    { key = "bs_player", label = "БС: игрока" },
+    { key = "bs_item",   label = "БС: на предметах" },
+    { key = "bs_chat",   label = "БС: команда -илвл" },
+    { key = "itemlevel", label = "Средний илвл" },
 }

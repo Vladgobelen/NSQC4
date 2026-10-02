@@ -2,7 +2,7 @@
 ## Title: NSQC4
 ## Notes: NSQC4
 ## Author: Vladgobelen
-## Version: 1.2
+## Version: 1.3
 ## SavedVariables: nsDbc4
 
 Core\Settings\Settings.lua
@@ -10,6 +10,11 @@ Core\ChatHandler.lua
 Core\ChatCatcher.lua
 Core\MinimapIcon.lua
 Core\Settings\OptionsPanel.lua
+BS\Stats.lua
+BS\ItemLevel.lua
+BS\PlayerScore.lua
+BS\ItemScore.lua
+BS\Chat.lua
 Guild\KickInactive.lua
 Guild\AutoPromote.lua
 Guild\Demote.lua
