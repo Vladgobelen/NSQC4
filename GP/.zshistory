@@ -1,0 +1,30 @@
+ldd Civ5XP
+./Civ5XP
+GLIBC_TUNABLES=glibc.tune.hwcaps=-SSE4_2 ./Civ5XP
+LD_PRELOAD=/usr/lib32/libopenal.so.1 ./Civ5XP
+MESA_GL_VERSION_OVERRIDE=4.2 MESA_GLSL_VERSION_OVERRIDE=420 ./Civ5XP
+env DXVK_HUD=fps,info WINEPREFIX=/home/diver/WP7/PF STAGING_SHARED_MEMORY=1 DXVK_STATE_CACHE=1 STAGING_WRITECOPY=1 /home/diver/WP7/bin/wine CivilizationV.exe
+wine CivilizationV.exe
+WINEDLLOVERRIDES="ir50_32=n" wine CivilizationV.exe
+wine CivilizationV_DX11.exe
+env DXVK_HUD=fps,info WINEPREFIX=/home/diver/WP7/PF STAGING_SHARED_MEMORY=1 DXVK_STATE_CACHE=1 STAGING_WRITECOPY=1 /home/diver/WP7/bin/wine CivilizationV_DX11.exe
+grep gstreamer /home/diver/WP7/.wine/winetricks.log 2>/dev/null
+grep gstreamer ~/.wine/winetricks.log 2>/dev/null
+;s
+cd '/home/diver/Games/Civ5/Sid Meiers Civilization V'
++
+cp "/home/diver/Games/Civ5/Sid Meiers Civilization V/CivilizationV_DX11.exe" "/home/diver/Games/Civ5/Sid Meiers Civilization V/CivilizationV_DX11.exe.bak"
+sed -i 's/SELECT ModID from Mods where Activated = 1/SELECT ModID from Mods where Activated = 2/' "/home/diver/Games/Civ5/Sid Meiers Civilization V/CivilizationV_DX11.exe"
+rm -f "/home/diver/WP11/PF/drive_c/users/diver/Documents/My Games/Sid Meier's Civilization 5/cache/Civ5ModsDatabase.db"
+cd '/home/diver/Games/Civ5/Sid Meiers Civilization V'\
+\
+WINEPREFIX=/home/diver/WP11/PF STAGING_SHARED_MEMORY=1 STAGING_WRITECOPY=1 DXVK_STATE_CACHE=1 /home/diver/Games/Civ5/wp/wine-proton-11/bin/wine CivilizationV_DX11.exe
+cd '/home/diver/Games/Civ5/Sid Meiers Civilization V'\
+\
+WINEPREFIX=/home/diver/WP11/PF STAGING_SHARED_MEMORY=1 STAGING_WRITECOPY=1 DXVK_STATE_CACHE=1 /home/diver/wine-proton-11/bin/wine CivilizationV_DX11.exe
+ls
+grep -r "MajorStartingUnits" "/home/diver/Games/Civ5/Sid Meiers Civilization V/" 2>/dev/null
+grep -rl "UNIT_WARRIOR" "/home/diver/Games/Civ5/Sid Meiers Civilization V/Assets/" 2>/dev/null
+grep -rl "<Class>UNITCLASS_WARRIOR</Class>" "/home/diver/Games/Civ5/Sid Meiers Civilization V/Assets/" 2>/dev/null
+grep -rl "UNIT_GATLINGGUN" "/home/diver/Games/Civ5/Sid Meiers Civilization V/Assets/" 2>/dev/null
+grep -rn "UNITCLASS_BAZOOKA\|UNIT_BAZOOKA" "/home/diver/Games/Civ5/Sid Meiers Civilization V/Assets/" 2>/dev/null
