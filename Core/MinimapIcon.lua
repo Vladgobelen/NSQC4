@@ -1,5 +1,6 @@
 -- ============================================================================
 -- NSQC4 / Core / MinimapIcon
+-- Иконка аддона у миникарты.
 -- ============================================================================
 
 NSQC4 = NSQC4 or {}
@@ -8,12 +9,117 @@ local ICON_TEXTURE = "Interface\\AddOns\\NSQC4\\Media\\Addon\\emblem.tga"
 local ICON_SIZE    = 32
 local ICON_RADIUS  = 80
 
--- Цвета тултипа (как в NSQC3)
+-- Цвета тултипа
 local TOOLTIP_COLOR_TITLE   = "|cFF6495EDNSQC4|cFF808080-|r"
 local TOOLTIP_COLOR_VERSION = "|cff00BFFF"
-local TOOLTIP_COLOR_LATEST  = "|cFF6495EDАктуальная: |r"
-local TOOLTIP_COLOR_UNKNOWN = "|cFF6495EDАктуальная: |cffff0000Неизвестно|r"
-local TOOLTIP_COLOR_HINT    = "|cff808080"
+local TOOLTIP_COLOR_LATEST  = "|cFF6495EDАктуальная версия: |r"
+local TOOLTIP_COLOR_UNKNOWN = "|cFF6495EDАктуальная версия: |cffff0000Неизвестно|r"
+
+-- ============================================================================
+-- Двойной клик — переменные состояния
+-- ============================================================================
+local lastClickTime   = 0
+local lastClickButton = nil
+local clickPending    = false
+
+-- ============================================================================
+-- Обработка одинарного клика
+-- ============================================================================
+local function HandleSingleClick(button)
+    if button == "RightButton" then
+        -- ПКМ — открыть панель настроек
+        if NSQC4.Settings and NSQC4.Settings.OpenPanel then
+            NSQC4.Settings.OpenPanel()
+        end
+    elseif button == "LeftButton" then
+        -- ЛКМ — пока пусто (заглушка)
+        -- Сюда позже повесим действие
+    elseif button == "MiddleButton" then
+        -- СКМ — пока пусто
+    end
+end
+
+-- ============================================================================
+-- Обработка двойного клика
+-- ============================================================================
+local function HandleDoubleClick(button)
+    if button == "LeftButton" then
+        -- Двойной ЛКМ — окно ГП
+        local target = nil
+        if gpDb_old and gpDb_old.Show then
+            target = gpDb_old
+        elseif gpDb and gpDb.Show then
+            target = gpDb
+        elseif NSQC4.gpDb and NSQC4.gpDb.Show then
+            target = NSQC4.gpDb
+        end
+
+        if target then
+            target:Show()
+        else
+            print("|cff808080[NSQC4]|r Окно ГП недоступно.")
+        end
+    elseif button == "RightButton" then
+        -- Двойной ПКМ — пока пусто
+    elseif button == "MiddleButton" then
+        -- Двойной СКМ — пока пусто
+    end
+end
+
+-- ============================================================================
+-- Фрейм-таймер (один на всю иконку)
+-- ============================================================================
+local ClickTimerFrame = CreateFrame("Frame")
+ClickTimerFrame:Hide()
+ClickTimerFrame.elapsed = 0
+ClickTimerFrame:SetScript("OnUpdate", function(self, elapsed)
+    if not clickPending then return end
+    self.elapsed = self.elapsed + elapsed
+    if self.elapsed >= 0.3 then
+        self.elapsed = 0
+        self:Hide()
+        clickPending = false
+        HandleSingleClick(lastClickButton)
+    end
+end)
+
+-- ============================================================================
+-- Сброс состояния клика
+-- ============================================================================
+local function ResetClickState()
+    lastClickTime   = 0
+    lastClickButton = nil
+    clickPending    = false
+    if ClickTimerFrame then
+        ClickTimerFrame.elapsed = 0
+        ClickTimerFrame:Hide()
+    end
+end
+
+-- ============================================================================
+-- Обработчик кликов
+-- ============================================================================
+local function OnMinimapClick(self, button)
+    local now = GetTime()
+
+    if clickPending
+        and (now - lastClickTime < 0.3)
+        and (button == lastClickButton)
+    then
+        -- Двойной клик — чистим состояние и вызываем двойной обработчик
+        clickPending = false
+        ClickTimerFrame.elapsed = 0
+        ClickTimerFrame:Hide()
+        HandleDoubleClick(button)
+    else
+        -- Первый клик — ждём 0.3 сек
+        clickPending = true
+        lastClickTime = now
+        lastClickButton = button
+        ClickTimerFrame.elapsed = 0
+        ClickTimerFrame:Show()
+    end
+end
 
 -- ============================================================================
 -- Создание кнопки
@@ -28,7 +134,7 @@ local function CreateMinimapButton()
     btn:SetPushedTexture(ICON_TEXTURE)
     btn:SetHighlightTexture(ICON_TEXTURE)
 
-    -- Читаем сохранённую позицию из nsDbc4
+    -- Позиция из nsDbc4
     nsDbc4 = nsDbc4 or {}
     nsDbc4.minimap = nsDbc4.minimap or {}
 
@@ -49,52 +155,42 @@ local function CreateMinimapButton()
 
     -- Клики
     btn:RegisterForClicks("LeftButtonUp", "RightButtonUp", "MiddleButtonUp")
-    btn:SetScript("OnClick", function(self, button)
-        if button == "LeftButton" then
-            if NSAuk and NSAuk.CreateSettingsWindow then
-                NSAuk.CreateSettingsWindow()
-            else
-                print("|cff00ff00[NSQC4]|r ЛКМ — окно ещё не реализовано.")
-            end
-        elseif button == "RightButton" then
-            if NSQC4.Settings and NSQC4.Settings.OpenPanel then
-                NSQC4.Settings.OpenPanel()
-            end
-        elseif button == "MiddleButton" then
-            print("|cff00ff00[NSQC4]|r СКМ — гильдбанк (не реализовано).")
-        end
-    end)
+    btn:SetScript("OnClick", OnMinimapClick)
 
     -- Тултип
     btn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
 
-        -- 1. Версия + ОЗУ
         local ver = NSQC4_VERSION and (NSQC4_VERSION.major .. "." .. NSQC4_VERSION.minor) or "?"
-        GameTooltip:AddLine("|cFF6495EDNSQC4|cFF808080-|cff00BFFF" .. ver ..
+        GameTooltip:AddLine(TOOLTIP_COLOR_TITLE .. TOOLTIP_COLOR_VERSION .. ver ..
             " |cffbbbbbbОЗУ: |cff00BFFF" ..
             string.format("%.0f", GetAddOnMemoryUsage("NSQC4")) .. " |cffbbbbbbкб")
 
-        -- 2. Актуальная версия
         if NSQC4_LAST_VERSION then
-            GameTooltip:AddLine("|cFF6495EDАктуальная версия: |cff00BFFF" ..
+            GameTooltip:AddLine(TOOLTIP_COLOR_LATEST .. TOOLTIP_COLOR_VERSION ..
                 NSQC4_LAST_VERSION.major .. "." .. NSQC4_LAST_VERSION.minor)
+        else
+            GameTooltip:AddLine(TOOLTIP_COLOR_UNKNOWN)
         end
 
-        -- 3. Средний илвл (если модуль включён)
-        if NSQC4.Settings.IsModuleEnabled("itemlevel") and NSQC4.BS.GetAverageItemLevel then
+        -- Илвл
+        if NSQC4.Settings.IsModuleEnabled("itemlevel")
+            and NSQC4.BS and NSQC4.BS.GetAverageItemLevel
+        then
             GameTooltip:AddLine("|cFF6495EDСредний уровень предметов: |cff00BFFF" ..
                 NSQC4.BS.GetAverageItemLevel("player"))
         end
 
-        -- 4. ГС (если аддон GS_Data есть)
+        -- ГС
         local myName = UnitName("player")
-        if GS_Data and GS_Data[GetRealmName()] and GS_Data[GetRealmName()].Players[myName] then
+        if GS_Data and GS_Data[GetRealmName()]
+            and GS_Data[GetRealmName()].Players[myName]
+        then
             GameTooltip:AddLine("|cFF6495EDGearScore: |cff00BFFF" ..
                 GS_Data[GetRealmName()].Players[myName].GearScore)
         end
 
-        -- 5. ГП из третьего слова офицерской заметки
+        -- ГП
         local gp = "0"
         for i = 1, GetNumGuildMembers() do
             local name, _, _, _, _, _, _, officerNote = GetGuildRosterInfo(i)
@@ -102,7 +198,9 @@ local function CreateMinimapButton()
                 name = name:gsub("%-.+", "")
                 if name == myName then
                     local words = {}
-                    for w in (officerNote or ""):gmatch("%S+") do table.insert(words, w) end
+                    for w in (officerNote or ""):gmatch("%S+") do
+                        table.insert(words, w)
+                    end
                     if #words >= 3 then gp = words[3] end
                     break
                 end
@@ -110,13 +208,10 @@ local function CreateMinimapButton()
         end
         GameTooltip:AddLine("|cFF6495EDГП: |cff00BFFF" .. gp)
 
-        -- 6. Пустая строка
         GameTooltip:AddLine(" ")
-
-        -- 7-9. Подсказки
-        GameTooltip:AddLine("|cffFF8C00ЛКМ|r — открыть окно")
+        GameTooltip:AddLine("|cffFF8C00ЛКМ|r — (действие)")
+        GameTooltip:AddLine("|cffFF8C00ЛКМ×2|r — открыть окно ГП")
         GameTooltip:AddLine("|cffF4A460ПКМ|r — настройки")
-        GameTooltip:AddLine("|cff32CD32СКМ|r — гильдбанк")
         GameTooltip:AddLine("|cff808080Shift+ЛКМ|r — перетащить")
 
         GameTooltip:Show()
@@ -140,11 +235,13 @@ local function CreateMinimapButton()
         self:SetScript("OnUpdate", nil)
         self:SetAlpha(1)
 
-        -- Сохраняем позицию в nsDbc4.minimap
         nsDbc4.minimap = nsDbc4.minimap or {}
         nsDbc4.minimap.x = ICON_RADIUS * math.cos(angle)
         nsDbc4.minimap.y = ICON_RADIUS * math.sin(angle)
     end)
+
+    -- Сброс клика при скрытии
+    btn:SetScript("OnHide", ResetClickState)
 
     return btn
 end
