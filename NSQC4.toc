@@ -29,3 +29,6 @@ Interface\Mail.lua
 Interface\ChatButtons.lua
 Interface\AOClick.lua
 Interface\WorldMap.lua
+Interface\Calendar.lua
+Interface\Timer.lua
+Interface\ListUI.lua

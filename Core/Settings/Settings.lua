@@ -22,6 +22,17 @@ local function EnsureSettings()
         openGuildChat = false,
     }
 
+    -- Подтаблица настроек таймера / listUI
+    nsDbc4.settings.timer = nsDbc4.settings.timer or {
+        time = 0,
+        visible = true,
+        point = "CENTER",
+        relativePoint = "CENTER",
+        x = 0,
+        y = 0,
+        sounds = {},     -- [ник] = путь к звуку (бывший testQ.fls)
+    }
+
     return nsDbc4.settings
 end
 
@@ -71,4 +82,13 @@ NSQC4.Settings.MODULES = {
     { key = "ui_chat",   label = "Интерфейс: кнопки чата" },
     { key = "ui_map",    label = "Интерфейс: управление картой" },
     { key = "ui_ao",     label = "Интерфейс: ссылки АО" },
+
+        -- Интерфейс
+    { key = "ui_mail",     label = "Интерфейс: сбор почты" },
+    { key = "ui_chat",     label = "Интерфейс: кнопки чата" },
+    { key = "ui_map",      label = "Интерфейс: управление картой" },
+    { key = "ui_ao",       label = "Интерфейс: ссылки АО" },
+    { key = "ui_calendar", label = "Интерфейс: календарь" },
+    { key = "ui_timer",    label = "Интерфейс: таймер" },
+    { key = "ui_list",     label = "Интерфейс: список алертов" },
 }

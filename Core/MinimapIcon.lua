@@ -27,15 +27,17 @@ local clickPending    = false
 -- ============================================================================
 local function HandleSingleClick(button)
     if button == "RightButton" then
-        -- ПКМ — открыть панель настроек
+        -- ПКМ — панель настроек
         if NSQC4.Settings and NSQC4.Settings.OpenPanel then
             NSQC4.Settings.OpenPanel()
         end
     elseif button == "LeftButton" then
-        -- ЛКМ — пока пусто (заглушка)
-        -- Сюда позже повесим действие
+        -- ЛКМ — заглушка (потом повесим)
     elseif button == "MiddleButton" then
-        -- СКМ — пока пусто
+        -- СКМ — окно «Управление списком»
+        if NSQC4.ListUI_Show then
+            NSQC4.ListUI_Show()
+        end
     end
 end
 
@@ -173,7 +175,7 @@ local function CreateMinimapButton()
             GameTooltip:AddLine(TOOLTIP_COLOR_UNKNOWN)
         end
 
-        -- Илвл
+        -- Илвл (если модуль включён)
         if NSQC4.Settings.IsModuleEnabled("itemlevel")
             and NSQC4.BS and NSQC4.BS.GetAverageItemLevel
         then
@@ -181,7 +183,7 @@ local function CreateMinimapButton()
                 NSQC4.BS.GetAverageItemLevel("player"))
         end
 
-        -- ГС
+        -- ГС (если аддон GS_Data есть)
         local myName = UnitName("player")
         if GS_Data and GS_Data[GetRealmName()]
             and GS_Data[GetRealmName()].Players[myName]
@@ -190,7 +192,7 @@ local function CreateMinimapButton()
                 GS_Data[GetRealmName()].Players[myName].GearScore)
         end
 
-        -- ГП
+        -- ГП из третьего слова офицерской заметки
         local gp = "0"
         for i = 1, GetNumGuildMembers() do
             local name, _, _, _, _, _, _, officerNote = GetGuildRosterInfo(i)
@@ -209,10 +211,11 @@ local function CreateMinimapButton()
         GameTooltip:AddLine("|cFF6495EDГП: |cff00BFFF" .. gp)
 
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("|cffFF8C00ЛКМ|r — (действие)")
+        GameTooltip:AddLine("|cffFF8C00ЛКМ|r — (пока пусто)")
         GameTooltip:AddLine("|cffFF8C00ЛКМ×2|r — открыть окно ГП")
-        GameTooltip:AddLine("|cffF4A460ПКМ|r — настройки")
-        GameTooltip:AddLine("|cff808080Shift+ЛКМ|r — перетащить")
+        GameTooltip:AddLine("|cffF4A460ПКМ|r — настройки аддона")
+        GameTooltip:AddLine("|cff32CD32СКМ|r — управление списком алертов")
+        GameTooltip:AddLine("|cff808080Shift+ЛКМ|r — перетащить иконку")
 
         GameTooltip:Show()
     end)
