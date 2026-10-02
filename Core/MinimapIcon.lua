@@ -1,6 +1,10 @@
 -- ============================================================================
 -- NSQC4 / Core / MinimapIcon
 -- Иконка аддона у миникарты.
+-- ЛКМ — панель слэш-команд.
+-- Двойной ЛКМ — окно ГП.
+-- ПКМ — настройки аддона.
+-- СКМ — управление списком алертов.
 -- ============================================================================
 
 NSQC4 = NSQC4 or {}
@@ -27,14 +31,16 @@ local clickPending    = false
 -- ============================================================================
 local function HandleSingleClick(button)
     if button == "RightButton" then
-        -- ПКМ — панель настроек
         if NSQC4.Settings and NSQC4.Settings.OpenPanel then
             NSQC4.Settings.OpenPanel()
         end
     elseif button == "LeftButton" then
-        -- ЛКМ — заглушка (потом повесим)
+        -- ЛКМ — открыть/закрыть панель слэш-команд
+        if NSQC4.SlashPanel_Toggle then
+            NSQC4.SlashPanel_Toggle()
+        end
     elseif button == "MiddleButton" then
-        -- СКМ — окно «Управление списком»
+        -- СКМ — окно управления списком алертов
         if NSQC4.ListUI_Show then
             NSQC4.ListUI_Show()
         end
@@ -61,10 +67,6 @@ local function HandleDoubleClick(button)
         else
             print("|cff808080[NSQC4]|r Окно ГП недоступно.")
         end
-    elseif button == "RightButton" then
-        -- Двойной ПКМ — пока пусто
-    elseif button == "MiddleButton" then
-        -- Двойной СКМ — пока пусто
     end
 end
 
@@ -108,13 +110,13 @@ local function OnMinimapClick(self, button)
         and (now - lastClickTime < 0.3)
         and (button == lastClickButton)
     then
-        -- Двойной клик — чистим состояние и вызываем двойной обработчик
+        -- Двойной клик
         clickPending = false
         ClickTimerFrame.elapsed = 0
         ClickTimerFrame:Hide()
         HandleDoubleClick(button)
     else
-        -- Первый клик — ждём 0.3 сек
+        -- Первый клик
         clickPending = true
         lastClickTime = now
         lastClickButton = button
@@ -211,7 +213,7 @@ local function CreateMinimapButton()
         GameTooltip:AddLine("|cFF6495EDГП: |cff00BFFF" .. gp)
 
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("|cffFF8C00ЛКМ|r — (пока пусто)")
+        GameTooltip:AddLine("|cffFF8C00ЛКМ|r — панель слэш-команд")
         GameTooltip:AddLine("|cffFF8C00ЛКМ×2|r — открыть окно ГП")
         GameTooltip:AddLine("|cffF4A460ПКМ|r — настройки аддона")
         GameTooltip:AddLine("|cff32CD32СКМ|r — управление списком алертов")

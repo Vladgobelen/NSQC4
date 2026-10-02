@@ -60,29 +60,21 @@ end
 
 -- Список известных модулей (для UI)
 NSQC4.Settings.MODULES = {
-    -- ГП / Аукцион / Лут
-    { key = "gp",          label = "ГП / Аукцион / Лут" },
-
-    -- Управление гильдией
-    { key = "promote",     label = "Повышение" },
-    { key = "demote",      label = "Понижение" },
-    { key = "kick",        label = "Кик неактивных" },
-
-    -- Развлечения
-    { key = "boobs",       label = "Сиськи" },
-
-    -- Бонус-скор
-    { key = "bs_player",   label = "БС: игрока" },
-    { key = "bs_item",     label = "БС: на предметах" },
-    { key = "bs_chat",     label = "БС: команда -илвл" },
-    { key = "itemlevel",   label = "Средний илвл" },
-
-    -- Интерфейс
-    { key = "ui_mail",     label = "Интерфейс: сбор почты" },
-    { key = "ui_chat",     label = "Интерфейс: кнопки чата" },
-    { key = "ui_map",      label = "Интерфейс: управление картой" },
-    { key = "ui_ao",       label = "Интерфейс: ссылки АО" },
-    { key = "ui_calendar", label = "Интерфейс: календарь" },
-    { key = "ui_timer",    label = "Интерфейс: таймер" },
-    { key = "ui_list",     label = "Интерфейс: список алертов" },
+    { key = "gp",             label = "ГП / Аукцион / Лут" },
+    { key = "promote",        label = "Повышение" },
+    { key = "demote",         label = "Понижение" },
+    { key = "kick",           label = "Кик неактивных" },
+    { key = "boobs",          label = "Сиськи" },
+    { key = "bs_player",      label = "БС: игрока" },
+    { key = "bs_item",        label = "БС: на предметах" },
+    { key = "bs_chat",        label = "БС: команда -илвл" },
+    { key = "itemlevel",      label = "Средний илвл" },
+    { key = "ui_mail",        label = "Интерфейс: сбор почты" },
+    { key = "ui_chat",        label = "Интерфейс: кнопки чата" },
+    { key = "ui_map",         label = "Интерфейс: управление картой" },
+    { key = "ui_ao",          label = "Интерфейс: ссылки АО" },
+    { key = "ui_calendar",    label = "Интерфейс: календарь" },
+    { key = "ui_timer",       label = "Интерфейс: таймер" },
+    { key = "ui_list",        label = "Интерфейс: список алертов" },
+    { key = "ui_slashpanel",  label = "Интерфейс: панель слэш-команд" },
 }

@@ -153,9 +153,7 @@ local function InitModule()
         content:SetSize(335, 0)
         scrollFrame:SetScrollChild(content)
 
-        -- Локальные таблицы (вместо testQ.fls)
-        local store = nsDbc4.settings.timer.sounds   -- хранилище: [ник] = путь к звуку
-
+        local store = nsDbc4.settings.timer.sounds   -- [ник] = путь к звуку
         content.entries = {}
 
         function frame:UpdateList()

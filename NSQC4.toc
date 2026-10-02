@@ -9,6 +9,8 @@ Core\Compat.lua
 Core\Settings\Settings.lua
 Core\ChatHandler.lua
 Core\ChatCatcher.lua
+Core\SlashCommands.lua
+Core\SlashPanel.lua
 Core\MinimapIcon.lua
 Core\Settings\OptionsPanel.lua
 BS\Stats.lua
@@ -20,11 +22,6 @@ Guild\KickInactive.lua
 Guild\AutoPromote.lua
 Guild\Demote.lua
 Guild\Boobs.lua
-GP\GP.lua
-GP\AUK.lua
-GP\BossLoot.lua
-GP\RaidTracker.lua
-VERSION.lua
 Interface\Mail.lua
 Interface\ChatButtons.lua
 Interface\AOClick.lua
@@ -32,3 +29,8 @@ Interface\WorldMap.lua
 Interface\Calendar.lua
 Interface\Timer.lua
 Interface\ListUI.lua
+GP\GP.lua
+GP\AUK.lua
+GP\BossLoot.lua
+GP\RaidTracker.lua
+VERSION.lua
