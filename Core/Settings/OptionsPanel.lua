@@ -65,12 +65,24 @@ for _, mod in ipairs(NSQC4.Settings.MODULES) do
     local label = _G[cb:GetName() .. "Text"]
     if label then
         label:SetText(mod.label)
-        -- ограничим ширину, чтобы длинные названия не наезжали на вторую колонку
         label:SetWidth(200)
         label:SetJustifyH("LEFT")
     end
 
     cb.moduleKey = mod.key
+
+    -- Тултип на чекбокс
+    if mod.tooltip then
+        cb:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(mod.label, 1, 0.82, 0)
+            GameTooltip:AddLine(mod.tooltip, 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        cb:SetScript("OnLeave", function()
+            GameTooltip:Hide()
+        end)
+    end
 
     cb:SetScript("OnClick", function(self)
         local enabled = self:GetChecked() == 1
@@ -91,7 +103,6 @@ for _, mod in ipairs(NSQC4.Settings.MODULES) do
 end
 
 -- Если последний ряд был неполным — увеличим row для правильной высоты
--- (у нас чётное число модулей, но на будущее)
 local totalRows = row + ((col == 2) and 1 or 0)
 content:SetHeight(math.abs(TOP_OFFSET) + totalRows * ROW_HEIGHT + 20)
 
