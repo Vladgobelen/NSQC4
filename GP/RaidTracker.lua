@@ -3,10 +3,7 @@
 -- Отслеживание состава рейда, запрос ГП у не-гильдейских. Модуль "gp".
 -- ============================================================================
 
-NSQC4 = NSQC4 or {}
-
-local function InitModule()
-    if not NSQC4.Settings.IsModuleEnabled("gp") then return end
+NSQC4.RegisterModule("gp", function()
 
     -- Защита от двойной инициализации (если GP.lua тоже активен)
     if NSQC4.RaidTrackerActive then return end
@@ -162,12 +159,5 @@ local function InitModule()
 
         wasInRaid = isInRaid
     end)
-end
 
-local f = CreateFrame("Frame")
-f:RegisterEvent("ADDON_LOADED")
-f:SetScript("OnEvent", function(self, event, addon)
-    if addon ~= "NSQC4" then return end
-    self:UnregisterEvent("ADDON_LOADED")
-    InitModule()
 end)

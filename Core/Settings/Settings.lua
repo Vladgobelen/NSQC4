@@ -76,5 +76,5 @@ NSQC4.Settings.MODULES = {
     { key = "ui_calendar",    label = "Интерфейс: календарь" },
     { key = "ui_timer",       label = "Интерфейс: таймер" },
     { key = "ui_list",        label = "Интерфейс: список алертов" },
-    { key = "ui_slashpanel",  label = "Интерфейс: панель слэш-команд" },
+    { key = "ui_vendor",      label = "Интерфейс: быстрая покупка эмблем" },
 }

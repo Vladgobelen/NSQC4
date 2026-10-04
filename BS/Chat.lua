@@ -3,10 +3,7 @@
 -- Команда "-илвл [Ник]" в гильд-чате. Модуль "bs_chat".
 -- ============================================================================
 
-NSQC4 = NSQC4 or {}
-
-local function InitModule()
-    if not NSQC4.Settings.IsModuleEnabled("bs_chat") then return end
+NSQC4.RegisterModule("bs_chat", function()
 
     -- ========================================================================
     -- Обработчик
@@ -25,7 +22,12 @@ local function InitModule()
             if sender ~= myName then return end
         end
 
-        -- Проверяем, доступна ли функция
+        -- Проверяем доступность ChatHandler и модуля БС игрока
+        if not NSQC4.ChatHandler then
+            -- Некуда отвечать, ChatHandler не загружен
+            return
+        end
+
         if not NSQC4.BS or not NSQC4.BS.GetPlayerScoreLine then
             SendChatMessage(myName .. " — БС-модуль игрока выключен.", "OFFICER")
             return
@@ -35,17 +37,14 @@ local function InitModule()
         SendChatMessage(myName .. " — " .. line, "OFFICER")
     end
 
+    -- ========================================================================
     -- Регистрация
+    -- ========================================================================
+    if not NSQC4.ChatHandler then return end
+
     NSQC4.ChatHandler:Register("GUILD:-илвл", {
         func = OnGuildMessage,
         stopOnMatch = true,
     })
-end
 
-local f = CreateFrame("Frame")
-f:RegisterEvent("ADDON_LOADED")
-f:SetScript("OnEvent", function(self, event, addon)
-    if addon ~= "NSQC4" then return end
-    self:UnregisterEvent("ADDON_LOADED")
-    InitModule()
 end)

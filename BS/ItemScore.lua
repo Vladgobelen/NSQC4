@@ -3,10 +3,7 @@
 -- БС предмета из тултипа. Модуль "bs_item".
 -- ============================================================================
 
-NSQC4 = NSQC4 or {}
-
-local function InitModule()
-    if not NSQC4.Settings.IsModuleEnabled("bs_item") then return end
+NSQC4.RegisterModule("bs_item", function()
 
     -- ========================================================================
     -- Паттерны
@@ -112,12 +109,5 @@ local function InitModule()
             self:Show()
         end
     end)
-end
 
-local f = CreateFrame("Frame")
-f:RegisterEvent("ADDON_LOADED")
-f:SetScript("OnEvent", function(self, event, addon)
-    if addon ~= "NSQC4" then return end
-    self:UnregisterEvent("ADDON_LOADED")
-    InitModule()
 end)

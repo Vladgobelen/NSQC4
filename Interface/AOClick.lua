@@ -3,10 +3,7 @@
 -- Кликабельные ники из канала АО. Модуль "ui_ao".
 -- ============================================================================
 
-NSQC4 = NSQC4 or {}
-
-local function InitModule()
-    if not NSQC4.Settings.IsModuleEnabled("ui_ao") then return end
+NSQC4.RegisterModule("ui_ao", function()
 
     local DISPLAY_PREFIX = "\208\144O"   -- «АO» в UTF-8
     local NICK_COLOR = "|cFFC0C0C0"
@@ -81,12 +78,4 @@ local function InitModule()
 
         return oldOnHyperlinkShow(self, link, text, button)
     end
-end
-
-local f = CreateFrame("Frame")
-f:RegisterEvent("ADDON_LOADED")
-f:SetScript("OnEvent", function(self, event, addon)
-    if addon ~= "NSQC4" then return end
-    self:UnregisterEvent("ADDON_LOADED")
-    InitModule()
 end)

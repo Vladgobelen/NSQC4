@@ -3,10 +3,7 @@
 -- Сбор всей почты одной кнопкой в окне почты. Модуль "ui_mail".
 -- ============================================================================
 
-NSQC4 = NSQC4 or {}
-
-local function InitModule()
-    if not NSQC4.Settings.IsModuleEnabled("ui_mail") then return end
+NSQC4.RegisterModule("ui_mail", function()
 
     -- Локальный флаг сбора (временный, не в БД)
     local isCollecting = false
@@ -77,12 +74,4 @@ local function InitModule()
             isCollecting = false
         end
     end)
-end
-
-local f = CreateFrame("Frame")
-f:RegisterEvent("ADDON_LOADED")
-f:SetScript("OnEvent", function(self, event, addon)
-    if addon ~= "NSQC4" then return end
-    self:UnregisterEvent("ADDON_LOADED")
-    InitModule()
 end)

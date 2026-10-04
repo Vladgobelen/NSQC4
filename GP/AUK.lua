@@ -1,17 +1,4 @@
-local function InitModule()
-    if not NSQC4.Settings.IsModuleEnabled("gp") then return end
-
-
-
-
-
-
-
-
-
-
-NSQC4 = NSQC4 or {}
-if not NSQC4.Settings.IsModuleEnabled("gp") then return end
+NSQC4.RegisterModule("gp", function()
 
 -- ============================================================================
 -- NS Auction System v5.9 - RELEASE (FINAL 3.3.5a COMPATIBLE) - ИСПРАВЛЕНО
@@ -1644,38 +1631,6 @@ function NSAuk.GiveLootToWinnerDeferred(playerName, itemLink)
     end)
 end
 
-print("|cff00ff00[NS Auction System v5.9]|r Загружен. Команды: /nsauk, /nsauk reset, /nsauk find")
+    print("|cff00ff00[NS Auction System v5.9]|r Загружен. Команды: /nsauk, /nsauk reset, /nsauk find")
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-end -- конец функции настроек
-
-local f = CreateFrame("Frame")
-f:RegisterEvent("ADDON_LOADED")
-f:SetScript("OnEvent", function(self, event, addon)
-    if addon ~= "NSQC4" then return end
-    self:UnregisterEvent("ADDON_LOADED")
-    InitModule()
 end)

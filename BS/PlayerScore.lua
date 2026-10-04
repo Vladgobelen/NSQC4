@@ -3,10 +3,7 @@
 -- БС игрока. Модуль "bs_player".
 -- ============================================================================
 
-NSQC4 = NSQC4 or {}
-
-local function InitModule()
-    if not NSQC4.Settings.IsModuleEnabled("bs_player") then return end
+NSQC4.RegisterModule("bs_player", function()
 
     -- ========================================================================
     -- Сбор статов
@@ -107,6 +104,10 @@ local function InitModule()
 
     -- ========================================================================
     -- Полная строка БС (илвл + гс + бс + капы)
+    -- Собирается из доступных модулей:
+    --   - "itemlevel"  → NSQC4.BS.GetAverageItemLevel
+    --   - GS_Data      → сторонний аддон GearScore
+    --   - "bs_player"  → этот модуль (CalcPlayerScore, GetCapString)
     -- ========================================================================
     function NSQC4.BS.GetPlayerScoreLine(unit)
         unit = unit or "player"
@@ -115,17 +116,21 @@ local function InitModule()
 
         local parts = {}
 
-        -- Илвл (если модуль itemlevel включён)
+        -- Илвл (если модуль "itemlevel" включён)
         if NSQC4.BS.GetAverageItemLevel then
             table.insert(parts, "илвл: " .. NSQC4.BS.GetAverageItemLevel(unit))
         end
 
-        -- ГС (если аддон GS_Data доступен)
-        if GS_Data and GS_Data[GetRealmName()] and GS_Data[GetRealmName()].Players[name] then
+        -- ГС (если сторонний аддон GS_Data доступен)
+        if GS_Data
+            and GS_Data[GetRealmName()]
+            and GS_Data[GetRealmName()].Players
+            and GS_Data[GetRealmName()].Players[name]
+        then
             table.insert(parts, "гс: " .. GS_Data[GetRealmName()].Players[name].GearScore)
         end
 
-        -- БС
+        -- БС (всегда, это же модуль bs_player)
         table.insert(parts, "бс: " .. score)
 
         -- Капы
@@ -136,12 +141,5 @@ local function InitModule()
 
         return table.concat(parts, " ")
     end
-end
 
-local f = CreateFrame("Frame")
-f:RegisterEvent("ADDON_LOADED")
-f:SetScript("OnEvent", function(self, event, addon)
-    if addon ~= "NSQC4" then return end
-    self:UnregisterEvent("ADDON_LOADED")
-    InitModule()
 end)

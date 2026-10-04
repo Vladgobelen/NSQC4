@@ -1,8 +1,4 @@
-local function InitModule()
-    if not NSQC4.Settings.IsModuleEnabled("gp") then return end
-
-
-    
+NSQC4.RegisterModule("gp", function()   
 
 GpDb = {}
 GpDb.__index = GpDb
@@ -2574,76 +2570,13 @@ end
 
 
 
-
-
-
-
-
-
-
-
-
-
--- ============================================================================
--- ОТЛОЖЕННАЯ ИНИЦИАЛИЗАЦИЯ ЭКЗЕМПЛЯРА GpDb
--- ============================================================================
--- C_Timer в 3.3.5a нет, поэтому используем одноразовый фрейм-таймер.
--- Через 3 секунды после загрузки файла создаём gpDb и уничтожаем таймер.
-
-local gpInitTimer = CreateFrame("Frame")
-gpInitTimer.elapsed = 0
-gpInitTimer.delay = 3
-
-gpInitTimer:SetScript("OnUpdate", function(self, dt)
-    self.elapsed = self.elapsed + dt
-    if self.elapsed >= self.delay then
-        -- Полная остановка и уничтожение таймера
-        self:SetScript("OnUpdate", nil)
-        self:Hide()
-        
-        if not gpDb then
-            gpDb = GpDb:new({})
-        end
-        
-        -- Обнуляем ссылку, чтобы сборщик мусора мог освободить фрейм
-        gpInitTimer = nil
+    -- ========================================================================
+    -- СОЗДАНИЕ ЭКЗЕМПЛЯРА GpDb (сразу, без таймера)
+    -- ========================================================================
+    if not gpDb then
+        gpDb = GpDb:new({})
     end
-end)
 
+    print("|cff00ff00[NSQC4-TEST]|r GP.lua выполняется до конца. NSQC4_GP_TEST зарегистрирована.")
 
-
-
-
-
--- ============================================================================
--- ТЕСТ ЗАГРУЗКИ ФАЙЛА
--- ============================================================================
-_G.NSQC4_GP_FILE_LOADED = true
-_G.NSQC4_GP_TEST = function()
-    print("|cff00ff00[NSQC4-TEST]|r Файл GP.lua ЗАГРУЖЕН")
-    print("|cff00ff00[NSQC4-TEST]|r GpDb (класс) =", GpDb)
-    print("|cff00ff00[NSQC4-TEST]|r gpDb (экземпляр) =", gpDb)
-    print("|cff00ff00[NSQC4-TEST]|r Время =", time(), " GetTime =", GetTime())
-    return "GP.lua OK"
-end
-
-print("|cff00ff00[NSQC4-TEST]|r GP.lua выполняется до конца. NSQC4_GP_TEST зарегистрирована.")
-
-
-
-
-
-
-
-
-
-
-end -- конец функции настроек
-
-local f = CreateFrame("Frame")
-f:RegisterEvent("ADDON_LOADED")
-f:SetScript("OnEvent", function(self, event, addon)
-    if addon ~= "NSQC4" then return end
-    self:UnregisterEvent("ADDON_LOADED")
-    InitModule()
 end)

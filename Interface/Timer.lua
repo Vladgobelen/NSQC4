@@ -3,10 +3,7 @@
 -- Таймер /nstimer: кнопка T с обратным отсчётом. Модуль "ui_timer".
 -- ============================================================================
 
-NSQC4 = NSQC4 or {}
-
-local function InitModule()
-    if not NSQC4.Settings.IsModuleEnabled("ui_timer") then return end
+NSQC4.RegisterModule("ui_timer", function()
 
     local SOUND_TIMER = "Interface\\AddOns\\NSQC4\\Media\\Sounds\\bip.ogg"
 
@@ -157,44 +154,34 @@ local function InitModule()
     end
 
     -- ========================================================================
-    -- Загрузка настроек с локальным таймером
+    -- Инициализация: создаём кнопку СРАЗУ (без 5-секундного таймера)
     -- ========================================================================
-    local initTimer = CreateFrame("Frame")
-    local initElapsed = 0
-    initTimer:SetScript("OnUpdate", function(self, dt)
-        initElapsed = initElapsed + dt
-        if initElapsed >= 5 then
-            self:SetScript("OnUpdate", nil)
-            self:Hide()
+    local st = nsDbc4.settings.timer
+    timerMinutes = st.time or 0
+    if timerMinutes > 0 then
+        timerStart = GetTime()
+        isAlarming = false
+        alarmTicker = 0
+    else
+        timerStart = 0
+        isAlarming = false
+    end
 
-            local st = nsDbc4.settings.timer
-            timerMinutes = st.time or 0
-            if timerMinutes > 0 then
-                timerStart = GetTime()
-                isAlarming = false
-                alarmTicker = 0
-            else
-                timerStart = 0
-                isAlarming = false
-            end
+    CreateTimerButton()
 
-            CreateTimerButton()
+    local point = st.point or "CENTER"
+    local relativePoint = st.relativePoint or "CENTER"
+    local x = st.x or 0
+    local y = st.y or 0
 
-            local point = st.point or "CENTER"
-            local relativePoint = st.relativePoint or "CENTER"
-            local x = st.x or 0
-            local y = st.y or 0
+    tButton:ClearAllPoints()
+    tButton:SetPoint(point, UIParent, relativePoint, x, y)
 
-            tButton:ClearAllPoints()
-            tButton:SetPoint(point, UIParent, relativePoint, x, y)
-
-            if st.visible then
-                tButton:Show()
-            else
-                tButton:Hide()
-            end
-        end
-    end)
+    if st.visible then
+        tButton:Show()
+    else
+        tButton:Hide()
+    end
 
     -- ========================================================================
     -- Слэш-команда
@@ -251,12 +238,4 @@ local function InitModule()
             end
         end
     end)
-end
-
-local f = CreateFrame("Frame")
-f:RegisterEvent("ADDON_LOADED")
-f:SetScript("OnEvent", function(self, event, addon)
-    if addon ~= "NSQC4" then return end
-    self:UnregisterEvent("ADDON_LOADED")
-    InitModule()
 end)

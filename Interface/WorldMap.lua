@@ -3,10 +3,7 @@
 -- Управление картой мира: ПКМ — перемещение, СКМ — масштаб. Модуль "ui_map".
 -- ============================================================================
 
-NSQC4 = NSQC4 or {}
-
-local function InitModule()
-    if not NSQC4.Settings.IsModuleEnabled("ui_map") then return end
+NSQC4.RegisterModule("ui_map", function()
 
     -- ========================================================================
     -- Шаги масштаба
@@ -108,21 +105,15 @@ local function InitModule()
     end
 
     -- ========================================================================
-    -- Инициализация: ждём появления кнопки
+    -- Триггерная инициализация: сразу, если кнопка есть;
+    -- иначе — один раз на PLAYER_ENTERING_WORLD.
     -- ========================================================================
-    local waitFrame = CreateFrame("Frame")
-    waitFrame:SetScript("OnUpdate", function(self)
-        if HookCloseButton() then
-            self:SetScript("OnUpdate", nil)
-            self:Hide()
-        end
-    end)
-end
-
-local f = CreateFrame("Frame")
-f:RegisterEvent("ADDON_LOADED")
-f:SetScript("OnEvent", function(self, event, addon)
-    if addon ~= "NSQC4" then return end
-    self:UnregisterEvent("ADDON_LOADED")
-    InitModule()
+    if not HookCloseButton() then
+        local ev = CreateFrame("Frame")
+        ev:RegisterEvent("PLAYER_ENTERING_WORLD")
+        ev:SetScript("OnEvent", function(self)
+            self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+            HookCloseButton()
+        end)
+    end
 end)

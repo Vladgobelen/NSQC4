@@ -3,10 +3,7 @@
 -- Кнопки у чат-фреймов: Общение, Вниз, Настройки. Модуль "ui_chat".
 -- ============================================================================
 
-NSQC4 = NSQC4 or {}
-
-local function InitModule()
-    if not NSQC4.Settings.IsModuleEnabled("ui_chat") then return end
+NSQC4.RegisterModule("ui_chat", function()
 
     -- Кэш настроек
     local chatSettings = nsDbc4.settings.chat
@@ -375,12 +372,5 @@ local function InitModule()
         local frame = _G["ChatFrame"..i]
         if frame then CreateChatMenuButton(frame) end
     end
-end
 
-local f = CreateFrame("Frame")
-f:RegisterEvent("ADDON_LOADED")
-f:SetScript("OnEvent", function(self, event, addon)
-    if addon ~= "NSQC4" then return end
-    self:UnregisterEvent("ADDON_LOADED")
-    InitModule()
 end)

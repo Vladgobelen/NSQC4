@@ -7,6 +7,7 @@
 
 Core\Compat.lua
 Core\Settings\Settings.lua
+Core\ModuleRegistry.lua
 Core\ChatHandler.lua
 Core\ChatCatcher.lua
 Core\SlashCommands.lua
@@ -29,6 +30,7 @@ Interface\WorldMap.lua
 Interface\Calendar.lua
 Interface\Timer.lua
 Interface\ListUI.lua
+Interface\Vendor.lua
 GP\GP.lua
 GP\AUK.lua
 GP\BossLoot.lua

@@ -3,91 +3,88 @@
 -- Окно управления списком алертов: ник → звук. Модуль "ui_list".
 -- ============================================================================
 
-NSQC4 = NSQC4 or {}
+NSQC4.RegisterModule("ui_list", function()
 
--- ============================================================================
--- Список звуков (пути обновлены на NSQC4)
--- ============================================================================
-ns_alert_sounds = {
-    {
-        label = "Системные",
-        sounds = {
-            "Sound\\Interface\\AlarmClockWarning1.wav",
-            "Sound\\Interface\\AlarmClockWarning2.wav",
-            "Sound\\Interface\\AlarmClockWarning3.wav",
-            "Sound\\Interface\\AchievementMenuOpen.wav",
-            "Sound\\Interface\\AchievementMenuClose.wav",
-            "Sound\\Interface\\AuctionWindowOpen.wav",
-            "Sound\\Interface\\AuctionWindowClose.wav",
-            "Sound\\Interface\\MapPing.wav",
-            "Sound\\Interface\\ReadyCheck.wav",
-            "Sound\\Interface\\RaidWarning.wav",
-            "Sound\\Interface\\LevelUp.wav",
-            "Sound\\Interface\\LFG_RoleCheck.wav",
-            "Sound\\Interface\\LFG_Denied.wav",
-            "Sound\\Interface\\LFG_Rewards.wav",
-            "Sound\\Interface\\GuildVaultOpen.wav",
-            "Sound\\Interface\\GuildVaultClose.wav",
-            "Sound\\Interface\\TalentScreenOpen.wav",
-            "Sound\\Interface\\TalentScreenClose.wav",
-            "Sound\\Spells\\SimonGame_Visual_GameStart.wav",
-            "Sound\\Spells\\PVPEnterQueue.wav",
-            "Sound\\Spells\\PVPFlagTaken.wav",
-            "Sound\\Spells\\PVPFlagCaptured.wav",
-            "Sound\\Spells\\PVPFlagReturned.wav",
-            "Sound\\Spells\\ShaysBell.wav",
-            "Sound\\Doodad\\BellTollAlliance.wav",
-            "Sound\\Doodad\\BellTollHorde.wav",
-            "Sound\\Doodad\\BellTollNightElf.wav",
-            "Sound\\Doodad\\BoatDockedWarning.wav",
-            "Sound\\Doodad\\G_NecropolisWound.wav",
-            "Sound\\Doodad\\Goblin_Lottery_Open01.wav",
-            "Sound\\Doodad\\Goblin_Lottery_Open02.wav",
-            "Sound\\Doodad\\Goblin_Lottery_Open03.wav",
-            "Sound\\Doodad\\Goblin_Lottery_Open04.wav",
-            "Sound\\Event Sounds\\Event_wardrum_ogre.wav",
-            "Sound\\Event Sounds\\Wisp\\WispPissed1.wav",
-            "Sound\\Event Sounds\\Wisp\\WispPissed2.wav",
-            "Sound\\Event Sounds\\Wisp\\WispPissed3.wav",
+    -- ========================================================================
+    -- Список звуков (внутри модуля — не глобал)
+    -- ========================================================================
+    local ns_alert_sounds = {
+        {
+            label = "Системные",
+            sounds = {
+                "Sound\\Interface\\AlarmClockWarning1.wav",
+                "Sound\\Interface\\AlarmClockWarning2.wav",
+                "Sound\\Interface\\AlarmClockWarning3.wav",
+                "Sound\\Interface\\AchievementMenuOpen.wav",
+                "Sound\\Interface\\AchievementMenuClose.wav",
+                "Sound\\Interface\\AuctionWindowOpen.wav",
+                "Sound\\Interface\\AuctionWindowClose.wav",
+                "Sound\\Interface\\MapPing.wav",
+                "Sound\\Interface\\ReadyCheck.wav",
+                "Sound\\Interface\\RaidWarning.wav",
+                "Sound\\Interface\\LevelUp.wav",
+                "Sound\\Interface\\LFG_RoleCheck.wav",
+                "Sound\\Interface\\LFG_Denied.wav",
+                "Sound\\Interface\\LFG_Rewards.wav",
+                "Sound\\Interface\\GuildVaultOpen.wav",
+                "Sound\\Interface\\GuildVaultClose.wav",
+                "Sound\\Interface\\TalentScreenOpen.wav",
+                "Sound\\Interface\\TalentScreenClose.wav",
+                "Sound\\Spells\\SimonGame_Visual_GameStart.wav",
+                "Sound\\Spells\\PVPEnterQueue.wav",
+                "Sound\\Spells\\PVPFlagTaken.wav",
+                "Sound\\Spells\\PVPFlagCaptured.wav",
+                "Sound\\Spells\\PVPFlagReturned.wav",
+                "Sound\\Spells\\ShaysBell.wav",
+                "Sound\\Doodad\\BellTollAlliance.wav",
+                "Sound\\Doodad\\BellTollHorde.wav",
+                "Sound\\Doodad\\BellTollNightElf.wav",
+                "Sound\\Doodad\\BoatDockedWarning.wav",
+                "Sound\\Doodad\\G_NecropolisWound.wav",
+                "Sound\\Doodad\\Goblin_Lottery_Open01.wav",
+                "Sound\\Doodad\\Goblin_Lottery_Open02.wav",
+                "Sound\\Doodad\\Goblin_Lottery_Open03.wav",
+                "Sound\\Doodad\\Goblin_Lottery_Open04.wav",
+                "Sound\\Event Sounds\\Event_wardrum_ogre.wav",
+                "Sound\\Event Sounds\\Wisp\\WispPissed1.wav",
+                "Sound\\Event Sounds\\Wisp\\WispPissed2.wav",
+                "Sound\\Event Sounds\\Wisp\\WispPissed3.wav",
+            },
         },
-    },
-    {
-        label = "Пользовательские",
-        sounds = {
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\fls.mp3",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\ach.ogg",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\bbbb.ogg",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\bt.ogg",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\clc.ogg",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\f.ogg",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\gob.ogg",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\gom.ogg",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\hs.ogg",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\k.ogg",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\m.ogg",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\ms.ogg",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\mx.ogg",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\sh.ogg",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\smg.ogg",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\t.ogg",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\tr.ogg",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\tx.ogg",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\uz.ogg",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\kare.mp3",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\karg.mp3",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\karp.mp3",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\yaix.mp3",
-            "Interface\\AddOns\\NSQC4\\Media\\Sounds\\yaiz.mp3",
+        {
+            label = "Пользовательские",
+            sounds = {
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\fls.mp3",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\ach.ogg",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\bbbb.ogg",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\bt.ogg",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\clc.ogg",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\f.ogg",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\gob.ogg",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\gom.ogg",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\hs.ogg",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\k.ogg",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\m.ogg",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\ms.ogg",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\mx.ogg",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\sh.ogg",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\smg.ogg",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\t.ogg",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\tr.ogg",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\tx.ogg",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\uz.ogg",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\kare.mp3",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\karg.mp3",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\karp.mp3",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\yaix.mp3",
+                "Interface\\AddOns\\NSQC4\\Media\\Sounds\\yaiz.mp3",
+            },
         },
-    },
-}
+    }
 
-local function GetFileName(path)
-    return path:match("[^\\/]+$") or path
-end
-
-local function InitModule()
-    if not NSQC4.Settings.IsModuleEnabled("ui_list") then return end
+    local function GetFileName(path)
+        return path:match("[^\\/]+$") or path
+    end
 
     local ListFrame = nil
 
@@ -277,12 +274,5 @@ local function InitModule()
 
         frame:UpdateList()
     end
-end
 
-local f = CreateFrame("Frame")
-f:RegisterEvent("ADDON_LOADED")
-f:SetScript("OnEvent", function(self, event, addon)
-    if addon ~= "NSQC4" then return end
-    self:UnregisterEvent("ADDON_LOADED")
-    InitModule()
 end)

@@ -3,10 +3,7 @@
 -- Календарь: кнопка «Создать» + контекстное меню события. Модуль "ui_calendar".
 -- ============================================================================
 
-NSQC4 = NSQC4 or {}
-
-local function InitModule()
-    if not NSQC4.Settings.IsModuleEnabled("ui_calendar") then return end
+NSQC4.RegisterModule("ui_calendar", function()
 
     -- ========================================================================
     -- Локальный таймер (замена C_Timer.After)
@@ -237,12 +234,5 @@ local function InitModule()
     end
 
     TryHookContextMenu()
-end
 
-local f = CreateFrame("Frame")
-f:RegisterEvent("ADDON_LOADED")
-f:SetScript("OnEvent", function(self, event, addon)
-    if addon ~= "NSQC4" then return end
-    self:UnregisterEvent("ADDON_LOADED")
-    InitModule()
 end)
