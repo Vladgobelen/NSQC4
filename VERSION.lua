@@ -1,6 +1,6 @@
 NSQC4_VERSION = {
     major = 1,
-    minor = 19,
+    minor = 20,
     code  = "NSQC4",
 }
 
@@ -20,11 +20,16 @@ verFrame:SetScript("OnEvent", function(self, event, prefix, msg, channel, sender
         if nick and major and minor and nick == myName and not versionChecked then
             versionChecked = true
             NSQC4_LAST_VERSION = { major = tonumber(major), minor = tonumber(minor) }
+
             if NSQC4_LAST_VERSION.major ~= NSQC4_VERSION.major
             or NSQC4_LAST_VERSION.minor ~= NSQC4_VERSION.minor then
                 SendChatMessage("Мой аддон устарел, нужно обновить", "OFFICER")
             else
-                SendChatMessage("Версия аддона актуальна", "OFFICER")
+                if NSQC4.Settings.IsModuleEnabled("version_officer") then
+                    SendChatMessage("Версия аддона актуальна", "OFFICER")
+                else
+                    SendAddonMessage("ns_NSQC4_vers", "Версия аддона актуальна", "GUILD")
+                end
             end
         end
     end
