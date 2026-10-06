@@ -12,6 +12,7 @@ Core\ChatHandler.lua
 Core\ChatCatcher.lua
 Core\SlashPanel.lua
 Core\MinimapIcon.lua
+Core\Charter.lua
 Core\Settings\OptionsPanel.lua
 BS\Stats.lua
 BS\ItemLevel.lua

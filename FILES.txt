@@ -19,6 +19,7 @@ Core\ChatHandler.lua                                 — O(1)-диспетчер
 Core\ChatCatcher.lua                                 — слушатель гильд-чата для свободных фраз (не команд с «-»)
 Core\SlashPanel.lua                                   — панель кнопок слева от иконки аддона + API SlashPanel_RegisterButton
 Core\MinimapIcon.lua                                — иконка аддона у миникарты (ЛКМ → панель, ПКМ → настройки, СКМ → ListUI)
+Core\Charter.lua                                     — устав гильдии (не модуль, всегда доступен)
 
 --- BS/ (бонус-скор) ---
 BS\Stats.lua                                             — константы: ID рейтингов, капы и веса статов по спекам (не модуль)
