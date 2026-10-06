@@ -1,6 +1,6 @@
 -- ============================================================================
 -- NSQC4 / Interface / Timer
--- Таймер /nstimer: кнопка T с обратным отсчётом. Модуль "ui_timer".
+-- Таймер /ns_timer: кнопка T с обратным отсчётом. Модуль "ui_timer".
 -- ============================================================================
 
 NSQC4.RegisterModule("ui_timer", function()
@@ -154,7 +154,7 @@ NSQC4.RegisterModule("ui_timer", function()
     end
 
     -- ========================================================================
-    -- Инициализация: создаём кнопку СРАЗУ (без 5-секундного таймера)
+    -- Инициализация: создаём кнопку сразу
     -- ========================================================================
     local st = nsDbc4.settings.timer
     timerMinutes = st.time or 0
@@ -184,29 +184,39 @@ NSQC4.RegisterModule("ui_timer", function()
     end
 
     -- ========================================================================
-    -- Слэш-команда
+    -- Слэш-команда /ns_timer
     -- ========================================================================
-    SLASH_NSTIMER1 = "/nstimer"
-    SlashCmdList["NSTIMER"] = function()
+    SLASH_NS_TIMER1 = "/ns_timer"
+    SlashCmdList["NS_TIMER"] = function()
         if not tButton then
-            local st = nsDbc4.settings.timer
-            timerMinutes = st.time or 0
+            local st2 = nsDbc4.settings.timer
+            timerMinutes = st2.time or 0
             CreateTimerButton()
-            local point = st.point or "CENTER"
-            local relativePoint = st.relativePoint or "CENTER"
-            local x = st.x or 0
-            local y = st.y or 0
+            local pt = st2.point or "CENTER"
+            local rp = st2.relativePoint or "CENTER"
+            local xx = st2.x or 0
+            local yy = st2.y or 0
             tButton:ClearAllPoints()
-            tButton:SetPoint(point, UIParent, relativePoint, x, y)
+            tButton:SetPoint(pt, UIParent, rp, xx, yy)
         end
-        local st = nsDbc4.settings.timer
+
+        local st2 = nsDbc4.settings.timer
         if tButton:IsShown() then
             tButton:Hide()
-            st.visible = false
+            st2.visible = false
         else
             tButton:Show()
-            st.visible = true
+            st2.visible = true
         end
+    end
+
+    -- ========================================================================
+    -- Регистрация кнопки на панели
+    -- ========================================================================
+    if NSQC4.SlashPanel_RegisterButton then
+        NSQC4.SlashPanel_RegisterButton("T", "/ns_timer", "Показать/скрыть кнопку таймера", function()
+            SlashCmdList["NS_TIMER"]("")
+        end)
     end
 
     -- ========================================================================
@@ -238,4 +248,5 @@ NSQC4.RegisterModule("ui_timer", function()
             end
         end
     end)
+
 end)

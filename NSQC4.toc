@@ -10,7 +10,6 @@ Core\Settings\Settings.lua
 Core\ModuleRegistry.lua
 Core\ChatHandler.lua
 Core\ChatCatcher.lua
-Core\SlashCommands.lua
 Core\SlashPanel.lua
 Core\MinimapIcon.lua
 Core\Settings\OptionsPanel.lua
@@ -31,6 +30,10 @@ Interface\Calendar.lua
 Interface\Timer.lua
 Interface\ListUI.lua
 Interface\Vendor.lua
+Interface\ui_frames\Chat.lua
+Interface\ui_frames\Layers.lua
+Interface\ui_frames\Alpha.lua
+Interface\ui_frames\Move.lua
 GP\GP.lua
 GP\AUK.lua
 GP\BossLoot.lua

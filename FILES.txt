@@ -1,68 +1,75 @@
 ================================================================================
 NSQC4 — КАРТА ФАЙЛОВ
-Краткое описание каждого файла аддона. Одна строка — один файл.
 ================================================================================
 
 --- КОРЕНЬ ---
-NSQC4.toc                     — точка входа, порядок загрузки файлов аддона
-VERSION.lua                   — версия аддона + ответ на запрос версии через addon-чат
-FILES.txt                     — этот файл (карта проекта)
-updateConfigs.sh              — скрипт git-коммита + push на GitHub и GitLab
-.gitignore                    — правила игнорирования файлов для git
+NSQC4.toc                                                — точка входа, порядок загрузки файлов аддона
+VERSION.lua                                             — версия аддона + ответ на запрос версии через addon-чат
+FILES.txt                                                  — этот файл (карта проекта)
+WORK.txt                                                 — карта текущей работы (что делаем, что сделано)
+updateConfigs.sh                                       — скрипт git-коммита + push на GitHub и GitLab
+.gitignore                                                 — правила игнорирования файлов для git
 
 --- Core/ (ядро) ---
-Core\Compat.lua               — эмуляция отсутствующих в 3.3.5a функций (IsInRaid, GetNumGroupMembers, IsInGroup)
-Core\Settings\Settings.lua    — настройки модулей (disabled-логика, подтаблицы chat, timer, MODULES)
-Core\Settings\OptionsPanel.lua— панель настроек в меню «Интерфейс → Модификации → NSQC4»
-Core\ChatHandler.lua          — O(1)-диспетчер команд чата (префикс «-» для текста, «ns_» для ADDON)
-Core\ChatCatcher.lua          — слушатель гильд-чата для свободных фраз (не команд с «-»)
-Core\SlashCommands.lua        — список слэш-команд для панели + /nsqc4help
-Core\SlashPanel.lua           — панель компактных кнопок слева от иконки аддона (ЛКМ)
-Core\MinimapIcon.lua          — иконка аддона у миникарты (клики, тултип, перетаскивание)
-Core\ModuleRegistry.lua       — единый реестр модулей, один фрейм на весь аддон
+Core\Compat.lua                                       — эмуляция отсутствующих в 3.3.5a функций
+Core\Settings\Settings.lua                           — настройки модулей, MODULES, подтаблицы, disabled-логика
+Core\Settings\OptionsPanel.lua                    — панель настроек в меню «Интерфейс → Модификации → NSQC4»
+Core\ModuleRegistry.lua                             — единый реестр модулей (RegisterModule), один фрейм на весь аддон
+Core\ChatHandler.lua                                 — O(1)-диспетчер команд чата (префикс «-» для текста, «ns_» для ADDON)
+Core\ChatCatcher.lua                                 — слушатель гильд-чата для свободных фраз (не команд с «-»)
+Core\SlashPanel.lua                                   — панель кнопок слева от иконки аддона + API SlashPanel_RegisterButton
+Core\MinimapIcon.lua                                — иконка аддона у миникарты (ЛКМ → панель, ПКМ → настройки, СКМ → ListUI)
 
 --- BS/ (бонус-скор) ---
-BS\Stats.lua                  — константы: ID рейтингов, капы и веса статов по спекам
-BS\ItemLevel.lua              — средний уровень предметов игрока (ilvl)
-BS\PlayerScore.lua            — БС игрока (спек-зависимый расчёт)
-BS\ItemScore.lua              — БС предмета из тултипа (парсинг бонусов)
-BS\Chat.lua                   — команда «-илвл» в гильд-чате
+BS\Stats.lua                                             — константы: ID рейтингов, капы и веса статов по спекам (не модуль)
+BS\ItemLevel.lua                                      — средний уровень предметов игрока (модуль itemlevel)
+BS\PlayerScore.lua                                    — БС игрока (модуль bs_player)
+BS\ItemScore.lua                                      — БС предмета из тултипа (модуль bs_item)
+BS\Chat.lua                                              — команда «-илвл» в гильд-чате (модуль bs_chat)
 
 --- Guild/ (управление гильдией) ---
-Guild\KickInactive.lua        — команда «-кик [Ник]» — кик неактивных или конкретного
-Guild\AutoPromote.lua         — команда «-повысить [Ник]» — массовое или точечное повышение
-Guild\Demote.lua              — команда «-понизить Ник» — точечное понижение
-Guild\Boobs.lua               — команда «покажи сиськи» — ASCII-арт в офицерский чат
+Guild\KickInactive.lua                                — команда «-кик [Ник]» (модуль kick)
+Guild\AutoPromote.lua                              — команда «-повысить [Ник]» (модуль promote)
+Guild\Demote.lua                                     — команда «-принизить Ник» (модуль demote)
+Guild\Boobs.lua                                        — команда «покажи сиськи» (модуль boobs)
 
 --- Interface/ (интерфейсные модули) ---
-Interface\Mail.lua            — кнопка «ЗАБРАТЬ ВСЁ» в окне почты + автосбор
-Interface\ChatButtons.lua     — кнопки слева у чат-фреймов: Общение, Меню, Вниз, Настройки
-Interface\AOClick.lua         — кликабельные ники канала АО (giveMeInfo между GUILD и RAID)
-Interface\WorldMap.lua        — ПКМ по крестику карты — перемещение, СКМ — масштаб
-Interface\Calendar.lua        — календарь: своя кнопка «Создать» + контекстное меню события
-Interface\Timer.lua           — кнопка «T» — таймер с обратным отсчётом (/nstimer)
-Interface\ListUI.lua          — окно управления списком алертов (ник → звук)
+Interface\Mail.lua                                     — кнопка «ЗАБРАТЬ ВСЁ» в почте (модуль ui_mail)
+Interface\ChatButtons.lua                          — кнопки у чат-фреймов (модуль ui_chat)
+Interface\AOClick.lua                                — кликабельные ники канала АО (модуль ui_ao)
+Interface\WorldMap.lua                             — ПКМ/СКМ по крестику карты (модуль ui_map)
+Interface\Calendar.lua                              — календарь: кнопка «Создать» + контекстное меню (модуль ui_calendar)
+Interface\Timer.lua                                  — кнопка «T» — таймер с отсчётом (модуль ui_timer)
+Interface\ListUI.lua                                  — окно управления списком алертов (модуль ui_list)
+Interface\Vendor.lua                                — быстрая покупка эмблем у вендора (модуль ui_vendor)
+
+--- Interface/ui_frames/ (модули управления фреймами) ---
+Interface\ui_frames\Chat.lua                     — фильтрация чата по тексту и каналам (модуль ui_frames_chat)
+Interface\ui_frames\Layers.lua                  — изменение слоёв (FrameStrata) фреймов (модуль ui_frames_layers)
+Interface\ui_frames\Alpha.lua                   — прозрачность фреймов (модуль ui_frames_alpha)
+Interface\ui_frames\Move.lua                    — перемещение фреймов (модуль ui_frames_move)
 
 --- GP/ (ГП, аукцион, лут) ---
-GP\GP.lua                     — основной GP-модуль: окно, лог, рейд-селект, парсинг гильдии
-GP\AUK.lua                    — аукцион: чат-команды, ставки, авто-выдача лута через GiveMasterLoot
-GP\BossLoot.lua               — панель быстрого начисления ГП при открытии лута с босса
-GP\RaidTracker.lua            — отслеживание состава рейда, запрос ГП у не-гильдейских (GetGPA)
+GP\GP.lua                                              — основной GP-модуль: окно, лог, рейд-селект (модуль gp)
+GP\AUK.lua                                            — аукцион: чат-команды, ставки, авто-выдача лута (модуль gp)
+GP\BossLoot.lua                                      — панель быстрой награды ГП при открытии лута (модуль gp)
+GP\RaidTracker.lua                                  — отслеживание рейда, запрос ГП у не-гильдейских (модуль gp)
 
 --- Media/ (ресурсы) ---
-Media\Addon\emblem.tga        — иконка аддона для миникарты
-Media\Sounds\*.ogg, *.mp3     — пользовательские звуки для алертов и таймера
+Media\Addon\emblem.tga                         — иконка аддона для миникарты
+Media\Sounds\*.ogg, *.mp3                      — пользовательские звуки для алертов и таймера
 
 ================================================================================
 ПРИМЕЧАНИЯ
 --------------------------------------------------------------------------------
 - Модули отключаются через галочки в «Интерфейс → Модификации → NSQC4».
 - Логика хранения: модуль ВЫКЛЮЧЕН → запись в nsDbc4.settings.disabled[имя] = true.
-- Нет записи → модуль ВКЛЮЧЁН (по умолчанию).
+- Нет записи → модуль ВКЛЮЧЕН (по умолчанию).
 - Изменения настроек применяются после /reload.
-- Все модули с галочками обёрнуты в функцию InitModule() и инициализируются
-  на событии ADDON_LOADED для NSQC4.
-- Файлы без галочек (всегда загружены): VERSION.lua, Core\Compat.lua,
-  Core\Settings\Settings.lua, Core\ChatHandler.lua, Core\ChatCatcher.lua,
-  Core\SlashCommands.lua, Core\MinimapIcon.lua.
+- Все модули обёрнуты в NSQC4.RegisterModule(key, function() ... end).
+  При выключенном модуле init-функция НЕ вызывается — ни фреймов, ни событий,
+  ни хуков, ни глобальных переменных.
+- Core-файлы без галочек (всегда загружены): Compat, Settings, ModuleRegistry,
+  ChatHandler, ChatCatcher, SlashPanel, MinimapIcon, OptionsPanel.
+- VERSION.lua — загружается последним.
 ================================================================================
