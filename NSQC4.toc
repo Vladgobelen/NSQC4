@@ -22,7 +22,6 @@ BS\Chat.lua
 Guild\KickInactive.lua
 Guild\AutoPromote.lua
 Guild\Demote.lua
-Guild\Boobs.lua
 Guild\Ustav.lua
 Interface\Mail.lua
 Interface\ChatButtons.lua
