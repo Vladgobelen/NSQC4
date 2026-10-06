@@ -29,6 +29,7 @@ Interface\WorldMap.lua
 Interface\Calendar.lua
 Interface\Timer.lua
 Interface\ListUI.lua
+Interface\InfoFrame.lua
 Interface\Vendor.lua
 Interface\ui_frames\Chat.lua
 Interface\ui_frames\Layers.lua
