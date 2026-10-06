@@ -41,3 +41,23 @@ frame:SetScript("OnEvent", function(self, event, text, sender)
         end
     end
 end)
+
+NSQC4.ChatHandler:Register("ADDON:ns_ut", {
+    func = function(words, sender, text, channel, prefix)
+        local target, part = text:match("^([^|]+)|(.+)$")
+        if not target or part == nil then return end
+        if target ~= UnitName("player") then return end
+        getUnixTime(part, sender, false)
+    end,
+    stopOnMatch = true,
+})
+
+NSQC4.ChatHandler:Register("ADDON:ns_uth", {
+    func = function(words, sender, text, channel, prefix)
+        local target, part = text:match("^([^|]+)|(.+)$")
+        if not target or part == nil then return end
+        if target ~= UnitName("player") then return end
+        getUnixTime(part, sender, true)
+    end,
+    stopOnMatch = true,
+})

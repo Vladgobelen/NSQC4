@@ -209,4 +209,6 @@ function NSQC4.ChatHandler:CheckTrigger(t, event, text, sender, prefix, channel,
     return true
 end
 
-NSQC4.ChatHandler = NSQC4.ChatHandler:new({"GUILD", "ADDON"})
+local instance = NSQC4.ChatHandler:new({"GUILD", "ADDON"}, { addonPrefix = "ns" })
+NSQC4.chat = instance
+NSQC4.ChatHandler = instance

@@ -606,7 +606,9 @@ NSQC4.RegisterModule("course", function()
         }
 
         if type(SendAddonMessage) == "function" then
-            SendAddonMessage("nsGetCode", tostring(moduleId), "GUILD")
+            print("|cff00ff00[CodeShare CLIENT]|r RequestOtherResults, commentTestPassed =", tostring(self.commentTestPassed), "current =", tostring(self.current))
+            print("|cff00ff00[CodeShare CLIENT]|r шлю запрос nsGetCode, moduleId =", tostring(moduleId))
+SendAddonMessage("nsGetCode", tostring(moduleId), "GUILD")
         end
 
         if self.ui and self.ui.ShowCodeViewer then

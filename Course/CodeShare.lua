@@ -13,28 +13,19 @@ NSQC4.RegisterModule("course", function()
     nsCodeViewerRequest = nsCodeViewerRequest or {}
 
     local function nsModuleCode(channel, text, sender, prefix)
-        local tokens = {}
+        -- text = "requester|owner|moduleId|variantKey|lineIndex|lineCount|line"
 
-        for token in tostring(prefix or ""):gmatch("%S+") do
-            table.insert(tokens, token)
-        end
+        local requester, owner, moduleIdStr, variantKey, lineIndexStr, lineCountStr, line =
+            text:match("^([^|]+)|([^|]+)|([^|]+)|([^|]+)|([^|]+)|([^|]+)|(.*)$")
 
-        if tokens[1] ~= "nsModuleCode" then
+        if not requester then
             return
         end
 
-        local requester = tokens[2]
-        local owner = tokens[3]
-        local moduleId = tonumber(tokens[4])
-        local variantKey = tostring(tokens[5] or "1")
-        local lineIndex = tonumber(tokens[6])
-        local lineCount = tonumber(tokens[7])
-
-        if not requester or not owner or not moduleId then
-            return
-        end
-
-        local me = (type(UnitName) == "function") and UnitName("player") or ""
+        local moduleId = tonumber(moduleIdStr)
+        local lineIndex = tonumber(lineIndexStr)
+        local lineCount = tonumber(lineCountStr)
+        local me = UnitName("player") or ""
 
         if requester ~= me then
             return
@@ -44,19 +35,13 @@ NSQC4.RegisterModule("course", function()
             return
         end
 
-        local line = tostring(text or "")
-
         nsCodeViewerData[moduleId] = nsCodeViewerData[moduleId] or {}
         nsCodeViewerData[moduleId][owner] = nsCodeViewerData[moduleId][owner] or {}
 
         local entry = nsCodeViewerData[moduleId][owner][variantKey]
 
         if type(entry) ~= "table" then
-            entry = {
-                raw = {},
-                lines = {},
-            }
-
+            entry = { raw = {}, lines = {} }
             nsCodeViewerData[moduleId][owner][variantKey] = entry
         end
 
@@ -74,12 +59,10 @@ NSQC4.RegisterModule("course", function()
 
             local lines = {}
             local i = 1
-
             while entry.raw[i] ~= nil and (entry.lineCount == nil or i <= entry.lineCount) do
                 lines[i] = entry.raw[i]
                 i = i + 1
             end
-
             entry.lines = lines
         else
             if line ~= "" then
@@ -96,4 +79,5 @@ NSQC4.RegisterModule("course", function()
     end
 
     NSQC4.Course.nsModuleCode = nsModuleCode
+
 end)

