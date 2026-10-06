@@ -40,6 +40,10 @@
 !Interface/
 !Interface/**
 
+# Папка Course
+!Course/
+!Course/**
+
 # ============================================
 # ЗАПРЕТЫ — в самом конце, перебивают всё выше
 # ============================================
@@ -66,3 +70,5 @@ Core/.zshistory
 Guild/.zshistory
 BS/.zshistory
 Media/.zshistory
+Course/.zshistory
+Course/.directory

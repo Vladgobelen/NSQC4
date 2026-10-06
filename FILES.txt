@@ -55,9 +55,19 @@ GP\AUK.lua                                            — аукцион: чат
 GP\BossLoot.lua                                      — панель быстрой награды ГП при открытии лута (модуль gp)
 GP\RaidTracker.lua                                  — отслеживание рейда, запрос ГП у не-гильдейских (модуль gp)
 
+--- Course/ (курс Lua) ---
+Course\Modules.lua                                 — данные курса: ns_llua['lua'][1..364] (модули, уроки, задания)
+Course\UI.lua                                         — класс UI: главное окно, справка, редактор, окно результатов
+Course\Logic.lua                                     — класс Logic: проверка кода, прогресс, ManageCourse, обмен кодом
+Course\Reminder.lua                               — класс NSReminder: напоминалка о прохождении курса
+Course\CodeShare.lua                             — приём ответов обмена кодом (nsModuleCode)
+Course\Triggers.lua                                 — регистрация чат-триггеров курса в NSQC4.chat
+Course\Init.lua                                       — сборка: инстансы ui/logic/reminder, слэш, кнопка панели
+
 --- Media/ (ресурсы) ---
-Media\Addon\emblem.tga                         — иконка аддона для миникарты
-Media\Sounds\*.ogg, *.mp3                      — пользовательские звуки для алертов и таймера
+Media\Addon\emblem.tga                        — иконка аддона для миникарты
+Media\Images\*.tga                                — текстуры (иконки, эмодзи, клетки, кубики, фигуры и т.д.)
+Media\Sounds\*.ogg, *.mp3                     — пользовательские звуки для алертов, таймера, курса
 
 ================================================================================
 ПРИМЕЧАНИЯ
@@ -71,5 +81,8 @@ Media\Sounds\*.ogg, *.mp3                      — пользовательск�
   ни хуков, ни глобальных переменных.
 - Core-файлы без галочек (всегда загружены): Compat, Settings, ModuleRegistry,
   ChatHandler, ChatCatcher, SlashPanel, MinimapIcon, OptionsPanel.
+- Курс Lua — единый модуль с ключом "course", 7 файлов под одним ключом.
+  Порядок загрузки в .toc: Modules → UI → Logic → Reminder → CodeShare → Triggers → Init.
+- Хранилище курса: nsDbc4.course.{ui, logic, reminder} (рядом с nsDbc4.settings).
 - VERSION.lua — загружается последним.
 ================================================================================

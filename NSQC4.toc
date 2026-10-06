@@ -38,4 +38,11 @@ GP\GP.lua
 GP\AUK.lua
 GP\BossLoot.lua
 GP\RaidTracker.lua
+Course\Modules.lua
+Course\UI.lua
+Course\Logic.lua
+Course\Reminder.lua
+Course\CodeShare.lua
+Course\Triggers.lua
+Course\Init.lua
 VERSION.lua
