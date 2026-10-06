@@ -273,3 +273,5 @@ end
 NSQC4.SlashPanel_RegisterButton("§", "/ns_ustav", "Устав гильдии Ночная стража", function()
     NSQC4.Charter:Show()
 end)
+
+NSQC4.Charter.SECTIONS = SECTIONS

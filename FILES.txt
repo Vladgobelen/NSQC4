@@ -33,6 +33,7 @@ Guild\KickInactive.lua                                — команда «-ки
 Guild\AutoPromote.lua                              — команда «-повысить [Ник]» (модуль promote)
 Guild\Demote.lua                                     — команда «-принизить Ник» (модуль demote)
 Guild\Boobs.lua                                        — команда «покажи сиськи» (модуль boobs)
+Guild\Ustav.lua                                        — вывод Устава в чат
 
 --- Interface/ (интерфейсные модули) ---
 Interface\Mail.lua                                     — кнопка «ЗАБРАТЬ ВСЁ» в почте (модуль ui_mail)
