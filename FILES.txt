@@ -42,6 +42,7 @@ Interface\Calendar.lua                              — календарь: кн
 Interface\Timer.lua                                  — кнопка «T» — таймер с отсчётом (модуль ui_timer)
 Interface\ListUI.lua                                  — окно управления списком алертов (модуль ui_list)
 Interface\Vendor.lua                                — быстрая покупка эмблем у вендора (модуль ui_vendor)
+Interface\InfoFrame.lua                            — универсальные инфо-фреймы с обновляемыми значениями (модуль ui_info)
 
 --- Interface/ui_frames/ (модули управления фреймами) ---
 Interface\ui_frames\Chat.lua                     — фильтрация чата по тексту и каналам (модуль ui_frames_chat)
@@ -64,6 +65,9 @@ Course\CodeShare.lua                             — приём ответов �
 Course\Triggers.lua                                 — регистрация чат-триггеров курса в NSQC4.chat
 Course\Init.lua                                       — сборка: инстансы ui/logic/reminder, слэш, кнопка панели
 
+--- Events/ (эвенты) ---
+Events\Cats.lua                                       — модуль events_cats: репортер целей в гильд-чат (префикс itsCat)
+
 --- Media/ (ресурсы) ---
 Media\Addon\emblem.tga                        — иконка аддона для миникарты
 Media\Images\*.tga                                — текстуры (иконки, эмодзи, клетки, кубики, фигуры и т.д.)
@@ -84,5 +88,6 @@ Media\Sounds\*.ogg, *.mp3                     — пользовательски
 - Курс Lua — единый модуль с ключом "course", 7 файлов под одним ключом.
   Порядок загрузки в .toc: Modules → UI → Logic → Reminder → CodeShare → Triggers → Init.
 - Хранилище курса: nsDbc4.course.{ui, logic, reminder} (рядом с nsDbc4.settings).
+- Хранилище инфо-фреймов: nsDbc4.ui_info.{frames, currentFrame}.
 - VERSION.lua — загружается последним.
 ================================================================================

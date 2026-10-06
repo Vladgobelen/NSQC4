@@ -44,6 +44,10 @@
 !Course/
 !Course/**
 
+# Папка Events
+!Events/
+!Events/**
+
 # ============================================
 # ЗАПРЕТЫ — в самом конце, перебивают всё выше
 # ============================================
@@ -72,3 +76,5 @@ BS/.zshistory
 Media/.zshistory
 Course/.zshistory
 Course/.directory
+Events/.zshistory
+Events/.directory
