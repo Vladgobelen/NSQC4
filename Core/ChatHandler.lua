@@ -30,22 +30,20 @@ function NSQC4.ChatHandler:new(chatTypes, opts)
     opts = opts or {}
     local obj = setmetatable({}, self)
 
-    obj.triggers   = {}                    -- [key] = { trigger, trigger, ... }
-    obj.textPrefix = opts.textPrefix or "-"  -- все команды в чате начинаются с "-"
-    obj.addonPrefix = opts.addonPrefix or "ns_"  -- все ADDON-префиксы начинаются с "ns_"
+    obj.triggers   = {}
+    obj.textPrefix = opts.textPrefix or "-"
+    obj.addonPrefix = opts.addonPrefix or "ns_"
     obj.debug      = opts.debug or false
     obj.funcCache  = {}
 
     obj.frame = CreateFrame("Frame")
 
-    -- Регистрация чатов
     if chatTypes and #chatTypes > 0 then
         for _, t in ipairs(chatTypes) do
             local ev = CHAT_EVENTS[t]
             if ev then obj.frame:RegisterEvent(ev) end
         end
     else
-        -- Все, кроме SYSTEM
         for _, ev in pairs(CHAT_EVENTS) do
             if ev ~= "CHAT_MSG_SYSTEM" then
                 obj.frame:RegisterEvent(ev)
@@ -77,8 +75,6 @@ end
 -- ============================================================================
 -- РЕГИСТРАЦИЯ ТРИГГЕРОВ
 -- ============================================================================
--- key — "CHATTYPE:firstword"  (например "GUILD:-кик", "ADDON:ns_ver")
--- Или "*" для catch-all
 function NSQC4.ChatHandler:Register(key, trigger)
     if not key or not trigger then return end
     self.triggers[key] = self.triggers[key] or {}
@@ -106,16 +102,11 @@ function NSQC4.ChatHandler:OnChatMessage(event, ...)
 
     if not text then return end
 
-    -- Защита от text без слов (только пробелы)
     local firstWordRaw = text:match("^(%S+)")
     if not firstWordRaw then return end
 
     local shortType = event:match("^CHAT_MSG_(.+)$")
     local firstWord = firstWordRaw:lower()
-
-    if self.debug then
-        print("|cff00ff00[ChatHandler]|r", event, "| key=" .. shortType .. ":" .. firstWord, "| sender=" .. tostring(sender))
-    end
 
     local key = shortType .. ":" .. firstWord
 
@@ -131,7 +122,6 @@ function NSQC4.ChatHandler:OnChatMessage(event, ...)
     if event == "CHAT_MSG_ADDON" and prefix then
         local basePrefix = prefix:match("^(%S+)") or prefix
         local pkey = "ADDON:" .. basePrefix:lower()
-        print("|cff00ff00[ChatHandler]|r ADDON: prefix='" .. tostring(prefix) .. "' pkey='" .. tostring(pkey) .. "' has=" .. tostring(self.triggers[pkey] ~= nil))
         local plist = self.triggers[pkey]
         if plist then
             if self:RunTriggers(plist, event, text, sender, prefix, channel, shortType) then
@@ -200,7 +190,6 @@ function NSQC4.ChatHandler:CheckTrigger(t, event, text, sender, prefix, channel,
     end
 
     if type(func) == "function" then
-        -- Передаём words, sender, text, channel
         local words = {}
         for w in text:gmatch("%S+") do table.insert(words, w) end
         func(words, sender, text, channel, prefix)
