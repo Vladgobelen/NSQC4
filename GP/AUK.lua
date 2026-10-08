@@ -1359,7 +1359,6 @@ local function ProcessRaidMessage(sender, msg, event)
                     NSAuk.UpdateAuctionWindow()
                 else
                     -- Ставка меньше минимума — сообщаем отправителю шёпотом
-                    SendChatMessage("Ваша ставка " .. amount .. " GP меньше минимальной (" .. mn .. " GP). Ставка отклонена.", "WHISPER", nil, sender)
                 end
                 return true
             end
