@@ -41,6 +41,7 @@ GP\GP.lua
 GP\AUK.lua
 GP\BossLoot.lua
 GP\RaidTracker.lua
+GP\MinimapGP.lua
 Course\Modules.lua
 Course\UI.lua
 Course\Logic.lua
