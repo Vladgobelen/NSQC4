@@ -37,7 +37,7 @@ NSQC4.RegisterModule("gp", function()
 
     local function GetGuildMemberSet()
         local guild = {}
-        for i = 1, GetNumGuildMembers() do
+        for i = 1, GetNumGuildMembers(true) do
             local name = GetGuildRosterInfo(i)
             if name then
                 local plainName = name:match("^(.-)-") or name

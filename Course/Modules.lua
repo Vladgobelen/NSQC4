@@ -14451,50 +14451,56 @@ end
 }
 
 ns_llua['lua'][125] = {
-type = "info",
-title = "Лидерство, роли и лут",
-helpModules = {113, 119},
-content = [=[
+    type = "info",
+    title = "Лидерство, роли и лут",
+    helpModules = {113, 119},
+    content = [=[
 <h>Лидерство, роли и лут</h>
 <t>Эти функции помогают понять, кто главный в группе или рейде, а также как распределяется добыча.</t>
 <h>Лидер группы</h>
-<code>
-/run print(GetPartyLeaderIndex())
-</code>
-<t>Если лидер группы — первый участник, функция может вернуть <n>1</n>.</t>
-<t>Если ты один или лидером являешься ты, функция может вернуть <n>0</n> или <k>nil</k>.</t>
-<h>Лидер рейда</h>
-<code>
-/run print(GetRaidLeaderIndex())
-</code>
-<h>Проверка лидера группы</h>
-<code>
-/run local leader = GetPartyLeaderIndex(); if leader and leader > 0 then print("Лидер группы: party" .. leader) else print("Лидер не найден") end
-</code>
-<h>UnitIsPartyLeader</h>
+<t>Для группы работает <k>UnitIsPartyLeader</k>.</t>
 <code>
 /run print(UnitIsPartyLeader("player"))
+/run print(UnitIsPartyLeader("party1"))
+</code>
+<t>Возвращает <k>true</k> если юнит — лидер группы, или <k>nil</k> в противном случае.</t>
+<h>Лидер рейда</h>
+<t>Для рейда <k>UnitIsPartyLeader</k> не работает. Нужно использовать <k>GetRaidRosterInfo</k>.</t>
+<code>
+/run local name, rank = GetRaidRosterInfo(1); print(name, rank)
+</code>
+<t>Второе значение — ранг участника:</t>
+<c>0</c> — лидер рейда.
+<c>1</c> — помощник лидера (офицер).
+<c>2</c> — обычный участник.
+<h>Поиск лидера рейда</h>
+<code>
+/run for i = 1, GetNumRaidMembers() do local name, rank = GetRaidRosterInfo(i); if rank == 0 then print("Лидер:", name) break end end
 </code>
 <h>UnitIsRaidOfficer</h>
-<t>Проверяет, является ли юнит помощником лидера рейда.</t>
+<t>Проверяет, является ли юнит помощником лидера рейда (офицером).</t>
 <code>
 /run print(UnitIsRaidOfficer("player"))
+/run print(UnitIsRaidOfficer("raid1"))
 </code>
 <h>Метод распределения лута</h>
 <code>
 /run local method, master, threshold = GetLootMethod(); print(method, master, threshold)
 </code>
-<t>Первое значение — строка с методом лута, например:</t>
-<c>"freeforall"</c>
-<c>"roundrobin"</c>
-<c>"master"</c>
-<c>"group"</c>
-<c>"needbeforegreed"</c>
-<h>Порог качества лута</h>
+<t>Функция возвращает три значения:</t>
+<c>1</c> — строка с методом лута.
+<c>2</c> — индекс мастера лута (число) или <k>nil</k>.
+<c>3</c> — порог качества (число).
+<h>Возможные методы лута:</h>
+<c>"freeforall"</c> — каждый лутает сам.
+<c>"roundrobin"</c> — по очереди.
+<c>"master"</c> — мастер лута распределяет.
+<c>"group"</c> — групповой лут.
+<c>"needbeforegreed"</c> — потребность перед жадностью.
+<h>Имя мастера лута</h>
 <code>
-/run local method, master, threshold = GetLootMethod(); print("Порог:", threshold)
+/run local method, masterIndex = GetLootMethod(); if masterIndex and masterIndex > 0 then print("Мастер:", UnitName("party" .. masterIndex)) end
 </code>
-<w>Примечание:</w> числовое значение порога связано с качеством предмета. Чем выше число, тем выше минимальное качество для розыгрыша.
 <h>Безопасный шаблон</h>
 <code>
 /run local method = GetLootMethod() or "unknown"; print("Метод лута:", method)
@@ -14623,13 +14629,8 @@ ns_llua['lua'][127] = {
     instruction = [=[
 <h>Тест 125-2: функция GetLeaderReport</h>
 <t>Создай глобальную функцию <k>GetLeaderReport()</k>.</t>
-<t>Функция должна определить, где ты сейчас (в группе или рейде), и вернуть информацию о лидере в формате:</t>
+<t>Функция должна найти лидера группы или рейда и вернуть информацию о нём в формате:</t>
 <s>"Лидер: Вася, Класс: WARRIOR"</s>
-<t>Если ты в рейде, используй <k>GetRaidLeaderIndex()</k> и юнит вида <s>"raid1"</s>.</t>
-<t>Если ты в группе, используй <k>GetPartyLeaderIndex()</k> и юнит вида <s>"party1"</s>.</t>
-<t>Если лидером являешься ты сам (индекс равен 0 или юнит "player"), используй юнит <s>"player"</s>.</t>
-<t>Если лидера нет или индекс меньше либо равен нулю, вернуть строку:</t>
-<s>"Лидер не найден"</s>
 <w>Перед проверкой собери группу или рейд.</w>
 ]=],
     initialCode = [=[
@@ -14640,12 +14641,6 @@ end
     requireKeywords = {
         "GetLeaderReport",
         "function",
-        "GetNumRaidMembers",
-        "GetPartyLeaderIndex",
-        "GetRaidLeaderIndex",
-        "UnitName",
-        "UnitClass",
-        "string.format",
         "return",
     },
     checkCode = function()
@@ -14659,6 +14654,13 @@ end
 
         if type(_G.GetLeaderReport) ~= "function" then
             return fail("GetLeaderReport не является глобальной функцией")
+        end
+
+        local numRaid = GetNumRaidMembers() or 0
+        local numParty = GetNumPartyMembers() or 0
+
+        if numRaid == 0 and numParty == 0 then
+            return fail("Нет ни группы, ни рейда. Собери группу минимум из 2 человек.")
         end
 
         local ok, result = pcall(_G.GetLeaderReport)
@@ -14677,46 +14679,43 @@ end
         end
 
         local expected
-        local numRaid = GetNumRaidMembers() or 0
-
         if numRaid > 0 then
-            local idx = GetRaidLeaderIndex()
-            if idx and idx > 0 then
-                local unit = "raid" .. idx
-                if UnitExists(unit) then
-                    local name = UnitName(unit) or "Unknown"
+            for i = 1, numRaid do
+                local name, rank = GetRaidRosterInfo(i)
+                if rank == 0 then
+                    local unit = "raid" .. i
+                    local unitName = UnitName(unit) or name or "Unknown"
                     local _, classToken = UnitClass(unit)
                     classToken = classToken or "UNKNOWN"
-                    expected = string.format("Лидер: %s, Класс: %s", name, classToken)
+                    expected = string.format("Лидер: %s, Класс: %s", unitName, classToken)
+                    break
                 end
-            elseif idx == 0 then
-                local name = UnitName("player") or "Unknown"
-                local _, classToken = UnitClass("player")
+            end
+        else
+            local leaderUnit
+            if UnitIsPartyLeader("player") then
+                leaderUnit = "player"
+            else
+                for i = 1, numParty do
+                    local unit = "party" .. i
+                    if UnitExists(unit) and UnitIsPartyLeader(unit) then
+                        leaderUnit = unit
+                        break
+                    end
+                end
+            end
+
+            if leaderUnit then
+                local name = UnitName(leaderUnit) or "Unknown"
+                local _, classToken = UnitClass(leaderUnit)
                 classToken = classToken or "UNKNOWN"
                 expected = string.format("Лидер: %s, Класс: %s", name, classToken)
             end
-        else
-            local numParty = GetNumPartyMembers() or 0
-            if numParty > 0 then
-                local idx = GetPartyLeaderIndex()
-                if idx and idx > 0 then
-                    local unit = "party" .. idx
-                    if UnitExists(unit) then
-                        local name = UnitName(unit) or "Unknown"
-                        local _, classToken = UnitClass(unit)
-                        classToken = classToken or "UNKNOWN"
-                        expected = string.format("Лидер: %s, Класс: %s", name, classToken)
-                    end
-                elseif idx == 0 then
-                    local name = UnitName("player") or "Unknown"
-                    local _, classToken = UnitClass("player")
-                    classToken = classToken or "UNKNOWN"
-                    expected = string.format("Лидер: %s, Класс: %s", name, classToken)
-                end
-            end
         end
 
-        expected = expected or "Лидер не найден"
+        if not expected then
+            return fail("Не удалось определить лидера для проверки")
+        end
 
         if result ~= expected then
             return fail("Результат не совпадает. Ожидалось: '" .. expected .. "', получено: '" .. result .. "'")
@@ -14733,9 +14732,13 @@ ns_llua['lua'][128] = {
     preloadVars = {
         {var = "GetLootSummary", desc = "GetLootSummary очищается перед проверкой"},
         {var = "checkError", desc = "checkError очищается перед проверкой"},
-        {var = "result", desc = "result очищается перед проверкой"},
+        {var = "test1", desc = "test1 очищается перед проверкой"},
+        {var = "test2", desc = "test2 очищается перед проверкой"},
+        {var = "test3", desc = "test3 очищается перед проверкой"},
+        {var = "test4", desc = "test4 очищается перед проверкой"},
+        {var = "test5", desc = "test5 очищается перед проверкой"},
     },
-    reportVars = {"checkError", "result"},
+    reportVars = {"checkError", "test1", "test2", "test3", "test4", "test5"},
     instruction = [=[
 <h>Тест 125-3: функция GetLootSummary</h>
 <t>Создай глобальную функцию <k>GetLootSummary()</k>.</t>
@@ -14743,11 +14746,7 @@ ns_llua['lua'][128] = {
 <c>method</c> — строка с методом (например, <s>"master"</s>, <s>"group"</s>).
 <c>masterName</c> — имя мастера лута (строка) или <k>nil</k>, если мастера нет.
 <c>threshold</c> — числовое значение порога качества.
-<t>Используй:</t>
-<c>GetLootMethod()</c> — возвращает три значения: метод, индекс мастера, порог.
-<t>Если индекс мастера существует и больше нуля, получи имя через <k>UnitName("party" .. index)</k> или <k>UnitName("raid" .. index)</k>.</t>
-<t>Если имя мастера получить не удалось, используй <k>nil</k>.</t>
-<w>Во время проверки система подставит свои тестовые значения.</w>
+<w>Во время проверки система прогонит функцию через 5 разных сценариев.</w>
 ]=],
     initialCode = [=[
 function GetLootSummary()
@@ -14757,30 +14756,48 @@ end
     requireKeywords = {
         "GetLootSummary",
         "function",
-        "GetLootMethod",
-        "UnitName",
         "return",
     },
 
     mockGlobals = {
         GetLootMethod = function()
-            return "master", 2, 3
+            local scenario = _G._currentScenario or 1
+            local scenarios = {
+                {method = "master", master = 2, threshold = 3},
+                {method = "master", master = 5, threshold = 4},
+                {method = "freeforall", master = nil, threshold = 2},
+                {method = "group", master = nil, threshold = 2},
+                {method = "needbeforegreed", master = nil, threshold = 3},
+            }
+            local s = scenarios[scenario]
+            return s.method, s.master, s.threshold
         end,
         UnitName = function(u)
+            local scenario = _G._currentScenario or 1
             local mock = {
-                party2 = "Мастер",
-                raid2 = "Мастер",
-                player = "Я",
+                [1] = {party2 = "Мастер"},
+                [2] = {raid5 = "Главный"},
+                [3] = {},
+                [4] = {},
+                [5] = {},
             }
-            return mock[u]
+            return mock[scenario][u]
         end,
-        GetNumRaidMembers = function() return 0 end,
-        GetNumPartyMembers = function() return 4 end,
+        GetNumRaidMembers = function()
+            local scenario = _G._currentScenario or 1
+            local counts = {0, 25, 0, 0, 10}
+            return counts[scenario]
+        end,
+        GetNumPartyMembers = function()
+            local scenario = _G._currentScenario or 1
+            local counts = {4, 0, 4, 4, 0}
+            return counts[scenario]
+        end,
     },
 
     checkCode = function(env)
         _G.checkError = nil
-        _G.result = nil
+        for i = 1, 5 do _G["test" .. i] = nil end
 
         local function fail(msg)
             _G.checkError = msg
@@ -14796,33 +14813,64 @@ end
             return fail("GetLootSummary не является глобальной функцией")
         end
 
-        local ok, result = pcall(fn)
+        local scenarios = {
+            {
+                name = "Метод master, мастер в группе (party2)",
+                expected = {method = "master", masterName = "Мастер", threshold = 3},
+            },
+            {
+                name = "Метод master, мастер в рейде (raid5)",
+                expected = {method = "master", masterName = "Главный", threshold = 4},
+            },
+            {
+                name = "Метод freeforall, мастера нет",
+                expected = {method = "freeforall", masterName = nil, threshold = 2},
+            },
+            {
+                name = "Метод group, мастера нет",
+                expected = {method = "group", masterName = nil, threshold = 2},
+            },
+            {
+                name = "Метод needbeforegreed, мастера нет",
+                expected = {method = "needbeforegreed", masterName = nil, threshold = 3},
+            },
+        }
 
-        if ok and type(result) == "table" then
-            _G.result = result
-        elseif ok then
-            _G.result = "ОШИБКА: функция вернула " .. type(result)
-        else
-            _G.result = "ОШИБКА: " .. tostring(result)
+        for i, test in ipairs(scenarios) do
+            _G._currentScenario = i
+            local ok, result = pcall(fn)
+
+            if not ok then
+                _G._currentScenario = nil
+                return fail("Тест " .. i .. " (" .. test.name .. "): ошибка вызова: " .. tostring(result))
+            end
+
+            if type(result) ~= "table" then
+                _G._currentScenario = nil
+                return fail("Тест " .. i .. " (" .. test.name .. "): функция должна вернуть таблицу")
+            end
+
+            local errors = {}
+            if result.method ~= test.expected.method then
+                table.insert(errors, "method: ожидалось '" .. tostring(test.expected.method) .. "', получено '" .. tostring(result.method) .. "'")
+            end
+            if result.masterName ~= test.expected.masterName then
+                table.insert(errors, "masterName: ожидалось " .. tostring(test.expected.masterName) .. ", получено " .. tostring(result.masterName))
+            end
+            if result.threshold ~= test.expected.threshold then
+                table.insert(errors, "threshold: ожидалось " .. tostring(test.expected.threshold) .. ", получено " .. tostring(result.threshold))
+            end
+
+            if #errors > 0 then
+                _G["test" .. i] = test.name .. " | ОШИБКИ: " .. table.concat(errors, "; ")
+                _G._currentScenario = nil
+                return fail("Тест " .. i .. " (" .. test.name .. ") не пройден")
+            else
+                _G["test" .. i] = test.name .. " | ОК"
+            end
         end
 
-        if not ok then
-            return fail("Ошибка вызова GetLootSummary: " .. tostring(result))
-        end
-        if type(result) ~= "table" then
-            return fail("GetLootSummary должна вернуть таблицу")
-        end
-
-        if result.method ~= "master" then
-            return fail("method не совпадает: ожидалось 'master', получено '" .. tostring(result.method) .. "'")
-        end
-        if result.masterName ~= "Мастер" then
-            return fail("masterName не совпадает: ожидалось 'Мастер', получено '" .. tostring(result.masterName) .. "'")
-        end
-        if result.threshold ~= 3 then
-            return fail("threshold не совпадает: ожидалось 3, получено " .. tostring(result.threshold))
-        end
-
+        _G._currentScenario = nil
         return true
     end,
 }
@@ -14946,20 +14994,19 @@ ns_llua['lua'][130] = {
         {var = "test2", desc = "test2 очищается перед проверкой"},
         {var = "test3", desc = "test3 очищается перед проверкой"},
         {var = "test4", desc = "test4 очищается перед проверкой"},
+        {var = "test5", desc = "test5 очищается перед проверкой"},
+        {var = "test6", desc = "test6 очищается перед проверкой"},
+        {var = "test7", desc = "test7 очищается перед проверкой"},
     },
-    reportVars = {"checkError", "test1", "test2", "test3", "test4"},
+    reportVars = {"checkError", "test1", "test2", "test3", "test4", "test5", "test6", "test7"},
     instruction = [=[
 <h>Тест 125-5: функция WhoCanLoot</h>
 <t>Создай глобальную функцию <k>WhoCanLoot(units)</k>.</t>
 <t>Аргумент <k>units</k> — массив строк UnitID.</t>
 <t>Функция должна определить, кто из юнитов может лутать в зависимости от текущего метода лута, и вернуть новый массив UnitID.</t>
-<t>Логика:</t>
-<c>Если метод <s>"freeforall"</s></c> — лутать могут все (вернуть весь исходный массив).
-<c>Если метод <s>"master"</s></c> — лутать может только мастер. Имя мастера получи через <k>UnitName("party" .. masterIndex)</k> или <k>UnitName("raid" .. masterIndex)</k>. Верни массив с одним элементом — UnitID мастера. Если в массиве <k>units</k> нет мастера, верни пустой массив.
-<c>В остальных случаях</c> (<s>"roundrobin"</s>, <s>"group"</s>, <s>"needbeforegreed"</s>) — лутать могут все (вернуть весь исходный массив).
 <t>Порядок юнитов в результирующем массиве должен совпадать с исходным.</t>
 <t>Если аргумент не таблица, верни пустой массив.</t>
-<w>Во время проверки система подставит свои тестовые значения.</w>
+<w>Во время проверки система прогонит функцию через 7 разных сценариев.</w>
 ]=],
     initialCode = [=[
 function WhoCanLoot(units)
@@ -14969,40 +15016,52 @@ end
     requireKeywords = {
         "WhoCanLoot",
         "function",
-        "GetLootMethod",
-        "UnitName",
-        "for",
         "return",
     },
 
     mockGlobals = {
         GetLootMethod = function()
-            local scenario = _G._currentTestScenario or "group"
-            if scenario == "freeforall" then
-                return "freeforall", nil, 2
-            elseif scenario == "master" then
-                return "master", 2, 3
-            else
-                return "group", nil, 2
-            end
+            local scenario = _G._currentScenario or 1
+            local scenarios = {
+                {method = "freeforall",       master = nil, threshold = 2},
+                {method = "master",           master = 2,   threshold = 3},
+                {method = "master",           master = 2,   threshold = 3},
+                {method = "master",           master = 0,   threshold = 3},
+                {method = "master",           master = nil, threshold = 3},
+                {method = "group",            master = nil, threshold = 2},
+                {method = "roundrobin",       master = nil, threshold = 2},
+            }
+            local s = scenarios[scenario]
+            return s.method, s.master, s.threshold
         end,
         UnitName = function(u)
-            local mock = {
+            local scenario = _G._currentScenario or 1
+            -- Общие имена для большинства сценариев
+            local names = {
                 player = "Я",
                 party1 = "Вася",
                 party2 = "Петя",
                 party3 = "Сидр",
                 party4 = "Коля",
+                raid5  = "Главный",
             }
-            return mock[u]
+            return names[u]
         end,
-        GetNumRaidMembers = function() return 0 end,
-        GetNumPartyMembers = function() return 4 end,
+        GetNumRaidMembers = function()
+            local scenario = _G._currentScenario or 1
+            local counts = {0, 0, 0, 0, 0, 0, 25}
+            return counts[scenario]
+        end,
+        GetNumPartyMembers = function()
+            local scenario = _G._currentScenario or 1
+            local counts = {4, 4, 4, 4, 4, 4, 0}
+            return counts[scenario]
+        end,
     },
 
     checkCode = function(env)
         _G.checkError = nil
-        for i = 1, 4 do _G["test" .. i] = nil end
+        for i = 1, 7 do _G["test" .. i] = nil end
 
         local function fail(msg)
             _G.checkError = msg
@@ -15020,53 +15079,79 @@ end
 
         local scenarios = {
             {
-                name = "freeforall",
+                name = "freeforall — все могут лутать",
                 input = {"party1", "party2", "party3"},
                 exp = {"party1", "party2", "party3"},
             },
             {
-                name = "master",
+                name = "master, мастер party2 — только он",
                 input = {"party1", "party2", "party3"},
                 exp = {"party2"},
             },
             {
-                name = "master",
+                name = "master, мастера нет в массиве",
                 input = {"party1", "party3"},
                 exp = {},
             },
             {
-                name = "group",
+                name = "master, masterIndex=0 (игрок сам мастер)",
+                input = {"player", "party1", "party2"},
+                exp = {"player"},
+            },
+            {
+                name = "master, masterIndex=nil (никого)",
+                input = {"party1", "party2"},
+                exp = {},
+            },
+            {
+                name = "group — все могут",
                 input = {"party1", "party2"},
                 exp = {"party1", "party2"},
+            },
+            {
+                name = "roundrobin в рейде — все могут",
+                input = {"raid5", "party1"},
+                exp = {"raid5", "party1"},
             },
         }
 
         for i, test in ipairs(scenarios) do
-            _G._currentTestScenario = test.name
+            _G._currentScenario = i
             local ok, result = pcall(fn, test.input)
 
-            _G["test" .. i] = "Сценарий '" .. test.name .. "' | Получено: {" .. table.concat(result or {}, ", ") .. "} | Ожидалось: {" .. table.concat(test.exp, ", ") .. "}"
+            local gotStr = table.concat(result or {}, ", ")
+            local expStr = table.concat(test.exp, ", ")
 
             if not ok then
-                return fail("Тест " .. i .. ": ошибка вызова: " .. tostring(result))
+                _G["test" .. i] = test.name .. " | ОШИБКА: " .. tostring(result)
+                _G._currentScenario = nil
+                return fail("Тест " .. i .. " (" .. test.name .. "): ошибка вызова")
             end
 
             if type(result) ~= "table" then
+                _G["test" .. i] = test.name .. " | вернула не таблицу"
+                _G._currentScenario = nil
                 return fail("Тест " .. i .. ": функция должна вернуть таблицу")
             end
 
             if #result ~= #test.exp then
-                return fail("Тест " .. i .. " не пройден: не совпадает длина массива")
+                _G["test" .. i] = test.name .. " | Получено: {" .. gotStr .. "} | Ожидалось: {" .. expStr .. "}"
+                _G._currentScenario = nil
+                return fail("Тест " .. i .. " не пройден: не совпадает длина")
             end
 
             for j = 1, #result do
                 if result[j] ~= test.exp[j] then
+                    _G["test" .. i] = test.name .. " | Получено: {" .. gotStr .. "} | Ожидалось: {" .. expStr .. "}"
+                    _G._currentScenario = nil
                     return fail("Тест " .. i .. " не пройден: элемент " .. j .. " не совпадает")
                 end
             end
+
+            _G["test" .. i] = test.name .. " | {" .. gotStr .. "} | ОК"
         end
 
-        _G._currentTestScenario = nil
+        _G._currentScenario = nil
         return true
     end,
 }

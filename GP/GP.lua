@@ -93,7 +93,7 @@ function GpDb:AddRawLogEntry(rawLogString)
         if not name or type(name) ~= "string" or name == "" then 
             return "|cFFFFFFFF" 
         end
-        for i = 1, GetNumGuildMembers() do
+        for i = 1, GetNumGuildMembers(true) do
             local guildName, _, _, _, _, _, _, _, _, _, classFileName = GetGuildRosterInfo(i)
             if guildName and guildName == name then
                 local color = RAID_CLASS_COLORS[classFileName]
@@ -271,7 +271,7 @@ function GpDb:_CreateLogWindow()
         if nameInput ~= "" and nameInput ~= "Ник" then
             local foundCode = nil
             -- Ищем игрока по имени в гильдии
-            for i = 1, GetNumGuildMembers() do
+            for i = 1, GetNumGuildMembers(true) do
                 local guildName, _, _, _, _, _, _, officerNote = GetGuildRosterInfo(i)
                 if guildName and officerNote then
                     -- Убираем серверную часть из имени (если есть)
@@ -1113,11 +1113,11 @@ function GpDb:_UpdateFromGuild()
                 ))
 
                 print(string.format(
-                    GetNumGuildMembers()
+                    GetNumGuildMembers(true)
                 ))
             end
 
-            for j = 1, GetNumGuildMembers() do
+            for j = 1, GetNumGuildMembers(true) do
                 local name, _, _, _, class5, _, publicNote, officerNote, online, _, class11 = GetGuildRosterInfo(j)
 
                 if name then
@@ -1337,7 +1337,7 @@ function GpDb:_UpdateFromGuild()
             db.window.totalText:SetText(string.format(
                 "Всего игроков с ГП: %d (из %d в гильдии)",
                 totalWithGP,
-                GetNumGuildMembers()
+                GetNumGuildMembers(true)
             ))
 
             db:ClearSelection()
@@ -1891,7 +1891,7 @@ function GpDb:RequestNonGuildGP()
     
     -- Собираем имена всех членов гильдии (без суффикса сервера) в таблицу для быстрого поиска
     local guildNames = {}
-    for i = 1, GetNumGuildMembers() do
+    for i = 1, GetNumGuildMembers(true) do
         local name = GetGuildRosterInfo(i)
         if name then
             local plainName = name:match("^(.-)-") or name
@@ -1927,7 +1927,7 @@ function GpDb:_UpdatePlayerInfo()
     local found = false
     local playerData = nil
     local rosterIndex = nil
-    for i = 1, GetNumGuildMembers() do
+    for i = 1, GetNumGuildMembers(true) do
         local name, rankName, rankIndex, level, classFileName, zone, publicNote, officerNote, online = GetGuildRosterInfo(i)
         if name then
             local plainName = name:match("^(.-)-") or name
@@ -2087,7 +2087,6 @@ function GpDb:_UpdatePlayerInfo()
             return
         end
         GuildDemote(playerData.name)
-        -- Сохраняем ссылку на объект, чтобы гарантировать доступ внутри замыкания OnUpdate
         local dbRef = db
         local timerFrame = CreateFrame("Frame")
         timerFrame:Hide()
@@ -2098,11 +2097,8 @@ function GpDb:_UpdatePlayerInfo()
         timerFrame:SetScript("OnUpdate", function(frame, dt)
             elapsed = elapsed + dt
             if elapsed >= delay then
-                -- Полная остановка и "очистка" таймера
                 frame:SetScript("OnUpdate", nil)
                 frame:Hide()
-                
-                -- Вызов отложенного метода в правильном контексте
                 dbRef:_UpdatePlayerInfo()
             end
         end)
@@ -2113,7 +2109,6 @@ function GpDb:_UpdatePlayerInfo()
             return
         end
         GuildPromote(playerData.name)
-        -- Сохраняем ссылку на объект, чтобы гарантировать доступ внутри замыкания OnUpdate
         local dbRef = db
         local timerFrame = CreateFrame("Frame")
         timerFrame:Hide()
@@ -2124,11 +2119,8 @@ function GpDb:_UpdatePlayerInfo()
         timerFrame:SetScript("OnUpdate", function(frame, dt)
             elapsed = elapsed + dt
             if elapsed >= delay then
-                -- Полная остановка и "очистка" таймера
                 frame:SetScript("OnUpdate", nil)
                 frame:Hide()
-                
-                -- Вызов отложенного метода в правильном контексте
                 dbRef:_UpdatePlayerInfo()
             end
         end)
@@ -2308,7 +2300,7 @@ function GpDb:_CheckOfficerRank()
     if not IsInGuild() then return false end
     
     local playerName = UnitName("player")
-    for i = 1, GetNumGuildMembers() do
+    for i = 1, GetNumGuildMembers(true) do
         local name, _, rankIndex = GetGuildRosterInfo(i)
         if name and name == playerName then
             -- Получаем информацию о звании

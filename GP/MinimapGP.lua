@@ -11,7 +11,87 @@
 NSQC4.RegisterModule("gp", function()
 
     -- ========================================================================
-    -- Константы и зависимости
+    -- nsGP() — сбор ГП всего рейда (для тултипа кнопки)
+    -- ========================================================================
+    local function Split(inputstr)
+        if not inputstr then return {} end
+        local t = {}
+        for str in string.gmatch(inputstr, "([^%s]+)") do
+            table.insert(t, str)
+        end
+        return t
+    end
+
+    local function BuildGuildRosterIndex()
+        local index = {}
+        local count = GetNumGuildMembers(true) or 0
+        for i = 1, count do
+            local name, rankName, _, _, _, _, publicNote, officerNote =
+                GetGuildRosterInfo(i)
+
+            if name then
+                local plainName = name:match("^(.-)-") or name
+
+                local gp = 0
+                if officerNote then
+                    local parts = Split(officerNote)
+                    if parts[3] then
+                        gp = tonumber(parts[3]) or 0
+                    end
+                end
+
+                index[plainName] = {
+                    nome = name,
+                    rank = rankName,
+                    public = publicNote or "",
+                    znach = gp,
+                }
+            end
+        end
+        return index
+    end
+
+    function nsGP()
+        local guildIndex = BuildGuildRosterIndex()
+
+        local result = {}
+        local num = GetNumRaidMembers() or 0
+
+        for i = 1, num do
+            local unit = "raid" .. i
+            local unitName = UnitName(unit)
+
+            if unitName then
+                local plainName = unitName:match("^(.-)-") or unitName
+                local info = guildIndex[plainName]
+
+                if info then
+                    table.insert(result, {
+                        nome   = info.nome,
+                        public = info.public,
+                        rank   = info.rank,
+                        znach  = info.znach,
+                    })
+                else
+                    table.insert(result, {
+                        nome   = unitName,
+                        public = "НЕ В ГИЛЬДИИ",
+                        rank   = "",
+                        znach  = 0,
+                    })
+                end
+            end
+        end
+
+        table.sort(result, function(a, b)
+            return (a.znach or 0) < (b.znach or 0)
+        end)
+
+        return result
+    end
+
+    -- ========================================================================
+    -- Константы
     -- ========================================================================
     local ID       = 973
     local POSEX    = 25
@@ -22,18 +102,17 @@ NSQC4.RegisterModule("gp", function()
     local myNome   = UnitName("player")
 
     -- ========================================================================
-    -- Утилиты (мягкие, с проверками — старая логика сохранена)
+    -- Утилиты
     -- ========================================================================
-
     local function safePlaySound(path)
         if PlaySoundFile then
             PlaySoundFile(path)
         end
     end
 
-    local function safeSplit(text)
-        if not mysplit then return {} end
-        return mysplit(text)
+    local function safeLength(tbl)
+        if type(tbl) ~= "table" then return 0 end
+        return #tbl
     end
 
     local function safeGetGP()
@@ -41,13 +120,8 @@ NSQC4.RegisterModule("gp", function()
         return nsGP() or {}
     end
 
-    local function safeLength(tbl)
-        if not tablelength then return 0 end
-        return tablelength(tbl) or 0
-    end
-
     -- ========================================================================
-    -- Получение данных игрока из ростера гильдии
+    -- Инфо о себе из ростера гильдии
     -- ========================================================================
     local function GetMyGuildInfo()
         local pbl, rezultat, rank
@@ -64,8 +138,8 @@ NSQC4.RegisterModule("gp", function()
                 pbl = publicNote
                 rank = rankName
 
-                if officerNote and mysplit then
-                    local parts = mysplit(officerNote)
+                if officerNote then
+                    local parts = Split(officerNote)
                     if parts and #parts >= 3 then
                         rezultat = parts[3]
                     end
@@ -82,46 +156,34 @@ NSQC4.RegisterModule("gp", function()
     local function OnEnter(button)
         if not GameTooltip then return end
 
-        if FriendsFrame then FriendsFrame:Show() end
-        if GuildFrame   then GuildFrame:Show()   end
-
         GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
 
         local rez = safeGetGP()
         local num = safeLength(rez)
         local pbl, rezultat = GetMyGuildInfo()
 
-        if GetNumRaidMembers and GetNumRaidMembers() ~= 0 and num ~= 0 then
-            for i = 1, num do
-                local key = tostring(i)
-                local entry = rez[key]
+        local raidMembers = GetNumRaidMembers and GetNumRaidMembers() or 0
 
+        if raidMembers ~= 0 and num ~= 0 then
+            for i = 1, num do
+                local entry = rez[i]
                 if entry and entry['nome'] then
                     local playerName = entry['nome']
-                    local displayName = (playerName ~= myNome) and "|cFF6495ED" or "|cffFF0000"
+                    local displayName = (playerName ~= myNome) and "|cFF6495ED" or "|cffff0000"
                     local publicNote = entry['public'] or ""
                     local znach = entry['znach'] or ""
 
-                    -- Кэш внешних ГП
+                    -- Кэш внешних ГП (для не-гильдейцев)
                     if gpDb and gpDb.GetExternalGp then
                         local cachedGp = gpDb:GetExternalGp(playerName)
                         if cachedGp ~= nil and cachedGp ~= 0 then
-                            znach = tostring(cachedGp)
+                            znach = cachedGp
                         end
                     end
 
                     GameTooltip:AddLine(displayName .. playerName ..
                         " |cffFF8C00(" .. publicNote .. "): |cff99ff99" .. znach)
-
-                    if gplabels then
-                        table.insert(gplabels, playerName ..
-                            " |cffFF8C00(" .. publicNote .. "): |cff99ff99" .. znach)
-                    end
                 end
-            end
-
-            if createParent then
-                createParent()
             end
         else
             if myNome and pbl and rezultat then
@@ -130,39 +192,24 @@ NSQC4.RegisterModule("gp", function()
             end
         end
 
-        if FriendsFrame then FriendsFrame:Hide() end
-        if GuildFrame   then GuildFrame:Hide()   end
-
         GameTooltip:Show()
     end
 
     -- ========================================================================
-    -- Уход мыши (OnLeave)
+    -- Уход мыши
     -- ========================================================================
     local function OnLeave()
-        if GameTooltip then
-            GameTooltip:Hide()
-        end
-
-        if gplabels then
-            gplabels = {}
-        end
-
-        if testQ then
-            testQ['gpRez'] = nil
-        end
+        if GameTooltip then GameTooltip:Hide() end
     end
 
     -- ========================================================================
-    -- Клик (OnClick)
+    -- Клик
     -- ========================================================================
     local function OnClick(button, mouseButton)
         safePlaySound("Interface\\AddOns\\NSQC4\\Media\\Sounds\\clc.ogg")
 
         if mouseButton == "MiddleButton" then
-            if RandomRoll then
-                RandomRoll(1, 100)
-            end
+            if RandomRoll then RandomRoll(1, 100) end
             return
         end
 
@@ -175,26 +222,19 @@ NSQC4.RegisterModule("gp", function()
                 if num ~= 0 then
                     if rank == "Капитан" or rank == "Статик" or rank == "Лейтенант" then
                         for i = 1, num do
-                            local key = tostring(i)
-                            local entry = rez[key]
-
+                            local entry = rez[i]
                             if entry and entry['nome'] and entry['public'] and entry['znach'] then
-                                SendChatMessage(
-                                    entry['nome'] .. "(" .. entry['public'] .. "): " .. entry['znach'],
-                                    "OFFICER", nil, 1
-                                )
+                                SendChatMessage(entry['nome'] .. "(" .. entry['public'] .. "): " .. entry['znach'], "OFFICER", nil, 1)
                             end
                         end
                     else
                         if myNome and pbl and rezultat then
-                            SendChatMessage(myNome .. "(" .. pbl .. "): " .. rezultat,
-                                "OFFICER", nil, 1)
+                            SendChatMessage(myNome .. "(" .. pbl .. "): " .. rezultat, "OFFICER", nil, 1)
                         end
                     end
                 else
                     if myNome and pbl and rezultat then
-                        SendChatMessage(myNome .. "(" .. pbl .. "): " .. rezultat,
-                            "OFFICER", nil, 1)
+                        SendChatMessage(myNome .. "(" .. pbl .. "): " .. rezultat, "OFFICER", nil, 1)
                     end
                 end
             end
@@ -210,31 +250,26 @@ NSQC4.RegisterModule("gp", function()
     end
 
     -- ========================================================================
-    -- Создание и настройка кнопки
+    -- Создание кнопки
     -- ========================================================================
-    local self = {}
-    self[ID] = CreateFrame("Button", "NSQC4MinimapGPButton", Minimap)
-    local btn = self[ID]
-
-    btn:SetSize(SIZE_X, SIZE_Y)
-    btn:SetNormalTexture("Interface\\Icons\\INV_Misc_Bag_07")
-    btn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
-    btn:SetPoint("LEFT", MinimapZoomOut, "RIGHT", POSEX, POSEY)
-
-    -- Заглушка, чтобы не сломать старую логику с btn[id]:SetPoint
+    local btn = CreateFrame("Button", "NSQC4MinimapGPButton", Minimap)
     local btnHolder = { [ID] = btn }
 
+    btn:SetSize(SIZE_X, SIZE_Y)
+    btn:SetNormalTexture("Interface\\Icons\\INV_Misc_Coin_06")
+    btn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
+    btn:SetPoint("LEFT", MinimapZoomOut, "RIGHT", POSEX, POSEY)
     btn:RegisterForClicks("LeftButtonUp", "RightButtonDown", "MiddleButtonDown")
 
     btn:SetScript("OnEnter", function(b, mouseButton)
-        if MinimapZoomOut and btnHolder[ID] then
+        if MinimapZoomOut then
             btnHolder[ID]:SetPoint("LEFT", MinimapZoomOut, "RIGHT", 0, POSEY)
         end
         OnEnter(b)
     end)
 
     btn:SetScript("OnLeave", function(b, mouseButton)
-        if MinimapZoomOut and btnHolder[ID] then
+        if MinimapZoomOut then
             btnHolder[ID]:SetPoint("LEFT", MinimapZoomOut, "RIGHT", 25, POSEY)
         end
         OnLeave()
