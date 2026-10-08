@@ -129,7 +129,9 @@ function NSQC4.ChatHandler:OnChatMessage(event, ...)
 
     -- 2. ADDON по префиксу
     if event == "CHAT_MSG_ADDON" and prefix then
-        local pkey = "ADDON:" .. prefix:lower()
+        -- Берём ТОЛЬКО первое слово префикса (до пробела)
+        local basePrefix = prefix:match("^(%S+)") or prefix
+        local pkey = "ADDON:" .. basePrefix:lower()
         local plist = self.triggers[pkey]
         if plist then
             if self:RunTriggers(plist, event, text, sender, prefix, channel, shortType) then
