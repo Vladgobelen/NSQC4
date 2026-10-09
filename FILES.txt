@@ -32,7 +32,6 @@ BS\Chat.lua                                              — команда «-�
 Guild\KickInactive.lua                                — команда «-кик [Ник]» (модуль kick)
 Guild\AutoPromote.lua                              — команда «-повысить [Ник]» (модуль promote)
 Guild\Demote.lua                                     — команда «-принизить Ник» (модуль demote)
-Guild\Boobs.lua                                        — команда «покажи сиськи» (модуль boobs)
 Guild\Ustav.lua                                        — вывод Устава в чат
 
 --- Interface/ (интерфейсные модули) ---
@@ -45,6 +44,7 @@ Interface\Timer.lua                                  — кнопка «T» — 
 Interface\ListUI.lua                                  — окно управления списком алертов (модуль ui_list)
 Interface\Vendor.lua                                — быстрая покупка эмблем у вендора (модуль ui_vendor)
 Interface\InfoFrame.lua                            — универсальные инфо-фреймы с обновляемыми значениями (модуль ui_info)
+Interface\Bugs\Bugs.lua                              — баг-репортёр: запрос у сервера, приём ответа (модуль ui_bugs)
 
 --- Interface/ui_frames/ (модули управления фреймами) ---
 Interface\ui_frames\Chat.lua                     — фильтрация чата по тексту и каналам (модуль ui_frames_chat)
@@ -58,6 +58,8 @@ GP\AUK.lua                                            — аукцион: чат
 GP\BossLoot.lua                                      — панель быстрой награды ГП при открытии лута (модуль gp)
 GP\RaidTracker.lua                                  — отслеживание рейда, запрос ГП у не-гильдейских (модуль gp)
 GP\MinimapGP.lua                                    — кнопка ГП у миникарты (модуль gp)
+GP\LogReceiver.lua                                  — приём логов ГП из гильд-чата, префикс nsYourLog (модуль gp)
+GP\ExternalGP.lua                                   — обмен ГП не-гильдейских игроков: GetGPA/showGPA/hisGP/enAlToGi/ns_hisGP (модуль gp)
 
 --- Course/ (курс Lua) ---
 Course\Modules.lua                                 — данные курса: ns_llua['lua'][1..364] (модули, уроки, задания)
@@ -87,7 +89,10 @@ Media\Sounds\*.ogg, *.mp3                     — пользовательски
   При выключенном модуле init-функция НЕ вызывается — ни фреймов, ни событий,
   ни хуков, ни глобальных переменных.
 - Core-файлы без галочек (всегда загружены): Compat, Settings, ModuleRegistry,
-  ChatHandler, ChatCatcher, SlashPanel, MinimapIcon, OptionsPanel.
+  ChatHandler, ChatCatcher, SlashPanel, MinimapIcon, OptionsPanel, Charter.
+- Порядок загрузки в .toc не совпадает с группировкой по папкам:
+  Charter.lua и OptionsPanel.lua грузятся последними среди Core;
+  Events\Cats.lua стоит между Interface\InfoFrame.lua и Interface\Vendor.lua.
 - Курс Lua — единый модуль с ключом "course", 7 файлов под одним ключом.
   Порядок загрузки в .toc: Modules → UI → Logic → Reminder → CodeShare → Triggers → Init.
 - Хранилище курса: nsDbc4.course.{ui, logic, reminder} (рядом с nsDbc4.settings).

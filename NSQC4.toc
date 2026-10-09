@@ -31,6 +31,7 @@ Interface\Calendar.lua
 Interface\Timer.lua
 Interface\ListUI.lua
 Interface\InfoFrame.lua
+Interface\Bugs\Bugs.lua
 Events\Cats.lua
 Interface\Vendor.lua
 Interface\ui_frames\Chat.lua
