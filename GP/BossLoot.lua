@@ -13,8 +13,7 @@ NSQC4.RegisterModule("gp", function()
     local FRAME_HEIGHT   = 55
     local FRAME_WIDTH    = 330
     local RARITY_EPIC    = 4
-    local SPOT_RADIUS    = 0.005
-    local SPOT_R2        = SPOT_RADIUS * SPOT_RADIUS
+    local DEFAULT_SPOT_RADIUS = 0.005   -- дефолтный радиус в долях карты
     local BAN_ICON       = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
 
     -- ========================================================================
@@ -45,11 +44,18 @@ NSQC4.RegisterModule("gp", function()
         return name:match("^([^%-]+)") or name
     end
 
+    -- Радиус точки (в долях карты). Если не задан — дефолт.
+    local function SpotRadius(spot)
+        if spot and spot.radius then return spot.radius end
+        return DEFAULT_SPOT_RADIUS
+    end
+
     local function InSpotList(list, x, y)
         if not list or not x or not y then return false end
         for _, spot in ipairs(list) do
+            local r = SpotRadius(spot)
             local dx, dy = spot.x - x, spot.y - y
-            if dx*dx + dy*dy <= SPOT_R2 then return true end
+            if dx*dx + dy*dy <= r*r then return true end
         end
         return false
     end
@@ -65,6 +71,15 @@ NSQC4.RegisterModule("gp", function()
             guildCacheReady = true
         end
         return guildCache[ShortName(name)] == true
+    end
+
+    -- ========================================================================
+    -- Расстояние между двумя точками карты (в ярдах)
+    -- ========================================================================
+    local function DistanceBetweenSpots(x1, y1, x2, y2)
+        local dx = (x2 - x1)
+        local dy = (y2 - y1)
+        return math.sqrt(dx*dx + dy*dy) * 10000
     end
 
     -- ========================================================================
@@ -119,7 +134,9 @@ NSQC4.RegisterModule("gp", function()
             local x, y = GetPlayerMapPosition("player")
             if zone and x and y and x > 0 and y > 0 then
                 gpDb.doneSpots[zone] = gpDb.doneSpots[zone] or {}
-                table.insert(gpDb.doneSpots[zone], { x = x, y = y })
+                table.insert(gpDb.doneSpots[zone], {
+                    x = x, y = y, radius = DEFAULT_SPOT_RADIUS,
+                })
             end
         end
     end
@@ -136,7 +153,9 @@ NSQC4.RegisterModule("gp", function()
             local x, y = GetPlayerMapPosition("player")
             if zone and x and y and x > 0 and y > 0 then
                 gpDb.bannedSpots[zone] = gpDb.bannedSpots[zone] or {}
-                table.insert(gpDb.bannedSpots[zone], { x = x, y = y })
+                table.insert(gpDb.bannedSpots[zone], {
+                    x = x, y = y, radius = DEFAULT_SPOT_RADIUS,
+                })
                 print("|cffff8000[NSQC4]|r Забанено место: "..zone)
             end
         end
@@ -280,7 +299,6 @@ NSQC4.RegisterModule("gp", function()
         panel = f
     end
 
-    -- bannedOnly = true → скрыть все кнопки ГП, оставить только бан
     local function ShowPanel(bannedOnly)
         if not panel then CreatePanel() end
 
@@ -288,7 +306,6 @@ NSQC4.RegisterModule("gp", function()
             if bannedOnly then
                 el:Hide()
             else
-                -- EditBox всегда скрыт при открытии панели — покажется по клику на "?"
                 if el == editBox then
                     el:Hide()
                 else
@@ -351,7 +368,7 @@ NSQC4.RegisterModule("gp", function()
     end)
 
     -- ========================================================================
-    -- АУК по СКМ: чтение имени предмета с кнопки → поиск ссылки → отправка
+    -- АУК по СКМ
     -- ========================================================================
     local function GetButtonText(b)
         if not b then return nil end
@@ -457,7 +474,6 @@ NSQC4.RegisterModule("gp", function()
 
         local entries = {}
 
-        -- Определяем текущую цель/место (для подсветки)
         local function GetCurrentKey()
             if UnitExists("target") then
                 local nick = ShortName(UnitName("target"))
@@ -471,8 +487,9 @@ NSQC4.RegisterModule("gp", function()
                     local list = gpDb.bannedSpots[zone]
                     if list then
                         for idx, spot in ipairs(list) do
+                            local r = SpotRadius(spot)
                             local dx, dy = spot.x - x, spot.y - y
-                            if dx*dx + dy*dy <= SPOT_R2 then
+                            if dx*dx + dy*dy <= r*r then
                                 return "spot", zone, idx
                             end
                         end
@@ -493,7 +510,9 @@ NSQC4.RegisterModule("gp", function()
                 for idx, spot in ipairs(list) do
                     table.insert(rows, {
                         kind = "spot", zone = zone,
-                        x = spot.x, y = spot.y, idx = idx,
+                        x = spot.x, y = spot.y,
+                        radius = spot.radius,
+                        idx = idx,
                     })
                 end
             end
@@ -520,17 +539,19 @@ NSQC4.RegisterModule("gp", function()
                     entry.sel:SetTexture("Interface\\Buttons\\WHITE8X8")
                     entry.sel:SetVertexColor(0.3, 0.5, 0.9, 0.5)
                     entry.sel:Hide()
+                    entry:RegisterForClicks("LeftButtonUp", "RightButtonUp")
                     entries[i] = entry
                 end
 
                 if row.kind == "player" then
                     entry.text:SetText("|cffff8000Ник:|r " .. row.nick)
                 else
-                    entry.text:SetText(string.format("|cff00ffffЗона:|r %s |cff808080(%.4f, %.4f)|r",
-                        row.zone, row.x, row.y))
+                    local rStr = row.radius and string.format("%.0f", row.radius * 10000) or "?"
+                    entry.text:SetText(string.format(
+                        "|cff00ffffЗона:|r %s |cff808080(%.4f, %.4f) r=%s|r",
+                        row.zone, row.x, row.y, rStr))
                 end
 
-                -- Подсветка текущей строки
                 local isCurrent = false
                 if curKind == "player" and row.kind == "player" and row.nick == curKey then
                     isCurrent = true
@@ -548,18 +569,82 @@ NSQC4.RegisterModule("gp", function()
                 entry:SetPoint("TOPLEFT", 0, -(i-1) * rowHeight)
                 entry:Show()
 
-                entry:SetScript("OnClick", function()
-                    if row.kind == "player" then
-                        gpDb.bannedPlayers[row.nick] = nil
-                    else
-                        local list = gpDb.bannedSpots[row.zone]
-                        if list then
-                            table.remove(list, row.idx)
-                            if #list == 0 then gpDb.bannedSpots[row.zone] = nil end
+                entry:SetScript("OnClick", function(_, button)
+                    if button == "LeftButton" then
+                        -- ЛКМ — удалить
+                        if row.kind == "player" then
+                            gpDb.bannedPlayers[row.nick] = nil
+                        else
+                            local list = gpDb.bannedSpots[row.zone]
+                            if list then
+                                table.remove(list, row.idx)
+                                if #list == 0 then gpDb.bannedSpots[row.zone] = nil end
+                            end
                         end
+                        w:Refresh()
+                    elseif button == "RightButton" then
+                        -- ПКМ — переписать радиус для точек по расстоянию от игрока
+                        if row.kind ~= "spot" then return end
+
+                        local px, py = GetPlayerMapPosition("player")
+                        local zone = GetRealZoneText()
+                        if not px or not py or px == 0 or py == 0 then
+                            print("|cffff0000[NSQC4]|r Не удалось получить вашу позицию")
+                            return
+                        end
+                        if zone ~= row.zone then
+                            print("|cffff0000[NSQC4]|r Вы не в этой локации")
+                            return
+                        end
+
+                        local dx = px - row.x
+                        local dy = py - row.y
+                        local newRadius = math.sqrt(dx*dx + dy*dy)
+                        if newRadius <= 0 then
+                            print("|cffff0000[NSQC4]|r Вы в самой точке — радиус не изменён")
+                            return
+                        end
+
+                        local list = gpDb.bannedSpots[row.zone]
+                        if list and list[row.idx] then
+                            list[row.idx].radius = newRadius
+                            print(string.format("|cff00ff00[NSQC4]|r Радиус обновлён: %.0f ярдов",
+                                newRadius * 10000))
+                        end
+                        w:Refresh()
                     end
-                    w:Refresh()
                 end)
+
+                entry:SetScript("OnEnter", function(self)
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+
+                    if row.kind == "player" then
+                        GameTooltip:SetText("Забаненный игрок", 1, 0.82, 0)
+                        GameTooltip:AddLine("|cffFF8C00ЛКМ|r — удалить из бана")
+                    else
+                        GameTooltip:SetText("Забаненная точка", 1, 0.82, 0)
+
+                        local px, py = GetPlayerMapPosition("player")
+                        local zone = GetRealZoneText()
+
+                        if px and py and px > 0 and py > 0 and zone == row.zone then
+                            local dist = DistanceBetweenSpots(px, py, row.x, row.y)
+                            GameTooltip:AddLine(string.format("Расстояние: |cff00ff00%.0f|r ярдов", dist))
+                        else
+                            GameTooltip:AddLine("|cff808080Вы не в этой локации|r")
+                        end
+
+                        local rStr = row.radius and string.format("%.0f", row.radius * 10000) or "?"
+                        GameTooltip:AddLine("Текущий радиус: |cff00BFFF" .. rStr .. "|r ярдов")
+
+                        GameTooltip:AddLine(" ")
+                        GameTooltip:AddLine("|cffFF8C00ЛКМ|r — удалить из бана")
+                        GameTooltip:AddLine("|cffF4A460ПКМ|r — переписать радиус по текущему расстоянию")
+                    end
+
+                    GameTooltip:Show()
+                end)
+                entry:SetScript("OnLeave", function() GameTooltip:Hide() end)
             end
 
             for i = #rows + 1, #entries do
