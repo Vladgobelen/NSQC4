@@ -13,12 +13,12 @@ NSQC4.RegisterModule("gp", function()
     local FRAME_HEIGHT   = 55
     local FRAME_WIDTH    = 330
     local RARITY_EPIC    = 4
-    local SPOT_RADIUS    = 0.005   -- радиус в долях карты (~10-20 м)
+    local SPOT_RADIUS    = 0.005
     local SPOT_R2        = SPOT_RADIUS * SPOT_RADIUS
     local BAN_ICON       = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
 
     -- ========================================================================
-    -- Хранилище (в nsDbc4.settings.gp)
+    -- Хранилище
     -- ========================================================================
     nsDbc4.settings.gp = nsDbc4.settings.gp or {}
     local gpDb = nsDbc4.settings.gp
@@ -68,6 +68,15 @@ NSQC4.RegisterModule("gp", function()
     end
 
     -- ========================================================================
+    -- Я мастер-лутер? (в 3.3.5a: mlParty == 0)
+    -- ========================================================================
+    local function AmIMasterLooter()
+        local method, mlParty, mlRaid = GetLootMethod()
+        if method ~= "master" then return false end
+        return mlParty == 0
+    end
+
+    -- ========================================================================
     -- Начисление ГП рейду
     -- ========================================================================
     local function AssignGpToRaid(value)
@@ -99,7 +108,7 @@ NSQC4.RegisterModule("gp", function()
     end
 
     -- ========================================================================
-    -- Запись в donePlayers / doneSpots
+    -- done / banned
     -- ========================================================================
     local function MarkDone()
         if UnitExists("target") then
@@ -115,9 +124,6 @@ NSQC4.RegisterModule("gp", function()
         end
     end
 
-    -- ========================================================================
-    -- Запись в bannedPlayers / bannedSpots
-    -- ========================================================================
     local function MarkBanned()
         if UnitExists("target") then
             local nick = ShortName(UnitName("target"))
@@ -136,30 +142,34 @@ NSQC4.RegisterModule("gp", function()
         end
     end
 
-    -- ========================================================================
-    -- Проверка: заблокировано ли (бан или уже начислено)
-    -- ========================================================================
-    local function IsBlocked()
+    local function IsBanned()
         if UnitExists("target") then
             local nick = ShortName(UnitName("target"))
-            if nick then
-                if gpDb.bannedPlayers[nick] then return true end
-                if gpDb.donePlayers[nick]   then return true end
-            end
+            if nick and gpDb.bannedPlayers[nick] then return true end
         else
             local zone = GetRealZoneText()
             local x, y = GetPlayerMapPosition("player")
             if zone and x and y and x > 0 and y > 0 then
                 if InSpotList(gpDb.bannedSpots[zone], x, y) then return true end
-                if InSpotList(gpDb.doneSpots[zone],   x, y) then return true end
             end
         end
         return false
     end
 
-    -- ========================================================================
-    -- Проверка: есть ли эпик в луте
-    -- ========================================================================
+    local function IsDone()
+        if UnitExists("target") then
+            local nick = ShortName(UnitName("target"))
+            if nick and gpDb.donePlayers[nick] then return true end
+        else
+            local zone = GetRealZoneText()
+            local x, y = GetPlayerMapPosition("player")
+            if zone and x and y and x > 0 and y > 0 then
+                if InSpotList(gpDb.doneSpots[zone], x, y) then return true end
+            end
+        end
+        return false
+    end
+
     local function HasEpicLoot()
         for i = 1, GetNumLootItems() do
             local _, _, _, rarity = GetLootSlotInfo(i)
@@ -182,6 +192,8 @@ NSQC4.RegisterModule("gp", function()
         title:SetText("Начислить ГП рейду:")
         title:SetTextColor(1, 0.82, 0)
 
+        local gpButtons = {}
+
         local xOffset = 10
         for _, value in ipairs(GP_VALUES) do
             local btn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
@@ -193,10 +205,10 @@ NSQC4.RegisterModule("gp", function()
                 MarkDone()
                 f:Hide()
             end)
+            table.insert(gpButtons, btn)
             xOffset = xOffset + 45
         end
 
-        -- Кнопка "?" — свой ввод
         local qBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
         qBtn:SetSize(30, 20)
         qBtn:SetPoint("TOPLEFT", f, "TOPLEFT", xOffset, -25)
@@ -207,9 +219,9 @@ NSQC4.RegisterModule("gp", function()
                 editBox:SetFocus()
             end
         end)
+        table.insert(gpButtons, qBtn)
         xOffset = xOffset + 35
 
-        -- EditBox
         local eb = CreateFrame("EditBox", "NSQC4BossLootEditBox", f, "InputBoxTemplate")
         eb:SetSize(60, 20)
         eb:SetPoint("TOPLEFT", f, "TOPLEFT", xOffset, -25)
@@ -233,8 +245,8 @@ NSQC4.RegisterModule("gp", function()
         end)
         eb:Hide()
         editBox = eb
+        table.insert(gpButtons, eb)
 
-        -- Кнопка бана
         local banBtn = CreateFrame("Button", nil, f)
         banBtn:SetSize(20, 20)
         banBtn:SetPoint("TOPLEFT", f, "TOPLEFT", xOffset + 65, -25)
@@ -260,11 +272,37 @@ NSQC4.RegisterModule("gp", function()
         end)
         banBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
+        f.gpButtons = gpButtons
+        f.banBtn    = banBtn
+        f.title     = title
+        f.editBox   = eb
+
         panel = f
     end
 
-    local function ShowPanel()
+    -- bannedOnly = true → скрыть все кнопки ГП, оставить только бан
+    local function ShowPanel(bannedOnly)
         if not panel then CreatePanel() end
+
+        for _, el in ipairs(panel.gpButtons) do
+            if bannedOnly then
+                el:Hide()
+            else
+                -- EditBox всегда скрыт при открытии панели — покажется по клику на "?"
+                if el == editBox then
+                    el:Hide()
+                else
+                    el:Show()
+                end
+            end
+        end
+
+        if bannedOnly then
+            panel.title:SetText("|cffff8000Забанено|r — только бан")
+        else
+            panel.title:SetText("Начислить ГП рейду:")
+        end
+
         panel:Show()
     end
 
@@ -285,12 +323,17 @@ NSQC4.RegisterModule("gp", function()
             return
         end
 
-        if not IsRaidLeader() then return end
-        if GetLootMethod() ~= "master" then return end
-        if IsBlocked() then return end
-        if not HasEpicLoot() then return end
+        if not AmIMasterLooter() then return end
 
-        ShowPanel()
+        if IsDone() then return end
+
+        if IsBanned() then
+            ShowPanel(true)
+            return
+        end
+
+        if not HasEpicLoot() then return end
+        ShowPanel(false)
     end)
 
     -- ========================================================================
@@ -314,7 +357,7 @@ NSQC4.RegisterModule("gp", function()
         if not b then return nil end
         local name = b:GetName()
         if name then
-            local nameFS = _G[name .. "Text"]   -- LootButtonNText — имя предмета
+            local nameFS = _G[name .. "Text"]
             if nameFS then
                 local t = nameFS:GetText()
                 if t and t ~= "" then return t end
@@ -344,7 +387,7 @@ NSQC4.RegisterModule("gp", function()
         b:SetScript("OnClick", function(self, button)
             if button == "MiddleButton" then
                 if InCombatLockdown() then return end
-                if not IsRaidLeader() then return end
+                if not AmIMasterLooter() then return end
                 local txt = GetButtonText(self)
                 local link = FindLinkByName(txt)
                 if link then
@@ -414,7 +457,34 @@ NSQC4.RegisterModule("gp", function()
 
         local entries = {}
 
+        -- Определяем текущую цель/место (для подсветки)
+        local function GetCurrentKey()
+            if UnitExists("target") then
+                local nick = ShortName(UnitName("target"))
+                if nick and gpDb.bannedPlayers[nick] then
+                    return "player", nick
+                end
+            else
+                local zone = GetRealZoneText()
+                local x, y = GetPlayerMapPosition("player")
+                if zone and x and y and x > 0 and y > 0 then
+                    local list = gpDb.bannedSpots[zone]
+                    if list then
+                        for idx, spot in ipairs(list) do
+                            local dx, dy = spot.x - x, spot.y - y
+                            if dx*dx + dy*dy <= SPOT_R2 then
+                                return "spot", zone, idx
+                            end
+                        end
+                    end
+                end
+            end
+            return nil
+        end
+
         function w:Refresh()
+            local curKind, curKey, curIdx = GetCurrentKey()
+
             local rows = {}
             for nick in pairs(gpDb.bannedPlayers) do
                 table.insert(rows, { kind = "player", nick = nick })
@@ -445,6 +515,11 @@ NSQC4.RegisterModule("gp", function()
                     entry.text:SetWidth(340)
                     entry.text:SetJustifyH("LEFT")
                     entry:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+                    entry.sel = entry:CreateTexture(nil, "BACKGROUND")
+                    entry.sel:SetAllPoints(true)
+                    entry.sel:SetTexture("Interface\\Buttons\\WHITE8X8")
+                    entry.sel:SetVertexColor(0.3, 0.5, 0.9, 0.5)
+                    entry.sel:Hide()
                     entries[i] = entry
                 end
 
@@ -453,6 +528,21 @@ NSQC4.RegisterModule("gp", function()
                 else
                     entry.text:SetText(string.format("|cff00ffffЗона:|r %s |cff808080(%.4f, %.4f)|r",
                         row.zone, row.x, row.y))
+                end
+
+                -- Подсветка текущей строки
+                local isCurrent = false
+                if curKind == "player" and row.kind == "player" and row.nick == curKey then
+                    isCurrent = true
+                elseif curKind == "spot" and row.kind == "spot"
+                       and row.zone == curKey and row.idx == curIdx then
+                    isCurrent = true
+                end
+
+                if isCurrent then
+                    entry.sel:Show()
+                else
+                    entry.sel:Hide()
                 end
 
                 entry:SetPoint("TOPLEFT", 0, -(i-1) * rowHeight)
