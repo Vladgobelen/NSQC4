@@ -33,6 +33,10 @@ Guild\KickInactive.lua                                — команда «-ки
 Guild\AutoPromote.lua                              — команда «-повысить [Ник]» (модуль promote)
 Guild\Demote.lua                                     — команда «-принизить Ник» (модуль demote)
 Guild\Ustav.lua                                        — вывод Устава в чат
+Guild\Recruiter\Init.lua                     — класс GuildRecruiter, создание инстанса, хук WhoFrame (модуль guild_recruiter)
+Guild\Recruiter\Storage.lua                  — работа с nsDbc4.guild_recruiter (автосохранение, загрузка)
+Guild\Recruiter\Logic.lua                    — поиск, фильтры, инвайты, игнор-лист
+Guild\Recruiter\UI.lua                       — интерфейс: окно, чекбоксы, список игроков
 
 --- Interface/ (интерфейсные модули) ---
 Interface\Mail.lua                                     — кнопка «ЗАБРАТЬ ВСЁ» в почте (модуль ui_mail)
