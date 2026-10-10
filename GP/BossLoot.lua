@@ -13,7 +13,7 @@ NSQC4.RegisterModule("gp", function()
     local FRAME_HEIGHT   = 55
     local FRAME_WIDTH    = 330
     local RARITY_EPIC    = 4
-    local DEFAULT_SPOT_RADIUS = 0.005   -- дефолтный радиус в долях карты
+    local DEFAULT_SPOT_RADIUS = 0.005
     local BAN_ICON       = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
 
     -- ========================================================================
@@ -44,7 +44,6 @@ NSQC4.RegisterModule("gp", function()
         return name:match("^([^%-]+)") or name
     end
 
-    -- Радиус точки (в долях карты). Если не задан — дефолт.
     local function SpotRadius(spot)
         if spot and spot.radius then return spot.radius end
         return DEFAULT_SPOT_RADIUS
@@ -73,18 +72,12 @@ NSQC4.RegisterModule("gp", function()
         return guildCache[ShortName(name)] == true
     end
 
-    -- ========================================================================
-    -- Расстояние между двумя точками карты (в ярдах)
-    -- ========================================================================
     local function DistanceBetweenSpots(x1, y1, x2, y2)
         local dx = (x2 - x1)
         local dy = (y2 - y1)
         return math.sqrt(dx*dx + dy*dy) * 10000
     end
 
-    -- ========================================================================
-    -- Я мастер-лутер? (в 3.3.5a: mlParty == 0)
-    -- ========================================================================
     local function AmIMasterLooter()
         local method, mlParty, mlRaid = GetLootMethod()
         if method ~= "master" then return false end
@@ -403,11 +396,19 @@ NSQC4.RegisterModule("gp", function()
         end
         b:SetScript("OnClick", function(self, button)
             if button == "MiddleButton" then
-                if InCombatLockdown() then return end
                 if not AmIMasterLooter() then return end
+
                 local txt = GetButtonText(self)
                 local link = FindLinkByName(txt)
-                if link then
+                if not link then
+                    print("|cffff0000[NSQC4]|r Не удалось получить ссылку на предмет.")
+                    return
+                end
+
+                if InCombatLockdown() then
+                    -- В бою RAID_WARNING недоступен, шлём в RAID
+                    SendChatMessage("АУК " .. link, "RAID")
+                else
                     SendChatMessage("АУК " .. link, "RAID_WARNING")
                 end
                 return
@@ -571,7 +572,6 @@ NSQC4.RegisterModule("gp", function()
 
                 entry:SetScript("OnClick", function(_, button)
                     if button == "LeftButton" then
-                        -- ЛКМ — удалить
                         if row.kind == "player" then
                             gpDb.bannedPlayers[row.nick] = nil
                         else
@@ -583,7 +583,6 @@ NSQC4.RegisterModule("gp", function()
                         end
                         w:Refresh()
                     elseif button == "RightButton" then
-                        -- ПКМ — переписать радиус для точек по расстоянию от игрока
                         if row.kind ~= "spot" then return end
 
                         local px, py = GetPlayerMapPosition("player")
