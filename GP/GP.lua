@@ -341,7 +341,7 @@ function GpDb:_CreateWindow()
     -- Создаем основной фрейм окна
     self.window = CreateFrame("Frame", "GpTrackerWindow", UIParent)
     self.window:SetFrameStrata("DIALOG")
-    self.window:SetSize(400, 600) -- Увеличена высота для размещения фильтра
+    self.window:SetSize(400, 600)
     self.window:SetPoint("LEFT", 5, 100)
     self.window:SetMovable(true)
     self.window:EnableMouse(true)
@@ -349,12 +349,14 @@ function GpDb:_CreateWindow()
     self.window:SetScript("OnDragStart", self.window.StartMoving)
     self.window:SetScript("OnDragStop", self.window.StopMovingOrSizing)
     self.window:Hide()
+
     -- 1. Непрозрачный чёрный фон
     self.window.background = self.window:CreateTexture(nil, "BACKGROUND")
     self.window.background:SetTexture("Interface\\Buttons\\WHITE8X8")
     self.window.background:SetVertexColor(0, 0, 0)
     self.window.background:SetAlpha(1)
     self.window.background:SetAllPoints(true)
+
     -- 2. Граница окна
     self.window.borderFrame = CreateFrame("Frame", nil, self.window)
     self.window.borderFrame:SetPoint("TOPLEFT", -3, 3)
@@ -364,22 +366,26 @@ function GpDb:_CreateWindow()
         edgeSize = 16,
         insets = {left = 4, right = 4, top = 4, bottom = 4}
     })
+
     -- 3. Заголовок окна
     self.window.title = self.window:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     self.window.title:SetPoint("TOP", 0, -15)
     self.window.title:SetText("")
+
     -- 4. Кнопка закрытия
     self.window.closeButton = CreateFrame("Button", nil, self.window, "UIPanelCloseButton")
     self.window.closeButton:SetPoint("TOPRIGHT", -5, -5)
     self.window.closeButton:SetScript("OnClick", function() self.window:Hide() end)
-    -- 4.1 Кнопка логов (справа от кнопки закрытия)
+
+    -- 4.1 Кнопка логов
     self.window.logButton = CreateFrame("Button", nil, self.window, "UIPanelButtonTemplate")
     self.window.logButton:SetSize(24, 24)
     self.window.logButton:SetPoint("RIGHT", self.window.closeButton, "LEFT", -5, 0)
     self.window.logButton:SetText("L")
-    self.window.logButton:SetScript("OnClick", function() 
-        self:ToggleLogWindow() 
+    self.window.logButton:SetScript("OnClick", function()
+        self:ToggleLogWindow()
     end)
+
     -- 5. Чекбокс "Только рейд"
     self.window.raidOnlyCheckbox = CreateFrame("CheckButton", nil, self.window, "UICheckButtonTemplate")
     self.window.raidOnlyCheckbox:SetPoint("TOPLEFT", 10, -15)
@@ -388,17 +394,10 @@ function GpDb:_CreateWindow()
     self.window.raidOnlyCheckbox.text:SetPoint("LEFT", self.window.raidOnlyCheckbox, "RIGHT", 5, 0)
     self.window.raidOnlyCheckbox.text:SetText("Только рейд")
     self.window.raidOnlyCheckbox:SetScript("OnClick", function()
-        if self.window.raidOnlyCheckbox:GetChecked() then
-            self.window.guildCheckbox:SetChecked(false)
-            self.window.guildCheckbox:Disable()
-            self.window.offCheckbox:SetChecked(false)
-            self.window.offCheckbox:Disable()
-        else
-            self.window.guildCheckbox:Enable()
-        end
         self:_UpdateFromGuild()
         self:UpdateWindow()
     end)
+
     -- 5.0.5 Чекбокс "Гильдия"
     self.window.guildCheckbox = CreateFrame("CheckButton", nil, self.window, "UICheckButtonTemplate")
     self.window.guildCheckbox:SetPoint("LEFT", self.window.raidOnlyCheckbox.text, "RIGHT", 10, 0)
@@ -407,15 +406,10 @@ function GpDb:_CreateWindow()
     self.window.guildCheckbox.text:SetPoint("LEFT", self.window.guildCheckbox, "RIGHT", 5, 0)
     self.window.guildCheckbox.text:SetText("Гильдия")
     self.window.guildCheckbox:SetScript("OnClick", function()
-        if self.window.guildCheckbox:GetChecked() then
-            self.window.offCheckbox:Enable()
-        else
-            self.window.offCheckbox:SetChecked(false)
-            self.window.offCheckbox:Disable()
-        end
         self:_UpdateFromGuild()
         self:UpdateWindow()
     end)
+
     -- 5.0.6 Чекбокс "Off"
     self.window.offCheckbox = CreateFrame("CheckButton", nil, self.window, "UICheckButtonTemplate")
     self.window.offCheckbox:SetPoint("LEFT", self.window.guildCheckbox.text, "RIGHT", 10, 0)
@@ -423,11 +417,11 @@ function GpDb:_CreateWindow()
     self.window.offCheckbox.text = self.window.offCheckbox:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     self.window.offCheckbox.text:SetPoint("LEFT", self.window.offCheckbox, "RIGHT", 5, 0)
     self.window.offCheckbox.text:SetText("Off")
-    self.window.offCheckbox:Disable()
     self.window.offCheckbox:SetScript("OnClick", function()
         self:_UpdateFromGuild()
         self:UpdateWindow()
     end)
+
     -- 5.1 Чекбокс "Заметки"
     self.window.notesCheckbox = CreateFrame("CheckButton", nil, self.window, "UICheckButtonTemplate")
     self.window.notesCheckbox:SetPoint("TOPLEFT", self.window.raidOnlyCheckbox, "BOTTOMLEFT", 0, -10)
@@ -438,7 +432,8 @@ function GpDb:_CreateWindow()
     self.window.notesCheckbox:SetScript("OnClick", function()
         self.showOnlyNotes = self.window.notesCheckbox:GetChecked()
     end)
-    -- 5.2 Поле фильтрации по нику (без надписи "Фильтр:")
+
+    -- 5.2 Поле фильтрации по нику
     self.window.filterEditBox = CreateFrame("EditBox", "fdsfdsa3333", self.window, "InputBoxTemplate")
     self.window.filterEditBox:SetPoint("TOPLEFT", self.window.notesCheckbox.text, "BOTTOMLEFT", 0, -5)
     self.window.filterEditBox:SetPoint("RIGHT", self.window.closeButton, "LEFT", -40, 0)
@@ -449,13 +444,14 @@ function GpDb:_CreateWindow()
         self.filterText = editBox:GetText():lower()
         self:_UpdateFromGuild()
     end)
-    self.window.filterEditBox:SetScript("OnEscapePressed", function() 
+    self.window.filterEditBox:SetScript("OnEscapePressed", function()
         self.window.filterEditBox:SetText("")
-        self.window.filterEditBox:ClearFocus() 
+        self.window.filterEditBox:ClearFocus()
     end)
-    self.window.filterEditBox:SetScript("OnEnterPressed", function() 
-        self.window.filterEditBox:ClearFocus() 
+    self.window.filterEditBox:SetScript("OnEnterPressed", function()
+        self.window.filterEditBox:ClearFocus()
     end)
+
     -- 5.3 Кнопка очистки фильтра
     self.window.filterClearButton = CreateFrame("Button", nil, self.window, "UIPanelButtonTemplate")
     self.window.filterClearButton:SetSize(80, 22)
@@ -466,29 +462,34 @@ function GpDb:_CreateWindow()
         self.filterText = ""
         self:_UpdateFromGuild()
     end)
+
     -- 6. Область с прокруткой
     self.window.scrollFrame = CreateFrame("ScrollFrame", "ScrollFrame", self.window, "UIPanelScrollFrameTemplate")
-    self.window.scrollFrame:SetPoint("TOPLEFT", 0, -85)  -- Больший отступ сверху
-    self.window.scrollFrame:SetPoint("BOTTOMRIGHT", 0, 60)  -- Больший отступ снизу
+    self.window.scrollFrame:SetPoint("TOPLEFT", 0, -85)
+    self.window.scrollFrame:SetPoint("BOTTOMRIGHT", 0, 60)
     self.window.scrollChild = CreateFrame("Frame")
     self.window.scrollChild:SetSize(380, 500)
     self.window.scrollFrame:SetScrollChild(self.window.scrollChild)
+
     -- 7. Ползунок прокрутки
     self.window.scrollBar = _G[self.window.scrollFrame:GetName().."ScrollBar"]
     self.window.scrollBar:SetPoint("TOPLEFT", self.window.scrollFrame, "TOPRIGHT", -20, -16)
     self.window.scrollBar:SetPoint("BOTTOMLEFT", self.window.scrollFrame, "BOTTOMRIGHT", -20, 16)
+
     -- 8. Строка с количеством отображаемых игроков
     self.window.countText = self.window:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     self.window.countText:SetPoint("BOTTOMLEFT", 10, 40)
     self.window.countText:SetPoint("BOTTOMRIGHT", -10, 40)
     self.window.countText:SetJustifyH("LEFT")
     self.window.countText:SetText("")
+
     -- 9. Строка с общим количеством игроков с ГП
     self.window.totalText = self.window:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     self.window.totalText:SetPoint("BOTTOMLEFT", 10, 20)
     self.window.totalText:SetPoint("BOTTOMRIGHT", -10, 20)
     self.window.totalText:SetJustifyH("LEFT")
     self.window.totalText:SetText("")
+
     -- 10. Настройка таблицы
     self:_SetupTable()
 end
@@ -1055,29 +1056,9 @@ function GpDb:_UpdateFromGuild()
     self.gp_data = {}
     local totalWithGP = 0
 
-    local inRaid = IsInRaid()
-    self.window.raidOnlyCheckbox:SetChecked(inRaid)
-
-    local raidOnlyMode = inRaid and self.window.raidOnlyCheckbox:GetChecked()
-    local showAllGuild = self.window.guildCheckbox:GetChecked()
+    local raidOnlyMode    = self.window.raidOnlyCheckbox:GetChecked()
+    local showAllGuild    = self.window.guildCheckbox:GetChecked()
     local showOfflineOnly = showAllGuild and self.window.offCheckbox:GetChecked()
-
-    if raidOnlyMode then
-        self.window.guildCheckbox:SetChecked(false)
-        self.window.guildCheckbox:Disable()
-
-        self.window.offCheckbox:SetChecked(false)
-        self.window.offCheckbox:Disable()
-    else
-        self.window.guildCheckbox:Enable()
-
-        if not showAllGuild then
-            self.window.offCheckbox:SetChecked(false)
-            self.window.offCheckbox:Disable()
-        else
-            self.window.offCheckbox:Enable()
-        end
-    end
 
     if not IsInGuild() then
         print("|cFFFF0000ГП:|r Вы не состоите в гильдии")
@@ -1108,8 +1089,7 @@ function GpDb:_UpdateFromGuild()
                 print(string.format(
                     tostring(raidOnlyMode),
                     tostring(showAllGuild),
-                    tostring(showOfflineOnly),
-                    tostring(inRaid)
+                    tostring(showOfflineOnly)
                 ))
 
                 print(string.format(
@@ -1379,35 +1359,28 @@ end
 
 function GpDb:Show()
     self.window:Show()
-    
-    -- Автоматически включаем режим "Только рейд", если мы в рейде
-    if IsInRaid() then
-        self.window.raidOnlyCheckbox:SetChecked(true)
-    else
-        self.window.raidOnlyCheckbox:SetChecked(false)
-    end
-    
+
     -- Принудительно обновляем данные гильдии перед показом
     GuildRoster()
-    
+
     -- === ВЫЗОВ НОВОЙ ФУНКЦИИ ПРИ ОТКРЫТИИ ОКНА ===
     self:RequestNonGuildGP()
     -- ==============================================
-    
+
     -- Сохраняем ссылку на оригинальный объект, так как внутри OnUpdate `self` будет указывать на фрейм таймера
     local ctx = self
     local timerFrame = CreateFrame("Frame")
     timerFrame:Hide()
     local elapsed = 0
     local delay = 0.1
-    
+
     timerFrame:SetScript("OnUpdate", function(frame, dt)
         elapsed = elapsed + dt
         if elapsed >= delay then
             -- Полная остановка и очистка таймера
             frame:SetScript("OnUpdate", nil)
             frame:Hide()
-            
+
             -- Выполнение отложенных методов в контексте оригинального объекта
             ctx:_UpdateFromGuild()
             ctx:UpdateWindow()
