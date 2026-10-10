@@ -59,34 +59,14 @@ end
 function NSAuk.BroadcastMyGP()
     local db = NSAuk.EnsureDB()
     if not db.active then return end
-    
+
     local myName = UnitName("player")
     local myBid = db.active.bids[myName]
     if not myBid then return end
-    
-    -- Получаем актуальные ГП
-    local myGP = myBid.gp or 0
-    
-    -- Если ГП = 0, пробуем получить из других источников
-    if myGP == 0 then
-        -- Из внешнего кэша
-        if gpDb and gpDb.external_gp_cache and gpDb.external_gp_cache[myName] then
-            myGP = tonumber(gpDb.external_gp_cache[myName]) or 0
-        end
-        
-        -- Из офицерской заметки (для игроков в гильдии)
-        if myGP == 0 then
-            for j = 1, GetNumGuildMembers(true) do
-                local gName, _, _, _, _, _, _, officerNote = GetGuildRosterInfo(j)
-                if gName == myName and officerNote and officerNote ~= "" then
-                    local z = NSAuk.mysplit(officerNote)
-                    myGP = tonumber(z[3]) or 0
-                    break
-                end
-            end
-        end
-    end
-    
+
+    -- Получаем актуальные ГП через общий хелпер
+    local myGP = NSAuk.GetMyGP()
+
     -- Отправляем свои ГП всем в рейде
     local _, myClass = UnitClass("player")
     local publicNote = ""
@@ -97,9 +77,9 @@ function NSAuk.BroadcastMyGP()
             break
         end
     end
-    
+
     SendAddonMessage("AUC_GP", myName .. ":" .. myGP .. ":" .. (myClass or "WARRIOR") .. ":" .. publicNote, "RAID")
-    
+
     -- Обновляем свои данные в bids
     if myBid then
         myBid.gp = myGP
@@ -220,6 +200,76 @@ function NSAuk.GetRaidGPData()
 end
 
 -- ============================================================================
+-- ПОЛУЧЕНИЕ ГП ИГРОКА
+-- Возвращает: gp (число), source (строка)
+-- ============================================================================
+function NSAuk.GetMyGP()
+    local myName = UnitName("player")
+    if not myName then return 0, "no-name" end
+
+    local db = NSAuk.EnsureDB()
+    if db.active and db.active.bids[myName] then
+        local gp = db.active.bids[myName].gp
+        if gp and gp > 0 then return gp, "active" end
+    end
+
+    if gpDb and gpDb.external_gp_cache and gpDb.external_gp_cache[myName] then
+        local gp = tonumber(gpDb.external_gp_cache[myName])
+        if gp and gp > 0 then return gp, "external" end
+    end
+
+    for j = 1, GetNumGuildMembers(true) do
+        local gName, _, _, _, _, _, _, officerNote = GetGuildRosterInfo(j)
+        if gName == myName and officerNote and officerNote ~= "" then
+            local z = NSAuk.mysplit(officerNote)
+            local gp = tonumber(z[3])
+            if gp and gp > 0 then return gp, "officer" end
+        end
+    end
+
+    return 0, "unknown"
+end
+
+-- ============================================================================
+-- ПРОВЕРКА СТАВКИ (для СВОИХ ставок)
+-- ============================================================================
+function NSAuk.CanBid(amount)
+    if not amount or amount <= 0 then
+        return false, "Ставка должна быть положительным числом."
+    end
+
+    local gp, source = NSAuk.GetMyGP()
+
+    if source == "unknown" or gp == 0 then
+        return false, "Не удалось определить ваш ГП."
+    end
+
+    if amount > gp then
+        return false, string.format("Недостаточно ГП: у вас %d, ставка %d.", gp, amount)
+    end
+
+    return true
+end
+
+-- ============================================================================
+-- СИНХРОНИЗАЦИЯ ГП ПЕРЕД СТАВКОЙ
+-- ============================================================================
+function NSAuk.SyncMyGP()
+    local myName = UnitName("player")
+    if not myName then return 0 end
+
+    local gp = NSAuk.GetMyGP()
+
+    local db = NSAuk.EnsureDB()
+    if db.active and db.active.bids[myName] then
+        db.active.bids[myName].gp = gp
+    end
+
+    NSAuk.BroadcastMyGP()
+    return gp
+end
+
+-- ============================================================================
 -- ИНТЕРФЕЙС И UI
 -- ============================================================================
 
@@ -267,8 +317,7 @@ function NSAuk.RenderCustomButtons()
     local frame = auctionFrame
     if not frame or not frame.customButtonBar then return end
     local bar = frame.customButtonBar
-    
-    -- Очистка старых кнопок
+
     for _, btn in ipairs(bar.buttons) do
         btn:Hide()
         btn:SetParent(nil)
@@ -293,21 +342,20 @@ function NSAuk.RenderCustomButtons()
         b:SetScript("OnClick", function()
             local d = NSAuk.EnsureDB()
             if not d.active then return end
-            
+
             local myName = UnitName("player")
             local myBid = d.active.bids[myName]
             if not myBid or myBid.banned then
                 print("|cffff0000[NSAuk]|r Вы забанены в этом аукционе.")
                 return
             end
-            
-            -- Проверка ГП перед ставкой
-            if (myBid.gp or 0) < val then
-                print("|cffff0000[NSAuk]|r Недостаточно ГП для ставки " .. val .. ". У вас: " .. (myBid.gp or 0))
+
+            local ok, reason = NSAuk.CanBid(val)
+            if not ok then
+                print("|cffff0000[NSAuk]|r " .. reason)
                 return
             end
-            
-            -- Проверка на лидерство
+
             local mx = 0
             for _, v in pairs(d.active.bids) do
                 if v.hasAction and not v.passed and v.amount > mx then
@@ -318,15 +366,14 @@ function NSAuk.RenderCustomButtons()
                 print("|cffff0000[NSAuk]|r Вы уже лидер. Нельзя перебить свою ставку.")
                 return
             end
-            
-            -- Отправляем свои ГП перед ставкой
-            NSAuk.BroadcastMyGP()
+
+            NSAuk.SyncMyGP()
             SendChatMessage(tostring(val), "RAID")
         end)
         bar.buttons[i] = b
         totalW = totalW + btnW + gap
     end
-    
+
     bar:SetWidth(totalW - gap)
     bar:SetHeight(25)
 end
@@ -624,22 +671,31 @@ function NSAuk.CreateAuctionFrame()
     bidBtn:SetText("Ставка")
     bidBtn:SetScript("OnClick", function()
         local d = NSAuk.EnsureDB()
-        if d.active then
-            local me = UnitName("player")
-            local myBid = d.active.bids[me] or {amount=0, gp=0}
-            local mx = 0
-            for _, v in pairs(d.active.bids) do
-                if v.hasAction and not v.passed and v.amount > mx then mx = v.amount end
-            end
-            if mx + d.active.step > (myBid.gp or 0) then
-                print("|cffff0000[NSAuk]|r Недостаточно ГП! Ваша ставка превысит доступный баланс.")
-                return
-            end
-            if (myBid.amount or 0) == mx and mx > 0 then print("Вы лидер"); return end
+        if not d.active then return end
 
-            NSAuk.BroadcastMyGP()
-            SendChatMessage(tostring(mx + d.active.step), "RAID")
+        local me = UnitName("player")
+        local myBid = d.active.bids[me] or { amount = 0, gp = 0 }
+
+        local mx = 0
+        for _, v in pairs(d.active.bids) do
+            if v.hasAction and not v.passed and v.amount > mx then mx = v.amount end
         end
+
+        local nextBid = mx + d.active.step
+
+        local ok, reason = NSAuk.CanBid(nextBid)
+        if not ok then
+            print("|cffff0000[NSAuk]|r " .. reason)
+            return
+        end
+
+        if (myBid.amount or 0) == mx and mx > 0 then
+            print("|cffff0000[NSAuk]|r Вы уже лидер. Нельзя перебить свою ставку.")
+            return
+        end
+
+        NSAuk.SyncMyGP()
+        SendChatMessage(tostring(nextBid), "RAID")
     end)
 
     local cbar = CreateFrame("Frame", "NSAukCustomBar", frame)
@@ -1339,15 +1395,22 @@ local function ProcessRaidMessage(sender, msg, event)
                 end
                 local mn = mx + db.active.step
 
-                if sender == myName then
-                    local playerGP = bidData.gp or 0
-                    if amount > playerGP then
-                        print("|cffff0000[NSAuk]|r Недостаточно ГП! У вас: " .. playerGP .. ", ставка: " .. amount)
-                        return true
+                -- Проверка достаточности ГП для ЛЮБОГО отправителя
+                local senderGP = bidData.gp or 0
+                if senderGP > 0 and amount > senderGP then
+                    if sender == myName then
+                        print("|cffff0000[NSAuk]|r Недостаточно ГП: у вас " .. senderGP .. ", ставка " .. amount .. ".")
+                    else
+                        print("|cffff0000[NSAuk]|r Ставка " .. sender .. " (" .. amount .. ") отклонена: у него " .. senderGP .. " ГП.")
                     end
-                    NSAuk.BroadcastMyGP()
+                    return true
                 end
-                
+
+                -- Синхронизация своего ГП перед ставкой (для себя)
+                if sender == myName then
+                    NSAuk.SyncMyGP()
+                end
+
                 if amount >= mn then
                     bidData.amount = amount; bidData.passed = false; bidData.hasAction = true
                     db.active.lastBidTime = GetTime()
@@ -1357,8 +1420,6 @@ local function ProcessRaidMessage(sender, msg, event)
                     end
                     if newLd then AnnounceRaid(newLd .. " лидирует с " .. newMx .. " GP.") end
                     NSAuk.UpdateAuctionWindow()
-                else
-                    -- Ставка меньше минимума — сообщаем отправителю шёпотом
                 end
                 return true
             end

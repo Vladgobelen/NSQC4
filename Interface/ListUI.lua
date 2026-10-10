@@ -275,4 +275,29 @@ NSQC4.RegisterModule("ui_list", function()
         frame:UpdateList()
     end
 
+    -- ========================================================================
+    -- Хук на контекстное меню: пункт «Настроить звук для <ник>»
+    -- ========================================================================
+    local function AddSoundMenuEntry(name)
+        if not name or name == UNKNOWNOBJECT then return end
+        UIDropDownMenu_AddButton({
+            text = "Настроить звук для " .. name,
+            notCheckable = 1,
+            func = function()
+                NSQC4.ListUI_Show()
+            end,
+        }, 1)
+    end
+
+    hooksecurefunc("FriendsFrame_ShowDropdown", function(name)
+        AddSoundMenuEntry(name)
+    end)
+
+    hooksecurefunc("UnitPopup_OnClick", function()
+        local menu = UIDROPDOWNMENU_OPEN_MENU
+        if menu and (menu.which == "CHAT_ROSTER" or menu.which == "FRIEND") then
+            AddSoundMenuEntry(menu.name)
+        end
+    end)
+
 end)

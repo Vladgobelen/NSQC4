@@ -49,6 +49,7 @@ Interface\ListUI.lua                                  — окно управл�
 Interface\Vendor.lua                                — быстрая покупка эмблем у вендора (модуль ui_vendor)
 Interface\InfoFrame.lua                            — универсальные инфо-фреймы с обновляемыми значениями (модуль ui_info)
 Interface\Bugs\Bugs.lua                              — баг-репортёр: запрос у сервера, приём ответа (модуль ui_bugs)
+Interface\PlayerInfo.lua                              — инфо об игроке: ПКМ по нику → вывод в офицерский чат (модуль ui_player_info)
 
 --- Interface/ui_frames/ (модули управления фреймами) ---
 Interface\ui_frames\Chat.lua                     — фильтрация чата по тексту и каналам (модуль ui_frames_chat)
