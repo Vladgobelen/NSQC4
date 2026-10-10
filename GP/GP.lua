@@ -922,71 +922,26 @@ end
 
 function GpDb:UpdateRaidWindowVisibility()
     if not self.raidWindow then return end
-    -- Проверяем звание игрока
-    local hasOfficerRank = self:_CheckOfficerRank()
-    if not hasOfficerRank then
-        if self.raidWindow:IsShown() then
-            self.raidWindow:Hide()
-            -- Восстанавливаем полный размер окна логов
-            if self.logWindow and self.logWindow:IsShown() then
-                self.logWindow:SetHeight(self.window:GetHeight())
-            end
-        end
-        return
-    end
+
     local hasSelection = next(self.selected_indices) ~= nil
-    if not hasSelection then
-        if self.raidWindow:IsShown() then
-            self.raidWindow:Hide()
-            -- Восстанавливаем полный размер окна логов
-            if self.logWindow and self.logWindow:IsShown() then
-                self.logWindow:SetHeight(self.window:GetHeight())
-            end
-        end
-        return
-    end
-    local inRaid = IsInRaid()
-    local raidOnlyChecked = self.window.raidOnlyCheckbox:GetChecked()
-    local shouldShow = not inRaid or raidOnlyChecked
-    if shouldShow and inRaid then
-        local raidMembers = {}
-        for i = 1, GetNumGroupMembers() do
-            local name = GetRaidRosterInfo(i)
-            if name then
-                raidMembers[name] = true
-            end
-        end
-        for index in pairs(self.selected_indices) do
-            local entry = self.gp_data[index]
-            if entry and not raidMembers[entry.original_nick] then
-                shouldShow = false
-                print("|cFFFF0000ГП:|r Некоторые выделенные игроки не в рейде")
-                break
-            end
-        end
-    end
-    if shouldShow then
+
+    if hasSelection then
         if not self.raidWindow:IsShown() then
             self.raidWindow:Show()
-            self:RestoreRaidWindowState() -- Восстанавливаем состояния при показе
-            self:_UpdateSelectedPlayersText() -- Обновляем список игроков
-            -- Корректируем размер окна логов
+            self:RestoreRaidWindowState()
+            self:_UpdateSelectedPlayersText()
             if self.logWindow and self.logWindow:IsShown() then
                 self.logWindow:SetHeight(self.window:GetHeight() / 2)
             end
         end
+        self:_UpdatePlayerInfo()
     else
         if self.raidWindow:IsShown() then
             self.raidWindow:Hide()
         end
-        -- Корректируем размер окна логов
         if self.logWindow and self.logWindow:IsShown() then
             self.logWindow:SetHeight(self.window:GetHeight())
         end
-    end
-    -- Обновляем информацию об игроке
-    if self.raidWindow and self.raidWindow:IsShown() then
-        self:_UpdatePlayerInfo()
     end
 end
 
@@ -2288,38 +2243,14 @@ function GpDb:_CheckOfficerRank()
     return false
 end
 
--- Добавляем метод для показа/скрытия окна
 function GpDb:ToggleRaidWindow()
-    -- Проверяем звание игрока
-    if not self:_CheckOfficerRank() then
-        print("|cFFFF0000ГП:|r Только офицеры могут начислять ГП")
-        if self.raidWindow and self.raidWindow:IsShown() then
-            self.raidWindow:Hide()
-        end
-        return
-    end
-    
     if not self.raidWindow then
         self:_CreateRaidSelectionWindow()
     end
-    
-    local inRaid = IsInRaid()
-    local raidOnlyChecked = self.window.raidOnlyCheckbox:GetChecked()
+
     local hasSelection = next(self.selected_indices) ~= nil
-    
-    if not hasSelection and not self.raidWindow:IsShown() then
-        self.raidWindow:Show()
-        UIDropDownMenu_Initialize(self.raidWindow.dropdown, nil)
-        return
-    end
-    
+
     if hasSelection then
-        if inRaid and not raidOnlyChecked then
-            print("|cFFFF0000ГП:|r Для начисления ГП в рейде включите 'Только рейд'")
-            self.raidWindow:Hide()
-            return
-        end
-        
         if self.raidWindow:IsShown() then
             self.raidWindow:Hide()
         else
