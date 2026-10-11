@@ -106,7 +106,11 @@ NSQC4.RegisterModule("gp", function()
             if nick then
                 local short = ShortName(nick)
                 local prefix = IsInMyGuild(short) and "nsGP1" or "nsGP1A"
-                SendAddonMessage(prefix .. " " .. value, short, "GUILD")
+                if prefix == "nsGP1" then
+                    SendAddonMessage("nsGP1 " .. value, short, "GUILD")
+                else
+                    SendAddonMessage("nsGP1A", value .. " " .. short, "GUILD")
+                end
                 log = log .. " " .. short
                 count = count + 1
             end

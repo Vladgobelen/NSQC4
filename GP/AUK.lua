@@ -903,8 +903,8 @@ end
 function NSAuk.DeductGPFromRoster(playerName, amount)
     if not playerName or not amount or amount <= 0 then return end
     
-    SendAddonMessage("nsGP1 -" .. amount, playerName, "guild")
-    SendAddonMessage("nsGP1A -" .. amount, playerName, "guild")
+    SendAddonMessage("nsGP1 -" .. amount, playerName, "GUILD")
+    SendAddonMessage("nsGP1A", "-" .. amount .. " " .. playerName, "GUILD")
     SendAddonMessage("nsGPlog", "Аукцион -" .. amount .. " " .. (playerName or ""), "guild")
     print(string.format("|cff00ff00[NSAuk]|r Отправлен запрос на списание %d ГП с %s.", amount, playerName))
 end

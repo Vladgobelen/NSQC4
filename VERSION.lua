@@ -1,6 +1,6 @@
 NSQC4_VERSION = {
-    major = 1,
-    minor = 42,
+    major = 2,
+    minor = 0,
     code  = "NSQC4",
 }
 

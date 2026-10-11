@@ -1740,11 +1740,10 @@ function GpDb:_CreateRaidSelectionWindow()
                 local entry = self.gp_data[index]
                 local nick = entry.original_nick
                 
-                local prefix = entry.isGuildMember and "nsGP1" or "nsGP1A"
-                
-                SendAddonMessage(prefix .. " " .. gpValue, nick, "GUILD")
-                
-                if prefix == "nsGP1A" then
+                if entry.isGuildMember then
+                    SendAddonMessage("nsGP1 " .. gpValue, nick, "GUILD")
+                else
+                    SendAddonMessage("nsGP1A", gpValue .. " " .. nick, "GUILD")
                     table.insert(nonGuildNicks, nick)
                 end
                 
