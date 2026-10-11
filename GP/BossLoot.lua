@@ -322,6 +322,21 @@ NSQC4.RegisterModule("gp", function()
     end
 
     -- ========================================================================
+    -- Сбор ссылок на эпик-лут
+    -- ========================================================================
+    local function GetEpicLinks()
+        local links = {}
+        for i = 1, GetNumLootItems() do
+            local link = GetLootSlotLink(i)
+            local _, _, _, rarity = GetLootSlotInfo(i)
+            if link and rarity and rarity >= RARITY_EPIC then
+                table.insert(links, link)
+            end
+        end
+        return links
+    end
+
+    -- ========================================================================
     -- LOOT_OPENED / LOOT_CLOSED
     -- ========================================================================
     local lootFrame = CreateFrame("Frame")
@@ -344,6 +359,16 @@ NSQC4.RegisterModule("gp", function()
 
         if not HasEpicLoot() then return end
         ShowPanel(false)
+
+        -- Отправка эпик-лута в рейд-чат (только мастер-лутер)
+        local links = GetEpicLinks()
+        if #links > 0 then
+            if InCombatLockdown() then
+                SendChatMessage("Лут: " .. table.concat(links, ", "), "RAID")
+            else
+                SendChatMessage("Лут: " .. table.concat(links, ", "), "RAID_WARNING")
+            end
+        end
     end)
 
     -- ========================================================================
