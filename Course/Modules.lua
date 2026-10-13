@@ -16154,6 +16154,164 @@ end
     end,
 }
 
+ns_llua['lua'][136.3] = {
+    type = "commenttest",
+    title = "Тест 131-8: функция GetTopGuildMembersByGP",
+    helpModules = {131, 45, 44, 7},
+    preloadVars = {
+        {var = "GetTopGuildMembersByGP", desc = "GetTopGuildMembersByGP очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "result", desc = "result очищается перед проверкой"},
+        {var = "resultText", desc = "resultText очищается перед проверкой"},
+        {var = "debug", desc = "debug очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "resultText", "debug"},
+    instruction = [=[
+<h>Тест 131-8: функция GetTopGuildMembersByGP</h>
+<t>Создай глобальную функцию <k>GetTopGuildMembersByGP()</k>.</t>
+<t>Функция должна пройтись по всем участникам твоей реальной гильдии, прочитать их офицерские заметки (8-е поле <k>GetGuildRosterInfo</k>) и извлечь оттуда <k>третье слово</k> — это количество ГП (гильдейских очков).</t>
+<t>Затем вернуть массив таблиц с топ-10 игроков по максимальному количеству ГП (отсортированных по убыванию).</t>
+<t>Каждая таблица должна содержать поля:</t>
+<c>name</c> — имя участника.
+<c>rank</c> — название ранга.
+<c>gp</c> — количество ГП (число).
+<t>Если третье слово отсутствует или не является числом, такого участника пропускай.</t>
+<t>Если в гильдии меньше 10 участников с валидными ГП, вернуть всех найденных.</t>
+<t>Если игрок не состоит в гильдии, вернуть пустой массив.</t>
+<w>Перед проверкой открой окно гильдии, чтобы ростер загрузился.</w>
+]=],
+    initialCode = [=[
+function GetTopGuildMembersByGP()
+    
+end
+]=],
+    requireKeywords = {
+        "GetTopGuildMembersByGP",
+        "function",
+        "GetGuildInfo",
+        "GetNumGuildMembers",
+        "GetGuildRosterInfo",
+        "tonumber",
+        "table.sort",
+        "return",
+    },
+    checkCode = function()
+        _G.checkError = nil
+        _G.result = nil
+        _G.resultText = nil
+        _G.debug = nil
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(_G.GetTopGuildMembersByGP) ~= "function" then
+            return fail("GetTopGuildMembersByGP не является глобальной функцией")
+        end
+
+        local guildName = GetGuildInfo("player")
+        if not guildName then
+            return fail("Ты не состоишь в гильдии. Вступи в гильдию и открой её окно.")
+        end
+
+        local total = GetNumGuildMembers()
+        if not total or total == 0 then
+            return fail("Ростер гильдии не загружен. Открой окно гильдии и попробуй снова.")
+        end
+
+        local ok, result = pcall(_G.GetTopGuildMembersByGP)
+
+        if not ok then
+            _G.resultText = "ОШИБКА: " .. tostring(result)
+            return fail("Ошибка вызова GetTopGuildMembersByGP: " .. tostring(result))
+        end
+        if type(result) ~= "table" then
+            _G.resultText = "ОШИБКА: функция вернула " .. type(result)
+            return fail("Функция должна вернуть массив (таблицу)")
+        end
+        
+        _G.result = result
+
+        -- Формируем читаемое текстовое представление
+        if #result == 0 then
+            _G.resultText = "Топ-10 пуст"
+        else
+            local lines = {}
+            for i, entry in ipairs(result) do
+                if type(entry) == "table" then
+                    local name = tostring(entry.name or "?")
+                    local rank = tostring(entry.rank or "?")
+                    local gp = tostring(entry.gp or "?")
+                    lines[#lines + 1] = string.format("%d. %s (%s) — %s ГП", i, name, rank, gp)
+                end
+            end
+            _G.resultText = table.concat(lines, "\n")
+        end
+
+        -- Строим expected тем же алгоритмом, что и функция студента
+        local members = {}
+        for i = 1, total do
+            local name, rank, _, _, _, _, _, officerNote = GetGuildRosterInfo(i)
+            if name and officerNote and officerNote ~= "" then
+                local words = {}
+                for word in string.gmatch(officerNote, "%S+") do
+                    words[#words + 1] = word
+                end
+                
+                if words[3] then
+                    local gp = tonumber(words[3])
+                    if gp then
+                        members[#members + 1] = {
+                            name = name,
+                            rank = rank,
+                            gp = gp,
+                        }
+                    end
+                end
+            end
+        end
+        
+        table.sort(members, function(a, b) return a.gp > b.gp end)
+        
+        local expected = {}
+        local limit = math.min(#members, 10)
+        for i = 1, limit do
+            expected[#expected + 1] = members[i]
+        end
+        
+        _G.debug = string.format("Гильдия: %s | Всего: %d | С ГП: %d | Топ-10: %d", 
+            guildName, total, #members, #expected)
+
+        if #expected == 0 then
+            return fail("В гильдии не найдено участников с валидным ГП в офицерских заметках. Проверь формат заметок.")
+        end
+
+        if #result ~= #expected then
+            return fail("Количество элементов не совпадает: ожидалось " .. #expected .. ", получено " .. #result)
+        end
+
+        for i = 1, #expected do
+            local r = result[i]
+            local e = expected[i]
+            if type(r) ~= "table" then
+                return fail("Элемент " .. i .. " должен быть таблицей")
+            end
+            if r.name ~= e.name then
+                return fail("Элемент " .. i .. ", name: ожидалось '" .. e.name .. "', получено '" .. tostring(r.name) .. "'")
+            end
+            if r.rank ~= e.rank then
+                return fail("Элемент " .. i .. ", rank: ожидалось '" .. e.rank .. "', получено '" .. tostring(r.rank) .. "'")
+            end
+            if r.gp ~= e.gp then
+                return fail("Элемент " .. i .. " (" .. e.name .. "), gp: ожидалось " .. e.gp .. ", получено " .. tostring(r.gp))
+            end
+        end
+
+        return true
+    end,
+}
+
 ns_llua['lua'][137] = {
 type = "info",
 title = "Координаты игрока",
