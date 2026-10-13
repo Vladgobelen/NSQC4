@@ -338,7 +338,6 @@ function GpDb:ClearLog()
 end
 
 function GpDb:_CreateWindow()
-    -- Создаем основной фрейм окна
     self.window = CreateFrame("Frame", "GpTrackerWindow", UIParent)
     self.window:SetFrameStrata("DIALOG")
     self.window:SetSize(400, 600)
@@ -350,14 +349,12 @@ function GpDb:_CreateWindow()
     self.window:SetScript("OnDragStop", self.window.StopMovingOrSizing)
     self.window:Hide()
 
-    -- 1. Непрозрачный чёрный фон
     self.window.background = self.window:CreateTexture(nil, "BACKGROUND")
     self.window.background:SetTexture("Interface\\Buttons\\WHITE8X8")
     self.window.background:SetVertexColor(0, 0, 0)
     self.window.background:SetAlpha(1)
     self.window.background:SetAllPoints(true)
 
-    -- 2. Граница окна
     self.window.borderFrame = CreateFrame("Frame", nil, self.window)
     self.window.borderFrame:SetPoint("TOPLEFT", -3, 3)
     self.window.borderFrame:SetPoint("BOTTOMRIGHT", 3, -3)
@@ -367,17 +364,14 @@ function GpDb:_CreateWindow()
         insets = {left = 4, right = 4, top = 4, bottom = 4}
     })
 
-    -- 3. Заголовок окна
     self.window.title = self.window:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     self.window.title:SetPoint("TOP", 0, -15)
     self.window.title:SetText("")
 
-    -- 4. Кнопка закрытия
     self.window.closeButton = CreateFrame("Button", nil, self.window, "UIPanelCloseButton")
     self.window.closeButton:SetPoint("TOPRIGHT", -5, -5)
     self.window.closeButton:SetScript("OnClick", function() self.window:Hide() end)
 
-    -- 4.1 Кнопка логов
     self.window.logButton = CreateFrame("Button", nil, self.window, "UIPanelButtonTemplate")
     self.window.logButton:SetSize(24, 24)
     self.window.logButton:SetPoint("RIGHT", self.window.closeButton, "LEFT", -5, 0)
@@ -386,7 +380,6 @@ function GpDb:_CreateWindow()
         self:ToggleLogWindow()
     end)
 
-    -- 5. Чекбокс "Только рейд"
     self.window.raidOnlyCheckbox = CreateFrame("CheckButton", nil, self.window, "UICheckButtonTemplate")
     self.window.raidOnlyCheckbox:SetPoint("TOPLEFT", 10, -15)
     self.window.raidOnlyCheckbox:SetSize(24, 24)
@@ -398,7 +391,6 @@ function GpDb:_CreateWindow()
         self:UpdateWindow()
     end)
 
-    -- 5.0.5 Чекбокс "Гильдия"
     self.window.guildCheckbox = CreateFrame("CheckButton", nil, self.window, "UICheckButtonTemplate")
     self.window.guildCheckbox:SetPoint("LEFT", self.window.raidOnlyCheckbox.text, "RIGHT", 10, 0)
     self.window.guildCheckbox:SetSize(24, 24)
@@ -410,7 +402,6 @@ function GpDb:_CreateWindow()
         self:UpdateWindow()
     end)
 
-    -- 5.0.6 Чекбокс "Off"
     self.window.offCheckbox = CreateFrame("CheckButton", nil, self.window, "UICheckButtonTemplate")
     self.window.offCheckbox:SetPoint("LEFT", self.window.guildCheckbox.text, "RIGHT", 10, 0)
     self.window.offCheckbox:SetSize(24, 24)
@@ -422,7 +413,6 @@ function GpDb:_CreateWindow()
         self:UpdateWindow()
     end)
 
-    -- 5.1 Чекбокс "Заметки"
     self.window.notesCheckbox = CreateFrame("CheckButton", nil, self.window, "UICheckButtonTemplate")
     self.window.notesCheckbox:SetPoint("TOPLEFT", self.window.raidOnlyCheckbox, "BOTTOMLEFT", 0, -10)
     self.window.notesCheckbox:SetSize(24, 24)
@@ -433,7 +423,18 @@ function GpDb:_CreateWindow()
         self.showOnlyNotes = self.window.notesCheckbox:GetChecked()
     end)
 
-    -- 5.2 Поле фильтрации по нику
+    -- Чекбокс ПВЕ-сезон
+    self.window.pveSeasonCheckbox = CreateFrame("CheckButton", nil, self.window, "UICheckButtonTemplate")
+    self.window.pveSeasonCheckbox:SetPoint("LEFT", self.window.notesCheckbox.text, "RIGHT", 10, 0)
+    self.window.pveSeasonCheckbox:SetSize(24, 24)
+    self.window.pveSeasonCheckbox.text = self.window.pveSeasonCheckbox:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    self.window.pveSeasonCheckbox.text:SetPoint("LEFT", self.window.pveSeasonCheckbox, "RIGHT", 5, 0)
+    self.window.pveSeasonCheckbox.text:SetText("ПВЕ-сезон")
+    self.window.pveSeasonCheckbox:SetScript("OnClick", function(self2)
+        NSQC4.SetPveSeason(self2:GetChecked() and true or false)
+    end)
+    self.window.pveSeasonCheckbox:SetChecked(nsDbc4.settings.gp.pveSeason == true)
+
     self.window.filterEditBox = CreateFrame("EditBox", "fdsfdsa3333", self.window, "InputBoxTemplate")
     self.window.filterEditBox:SetPoint("TOPLEFT", self.window.notesCheckbox.text, "BOTTOMLEFT", 0, -5)
     self.window.filterEditBox:SetPoint("RIGHT", self.window.closeButton, "LEFT", -40, 0)
@@ -452,7 +453,6 @@ function GpDb:_CreateWindow()
         self.window.filterEditBox:ClearFocus()
     end)
 
-    -- 5.3 Кнопка очистки фильтра
     self.window.filterClearButton = CreateFrame("Button", nil, self.window, "UIPanelButtonTemplate")
     self.window.filterClearButton:SetSize(80, 22)
     self.window.filterClearButton:SetPoint("TOPRIGHT", self.window.filterEditBox, "BOTTOMRIGHT", 60, 20)
@@ -463,7 +463,6 @@ function GpDb:_CreateWindow()
         self:_UpdateFromGuild()
     end)
 
-    -- 6. Область с прокруткой
     self.window.scrollFrame = CreateFrame("ScrollFrame", "ScrollFrame", self.window, "UIPanelScrollFrameTemplate")
     self.window.scrollFrame:SetPoint("TOPLEFT", 0, -85)
     self.window.scrollFrame:SetPoint("BOTTOMRIGHT", 0, 60)
@@ -471,26 +470,22 @@ function GpDb:_CreateWindow()
     self.window.scrollChild:SetSize(380, 500)
     self.window.scrollFrame:SetScrollChild(self.window.scrollChild)
 
-    -- 7. Ползунок прокрутки
     self.window.scrollBar = _G[self.window.scrollFrame:GetName().."ScrollBar"]
     self.window.scrollBar:SetPoint("TOPLEFT", self.window.scrollFrame, "TOPRIGHT", -20, -16)
     self.window.scrollBar:SetPoint("BOTTOMLEFT", self.window.scrollFrame, "BOTTOMRIGHT", -20, 16)
 
-    -- 8. Строка с количеством отображаемых игроков
     self.window.countText = self.window:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     self.window.countText:SetPoint("BOTTOMLEFT", 10, 40)
     self.window.countText:SetPoint("BOTTOMRIGHT", -10, 40)
     self.window.countText:SetJustifyH("LEFT")
     self.window.countText:SetText("")
 
-    -- 9. Строка с общим количеством игроков с ГП
     self.window.totalText = self.window:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     self.window.totalText:SetPoint("BOTTOMLEFT", 10, 20)
     self.window.totalText:SetPoint("BOTTOMRIGHT", -10, 20)
     self.window.totalText:SetJustifyH("LEFT")
     self.window.totalText:SetText("")
 
-    -- 10. Настройка таблицы
     self:_SetupTable()
 end
 
@@ -1480,21 +1475,18 @@ function GpDb:LoadFromNsDb()
 end
 
 function GpDb:_CreateRaidSelectionWindow()
-    -- Создаем основное окно
     self.raidWindow = CreateFrame("Frame", "GpDbRaidWindow", self.window)
     self.raidWindow:SetFrameStrata("DIALOG")
     self.raidWindow:SetSize(500, self.window:GetHeight() * 0.5)
     self.raidWindow:SetPoint("BOTTOMLEFT", self.window, "BOTTOMRIGHT", 5, 0)
     self.raidWindow:SetMovable(false)
-    
-    -- Фон окна
+
     self.raidWindow.background = self.raidWindow:CreateTexture(nil, "BACKGROUND")
     self.raidWindow.background:SetTexture("Interface\\Buttons\\WHITE8X8")
     self.raidWindow.background:SetVertexColor(0, 0, 0)
     self.raidWindow.background:SetAlpha(1)
     self.raidWindow.background:SetAllPoints(true)
-    
-    -- Граница окна
+
     self.raidWindow.borderFrame = CreateFrame("Frame", nil, self.raidWindow)
     self.raidWindow.borderFrame:SetPoint("TOPLEFT", -3, 3)
     self.raidWindow.borderFrame:SetPoint("BOTTOMRIGHT", 3, -3)
@@ -1503,20 +1495,18 @@ function GpDb:_CreateRaidSelectionWindow()
         edgeSize = 16,
         insets = {left = 4, right = 4, top = 4, bottom = 4}
     })
-    
-    -- Кнопка закрытия
+
     self.raidWindow.closeButton = CreateFrame("Button", nil, self.raidWindow, "UIPanelCloseButton")
     self.raidWindow.closeButton:SetPoint("TOPRIGHT", -5, -5)
     self.raidWindow.closeButton:SetScript("OnClick", function()
         self.raidWindow:Hide()
     end)
-    
-    -- Выпадающий список рейдов
+
     self.raidWindow.dropdown = CreateFrame("Frame", "GpDbRaidDropdown", self.raidWindow, "UIDropDownMenuTemplate")
     self.raidWindow.dropdown:SetPoint("TOPLEFT", 10, -10)
     self.raidWindow.dropdown:SetPoint("RIGHT", -260, 0)
     self.raidWindow.dropdown:SetHeight(32)
-    
+
     local function UpdateDropdownText()
         if self.raidWindow.selectedRaidId then
             for i = 1, GetNumSavedInstances() do
@@ -1530,7 +1520,7 @@ function GpDb:_CreateRaidSelectionWindow()
             UIDropDownMenu_SetText(self.raidWindow.dropdown, "Выберите рейд")
         end
     end
-    
+
     local function InitializeDropdown(frame, level, menuList)
         local info = UIDropDownMenu_CreateInfo()
         for i = 1, GetNumSavedInstances() do
@@ -1570,19 +1560,17 @@ function GpDb:_CreateRaidSelectionWindow()
         info.notCheckable = true
         UIDropDownMenu_AddButton(info)
     end
-    
+
     UIDropDownMenu_Initialize(self.raidWindow.dropdown, InitializeDropdown)
     UIDropDownMenu_SetWidth(self.raidWindow.dropdown, 200)
     UIDropDownMenu_SetButtonWidth(self.raidWindow.dropdown, 224)
     UIDropDownMenu_JustifyText(self.raidWindow.dropdown, "LEFT")
     UpdateDropdownText()
-    
-    -- Текст "Другое"
+
     self.raidWindow.otherText = self.raidWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     self.raidWindow.otherText:SetPoint("TOPLEFT", self.raidWindow.dropdown, "BOTTOMLEFT", 0, -10)
     self.raidWindow.otherText:SetText("Другое:")
-    
-    -- Поле ввода "Другое"
+
     self.raidWindow.editBox = CreateFrame("EditBox", "fdsfsda111111", self.raidWindow, "InputBoxTemplate")
     self.raidWindow.editBox:SetPoint("TOPLEFT", self.raidWindow.otherText, "BOTTOMLEFT", 0, -5)
     self.raidWindow.editBox:SetPoint("RIGHT", -260, 0)
@@ -1599,8 +1587,7 @@ function GpDb:_CreateRaidSelectionWindow()
             UpdateDropdownText()
         end
     end)
-    
-    -- Галочка "Сохранить выбор"
+
     self.raidWindow.saveCheckbox = CreateFrame("CheckButton", nil, self.raidWindow, "UICheckButtonTemplate")
     self.raidWindow.saveCheckbox:SetPoint("TOPLEFT", self.raidWindow.editBox, "BOTTOMLEFT", 0, -10)
     self.raidWindow.saveCheckbox:SetSize(24, 24)
@@ -1612,8 +1599,7 @@ function GpDb:_CreateRaidSelectionWindow()
     self.raidWindow.saveCheckbox:SetScript("OnClick", function()
         self.saveSelectionEnabled = self.raidWindow.saveCheckbox:GetChecked()
     end)
-    
-    -- Текст с выбранными игроками
+
     self.raidWindow.selectedPlayersText = self.raidWindow:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     self.raidWindow.selectedPlayersText:SetPoint("TOPLEFT", self.raidWindow.saveCheckbox, "BOTTOMLEFT", 0, -5)
     self.raidWindow.selectedPlayersText:SetPoint("RIGHT", -260, 0)
@@ -1621,8 +1607,7 @@ function GpDb:_CreateRaidSelectionWindow()
     self.raidWindow.selectedPlayersText:SetJustifyH("LEFT")
     self.raidWindow.selectedPlayersText:SetJustifyV("TOP")
     self.raidWindow.selectedPlayersText:SetWordWrap(true)
-    
-    -- Кнопки быстрого ввода ГП
+
     local quickGPValues = {5, 10, 20, 25, 50, 100}
     local lastQuickButton
     for i, value in ipairs(quickGPValues) do
@@ -1640,8 +1625,7 @@ function GpDb:_CreateRaidSelectionWindow()
         end)
         lastQuickButton = btn
     end
-    
-    -- Кнопка минуса
+
     local minusBtn = CreateFrame("Button", nil, self.raidWindow, "UIPanelButtonTemplate")
     minusBtn:SetSize(40, 22)
     minusBtn:SetText("-/+")
@@ -1652,8 +1636,7 @@ function GpDb:_CreateRaidSelectionWindow()
         self.raidWindow.gpEditBox:HighlightText()
     end)
     lastQuickButton = minusBtn
-    
-    -- Кнопка процента
+
     local percentBtn = CreateFrame("Button", nil, self.raidWindow, "UIPanelButtonTemplate")
     percentBtn:SetSize(27, 20)
     percentBtn:SetText("%")
@@ -1675,21 +1658,23 @@ function GpDb:_CreateRaidSelectionWindow()
         self.raidWindow.gpEditBox:SetText(tostring(newGp))
         self.raidWindow.gpEditBox:HighlightText()
     end)
-    
-    -- Поле ввода ГП
+
     self.raidWindow.gpEditBox = CreateFrame("EditBox", "fdjkjfkjkj33333", self.raidWindow, "InputBoxTemplate")
     self.raidWindow.gpEditBox:SetPoint("BOTTOMLEFT", 10, 5)
     self.raidWindow.gpEditBox:SetSize(100, 20)
     self.raidWindow.gpEditBox:SetAutoFocus(false)
     self.raidWindow.gpEditBox:SetScript("OnEscapePressed", function() self.raidWindow.gpEditBox:ClearFocus() end)
     self.raidWindow.gpEditBox:SetScript("OnEnterPressed", function() self.raidWindow.gpEditBox:ClearFocus() end)
-    
-    -- Кнопка "Начислить"
+
     self.raidWindow.awardButton = CreateFrame("Button", nil, self.raidWindow, "UIPanelButtonTemplate")
     self.raidWindow.awardButton:SetPoint("BOTTOMRIGHT", -10, 5)
     self.raidWindow.awardButton:SetSize(100, 22)
     self.raidWindow.awardButton:SetText("Начислить")
     self.raidWindow.awardButton:SetScript("OnClick", function()
+        if not NSQC4.CanAssignGp() then
+            return
+        end
+
         if not self:_CheckOfficerRank() then
             print("|cFFFF0000ГП:|r Только офицеры могут начислять ГП")
             self.raidWindow:Hide()
@@ -1719,7 +1704,7 @@ function GpDb:_CreateRaidSelectionWindow()
         else
             self.lastGPValue = gpValue
         end
-        
+
         local logStr
         if self.raidWindow.selectedRaidId then
             local cleanRaidName = (self.raidWindow.selectedRaidName or ""):gsub("%s+", "_")
@@ -1732,52 +1717,48 @@ function GpDb:_CreateRaidSelectionWindow()
             local cleanOtherText = (self.lastOtherText or ""):gsub("%s+", "_")
             logStr = string.format("%s %d", cleanOtherText, gpValue)
         end
-        
+
         local nonGuildNicks = {}
-        
+
         for index in pairs(self.selected_indices) do
             if self.gp_data[index] then
                 local entry = self.gp_data[index]
                 local nick = entry.original_nick
-                
+
                 if entry.isGuildMember then
                     SendAddonMessage("nsGP1 " .. gpValue, nick, "GUILD")
                 else
                     SendAddonMessage("nsGP1A", gpValue .. " " .. nick, "GUILD")
                     table.insert(nonGuildNicks, nick)
                 end
-                
+
                 local logIdentifier = entry.playerID or ("N:" .. nick)
                 logStr = logStr .. " " .. logIdentifier
-                
+
                 self:AddLogEntry(gpValue, date("%H:%M"), UnitName("player"),
                     self.raidWindow.selectedRaidName or self.raidWindow.editBox:GetText(), nick)
             end
         end
-        
+
         SendAddonMessage("nsGPlog", logStr, "GUILD")
-        
+
         for _, entry in ipairs(self:GetSelectedEntries()) do
             entry.gp = (entry.gp or 0) + gpValue
         end
         self:UpdateWindow()
         self.raidWindow:Hide()
-        
-        if #nonGuildNicks > 0 then
-        end
-        
+
         if #nonGuildNicks > 0 then
             local timerFrame = CreateFrame("Frame")
-            -- УБРАЛИ timerFrame:Hide() — фрейм остаётся видимым
             local elapsed = 0
             local initialDelay = 1.0
             local betweenDelay = 0.05
             local currentIndex = 1
             local phase = "waiting"
-            
+
             timerFrame:SetScript("OnUpdate", function(frame, dt)
                 elapsed = elapsed + dt
-                
+
                 if phase == "waiting" then
                     if elapsed >= initialDelay then
                         phase = "sending"
@@ -1798,10 +1779,9 @@ function GpDb:_CreateRaidSelectionWindow()
                     end
                 end
             end)
-        else
         end
     end)
-    
+
     self.raidWindow:SetScript("OnHide", function()
         if self.logWindow and self.logWindow:IsShown() then
             self.logWindow:SetHeight(self.window:GetHeight())
@@ -2470,6 +2450,15 @@ end
     -- ========================================================================
     if not gpDb then
         gpDb = GpDb:new({})
+    end
+    NSQC4._gpWindow = gpDb
+
+    function NSQC4.RefreshPveSeasonCheckbox()
+        if NSQC4._gpWindow and NSQC4._gpWindow.window
+           and NSQC4._gpWindow.window.pveSeasonCheckbox then
+            NSQC4._gpWindow.window.pveSeasonCheckbox:SetChecked(
+                nsDbc4.settings.gp.pveSeason == true)
+        end
     end
 
     print("|cff00ff00[NSQC4-TEST]|r GP.lua выполняется до конца. NSQC4_GP_TEST зарегистрирована.")

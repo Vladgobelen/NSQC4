@@ -50,6 +50,7 @@ GP\RaidTracker.lua
 GP\MinimapGP.lua
 GP\LogReceiver.lua
 GP\ExternalGP.lua
+GP\PveSeason.lua
 Course\Modules.lua
 Course\UI.lua
 Course\Logic.lua

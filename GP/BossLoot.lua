@@ -94,6 +94,10 @@ NSQC4.RegisterModule("gp", function()
     -- Начисление ГП рейду
     -- ========================================================================
     local function AssignGpToRaid(value)
+        if not NSQC4.CanAssignGp() then
+            return
+        end
+
         value = tonumber(value)
         if not value or value == 0 then return end
         if not IsInGuild() then
@@ -124,7 +128,6 @@ NSQC4.RegisterModule("gp", function()
         SendAddonMessage("nsGPlog", log, "GUILD")
         print("|cff00ff00[NSQC4]|r Начислено " .. value .. " ГП " .. count .. " игрокам рейда")
     end
-
     -- ========================================================================
     -- done / banned
     -- ========================================================================
