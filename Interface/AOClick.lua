@@ -17,9 +17,8 @@ NSQC4.RegisterModule("ui_ao", function()
     local PREFIX_Q = "nsInfoQ"
 
     local aoNames = {}
-    local lastNick = nil
 
-    -- Дабл-клик — состояние (по образцу MinimapIcon)
+    -- Дабл-клик — состояние
     local lastClickTime   = 0
     local lastClickButton = nil
     local lastClickName   = nil
@@ -36,7 +35,6 @@ NSQC4.RegisterModule("ui_ao", function()
             self:Hide()
             clickPending = false
 
-            -- ОДИНАРНЫЙ клик
             local button = lastClickButton
             local name = lastClickName
 
@@ -55,51 +53,32 @@ NSQC4.RegisterModule("ui_ao", function()
         end
     end)
 
-    local function ResetClickState()
-        lastClickTime   = 0
-        lastClickButton = nil
-        lastClickName   = nil
-        clickPending    = false
-        if ClickTimerFrame then
-            ClickTimerFrame.elapsed = 0
-            ClickTimerFrame:Hide()
-        end
-    end
-
-    -- ДЕЙСТВИЕ ДВОЙНОГО КЛИКА
-    local function HandleDoubleClick(button, linkType, name)
-        if button == "LeftButton" then
-            -- Двойной ЛКМ — открыть чат канала, по которому кликнули
-            if linkType == "channel" then
-                -- Открываем чат гильдии/офицера
-                if lastNick and aoNames[lastNick] then
-                    -- Просто открываем гильд-чат
-                    ChatFrame_OpenChat("/g ")
-                end
-            end
-        elseif button == "RightButton" then
-            -- (если нужно — что-то ещё)
-        end
-    end
-
+    -- Собираем две ссылки:
+    --   |Hchannel:GUILD|h[G]|h        → клик по [G] откроет /g
+    --   |Hplayer:Ашвин|h[Ашвин:8:0]|h → клик по нику — наша логика
+    -- Между ними — буква фракции без пробелов.
     local function BuildReplacement(letter, code, nick, meta)
         local cleanName = nick:gsub(":+$", "")
         local color = CLASS_COLORS[code] or DEFAULT_COLOR
         aoNames[cleanName] = true
-        lastNick = cleanName
 
         local nickDisplay = cleanName
         if meta and meta ~= "" then
             nickDisplay = cleanName .. meta
         end
 
-        return "[" .. letter .. "] |Hplayer:" .. cleanName .. "|h" ..
-            color .. "[" .. nickDisplay .. "]" .. NICK_COLOR_RESET .. "|h: "
+        local channelLink = "|Hchannel:GUILD|h[G]|h"
+        local nickLink = "|Hplayer:" .. cleanName .. "|h" ..
+            color .. "[" .. nickDisplay .. "]" .. NICK_COLOR_RESET .. "|h"
+
+        return channelLink .. letter .. nickLink .. ": "
     end
 
+    -- Поглощаем префикс ядра: "|Hplayer:ОТПР|h[ОТПР]|h: " вместе с "[О0:8:0] Ник:"
     local function ReplaceAll(msg)
+        -- 3 числа
         msg = msg:gsub(
-            "%[\208\144(%d):(%-?%d+):(%-?%d+)%] (%S+): ",
+            "|Hplayer:[^|]+|h%[[^%]]+%]|h: %[\208\144(%d):(%-?%d+):(%-?%d+)%] (%S+): ",
             function(code, level, rep, nick)
                 if tonumber(level) == 80 then
                     return BuildReplacement("А", code, nick, ":" .. rep)
@@ -108,7 +87,7 @@ NSQC4.RegisterModule("ui_ao", function()
                 end
             end)
         msg = msg:gsub(
-            "%[\208\158(%d):(%-?%d+):(%-?%d+)%] (%S+): ",
+            "|Hplayer:[^|]+|h%[[^%]]+%]|h: %[\208\158(%d):(%-?%d+):(%-?%d+)%] (%S+): ",
             function(code, level, rep, nick)
                 if tonumber(level) == 80 then
                     return BuildReplacement("О", code, nick, ":" .. rep)
@@ -117,32 +96,25 @@ NSQC4.RegisterModule("ui_ao", function()
                 end
             end)
 
+        -- 2 числа
         msg = msg:gsub(
-            "%[\208\144(%d):(%-?%d+)%] (%S+): ",
+            "|Hplayer:[^|]+|h%[[^%]]+%]|h: %[\208\144(%d):(%-?%d+)%] (%S+): ",
             function(code, rep, nick)
                 return BuildReplacement("А", code, nick, ":" .. rep)
             end)
         msg = msg:gsub(
-            "%[\208\158(%d):(%-?%d+)%] (%S+): ",
+            "|Hplayer:[^|]+|h%[[^%]]+%]|h: %[\208\158(%d):(%-?%d+)%] (%S+): ",
             function(code, rep, nick)
                 return BuildReplacement("О", code, nick, ":" .. rep)
             end)
 
+        -- 1 число
         msg = msg:gsub(
-            "%[\208\144(%d)%] (%S+): ",
+            "|Hplayer:[^|]+|h%[[^%]]+%]|h: %[\208\144(%d)%] (%S+): ",
             function(code, nick) return BuildReplacement("А", code, nick) end)
         msg = msg:gsub(
-            "%[\208\158(%d)%] (%S+): ",
+            "|Hplayer:[^|]+|h%[[^%]]+%]|h: %[\208\158(%d)%] (%S+): ",
             function(code, nick) return BuildReplacement("О", code, nick) end)
-
-        msg = msg:gsub("%[G%].-%[А%]", "[GА]")
-        msg = msg:gsub("%[G%].-%[О%]", "[GО]")
-        msg = msg:gsub("%[O%].-%[А%]", "[OА]")
-        msg = msg:gsub("%[O%].-%[О%]", "[OО]")
-        msg = msg:gsub("%[Гильдия%].-%[А%]", "[ГА]")
-        msg = msg:gsub("%[Гильдия%].-%[О%]", "[ГО]")
-        msg = msg:gsub("%[Офицер%].-%[А%]", "[ОА]")
-        msg = msg:gsub("%[Офицер%].-%[О%]", "[ОО]")
 
         return msg
     end
@@ -171,53 +143,53 @@ NSQC4.RegisterModule("ui_ao", function()
         HookChatFrame(_G["ChatFrame"..i])
     end
 
-    -- Перехват клика с дабл-кликом
+    -- Хук 1: [G] → /g.   Хук 2: [Ник:level:rep] → наша логика
     local oldOnHyperlinkShow = ChatFrame_OnHyperlinkShow
     ChatFrame_OnHyperlinkShow = function(self, link, text, button)
         local linkType, linkData = link:match("^(%a+):(.+)$")
 
-        local name = nil
-        if linkType == "player" and linkData then
-            name = linkData:match("^([^:]+)")
-        elseif linkType == "channel" then
-            if lastNick and aoNames[lastNick] then
-                name = lastNick
-            end
-        end
-
-        if not (name and aoNames[name]) then
-            return oldOnHyperlinkShow(self, link, text, button)
-        end
-
-        local now = GetTime()
-
-        if clickPending
-            and (now - lastClickTime < 0.3)
-            and (button == lastClickButton)
-            and (name == lastClickName)
-        then
-            -- ДВОЙНОЙ клик
-            clickPending = false
-            ClickTimerFrame.elapsed = 0
-            ClickTimerFrame:Hide()
-
+        if linkType == "channel" then
             if button == "LeftButton" then
-                -- Двойной ЛКМ — открыть чат канала
-                if linkType == "channel" then
-                    ChatFrame_OpenChat("/g ")
+                if linkData == "GUILD" then
+                    ChatFrame_OpenChat("/g ", self)
+                elseif linkData == "OFFICER" then
+                    ChatFrame_OpenChat("/o ", self)
+                else
+                    ChatFrame_OpenChat("/g ", self)
                 end
             end
             return
-        else
-            -- ПЕРВЫЙ клик — ждём таймер
-            clickPending    = true
-            lastClickTime   = now
-            lastClickButton = button
-            lastClickName   = name
-            ClickTimerFrame.elapsed = 0
-            ClickTimerFrame:Show()
-            return
         end
+
+        if linkType == "player" and linkData then
+            local name = linkData:match("^([^:]+)")
+            if not (name and aoNames[name]) then
+                return oldOnHyperlinkShow(self, link, text, button)
+            end
+
+            local now = GetTime()
+
+            if clickPending
+                and (now - lastClickTime < 0.3)
+                and (button == lastClickButton)
+                and (name == lastClickName)
+            then
+                clickPending = false
+                ClickTimerFrame.elapsed = 0
+                ClickTimerFrame:Hide()
+                return
+            else
+                clickPending    = true
+                lastClickTime   = now
+                lastClickButton = button
+                lastClickName   = name
+                ClickTimerFrame.elapsed = 0
+                ClickTimerFrame:Show()
+                return
+            end
+        end
+
+        return oldOnHyperlinkShow(self, link, text, button)
     end
 
 end)
