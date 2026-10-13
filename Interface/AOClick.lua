@@ -18,38 +18,54 @@ NSQC4.RegisterModule("ui_ao", function()
 
     local aoNames = {}
 
-    local function BuildReplacement(letter, code, nick)
+    local function BuildReplacement(letter, code, nick, meta)
         local cleanName = nick:gsub(":+$", "")
         local color = CLASS_COLORS[code] or DEFAULT_COLOR
         aoNames[cleanName] = true
+
+        local nickDisplay = cleanName
+        if meta and meta ~= "" then
+            nickDisplay = cleanName .. meta
+        end
+
         return "[" .. letter .. "] |Hplayer:" .. cleanName .. "|h" ..
-            color .. "[" .. cleanName .. "]" .. NICK_COLOR_RESET .. "|h: "
+            color .. "[" .. nickDisplay .. "]" .. NICK_COLOR_RESET .. "|h: "
     end
 
     local function ReplaceAll(msg)
-        -- НОВОЕ: [А2:70:1196] Ник: → [А] [Ник:70:1196]:
+        -- [А2:70:1196] Ник: (уровень + репутация)
         msg = msg:gsub(
             "%[\208\144(%d):(%-?%d+):(%-?%d+)%] (%S+): ",
             function(code, level, rep, nick)
-                local cleanName = nick:gsub(":+$", "")
-                local color = CLASS_COLORS[code] or DEFAULT_COLOR
-                aoNames[cleanName] = true
-                return "[" .. "А" .. "] |Hplayer:" .. cleanName .. "|h" ..
-                    color .. "[" .. cleanName .. ":" .. level .. ":" .. rep .. "]" ..
-                    NICK_COLOR_RESET .. "|h: "
+                if tonumber(level) == 80 then
+                    return BuildReplacement("А", code, nick, ":" .. rep)
+                else
+                    return BuildReplacement("А", code, nick, ":" .. level .. ":" .. rep)
+                end
             end)
         msg = msg:gsub(
             "%[\208\158(%d):(%-?%d+):(%-?%d+)%] (%S+): ",
             function(code, level, rep, nick)
-                local cleanName = nick:gsub(":+$", "")
-                local color = CLASS_COLORS[code] or DEFAULT_COLOR
-                aoNames[cleanName] = true
-                return "[" .. "О" .. "] |Hplayer:" .. cleanName .. "|h" ..
-                    color .. "[" .. cleanName .. ":" .. level .. ":" .. rep .. "]" ..
-                    NICK_COLOR_RESET .. "|h: "
+                if tonumber(level) == 80 then
+                    return BuildReplacement("О", code, nick, ":" .. rep)
+                else
+                    return BuildReplacement("О", code, nick, ":" .. level .. ":" .. rep)
+                end
             end)
 
-        -- СТАРОЕ: [А2] Ник: → [А] [Ник]: (fallback для старых сообщений)
+        -- [А2:1196] Ник: (только репутация, уровень 80)
+        msg = msg:gsub(
+            "%[\208\144(%d):(%-?%d+)%] (%S+): ",
+            function(code, rep, nick)
+                return BuildReplacement("А", code, nick, ":" .. rep)
+            end)
+        msg = msg:gsub(
+            "%[\208\158(%d):(%-?%d+)%] (%S+): ",
+            function(code, rep, nick)
+                return BuildReplacement("О", code, nick, ":" .. rep)
+            end)
+
+        -- Fallback: [А2] Ник:
         msg = msg:gsub(
             "%[\208\144(%d)%] (%S+): ",
             function(code, nick) return BuildReplacement("А", code, nick) end)
@@ -57,14 +73,19 @@ NSQC4.RegisterModule("ui_ao", function()
             "%[\208\158(%d)%] (%S+): ",
             function(code, nick) return BuildReplacement("О", code, nick) end)
 
-        -- ШАГ 2: слияние [G] ... [А] → [GА] (как сейчас)
+        -- Слияние [G] ... [А] → [GА]
         msg = msg:gsub("%[G%].-%[А%]", "[GА]")
-        -- ... остальные строки слияния без изменений ...
+        msg = msg:gsub("%[G%].-%[О%]", "[GО]")
+        msg = msg:gsub("%[O%].-%[А%]", "[OА]")
+        msg = msg:gsub("%[O%].-%[О%]", "[OО]")
+        msg = msg:gsub("%[Гильдия%].-%[А%]", "[ГА]")
+        msg = msg:gsub("%[Гильдия%].-%[О%]", "[ГО]")
+        msg = msg:gsub("%[Офицер%].-%[А%]", "[ОА]")
+        msg = msg:gsub("%[Офицер%].-%[О%]", "[ОО]")
 
         return msg
     end
 
-    -- Приём nsInfoA
     local f2 = CreateFrame("Frame")
     f2:RegisterEvent("CHAT_MSG_ADDON")
     f2:SetScript("OnEvent", function(_, _, prefix, text, channel, sender)
@@ -73,7 +94,6 @@ NSQC4.RegisterModule("ui_ao", function()
         DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff[nsInfo]|r " .. tostring(text))
     end)
 
-    -- Хук AddMessage
     local function HookChatFrame(chatFrame)
         if not chatFrame or chatFrame.hookedAO then return end
         chatFrame.hookedAO = true
@@ -90,7 +110,6 @@ NSQC4.RegisterModule("ui_ao", function()
         HookChatFrame(_G["ChatFrame"..i])
     end
 
-    -- Прямая правка FontString (для случая, когда AddMessage уже отработал)
     local function ProcessChatFrame(chatFrame)
         if not chatFrame or not chatFrame:IsShown() then return end
         local regions = { chatFrame:GetRegions() }
@@ -121,7 +140,6 @@ NSQC4.RegisterModule("ui_ao", function()
         end
     end)
 
-    -- Клики по кликабельным никам
     local oldOnHyperlinkShow = ChatFrame_OnHyperlinkShow
     ChatFrame_OnHyperlinkShow = function(self, link, text, button)
         local linkType, linkData = link:match("^(%a+):(.+)$")
