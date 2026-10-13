@@ -16347,224 +16347,392 @@ print(string.format("%.2f", 12.345)) -- 12.35
 }
 
 ns_llua['lua'][138] = {
-type = "vartest",
-title = "Тест 137-1: сырые координаты игрока",
-helpModules = {137, 65},
-tasks = {
-{
-var = "mapX",
-desc = 'Создай глобальную переменную mapX = (GetPlayerMapPosition("player")) or 0',
-check = function(value)
-return type(value) == "number" and value >= 0 and value <= 1
-end,
-},
-{
-var = "mapY",
-desc = 'Создай глобальную переменную mapY = select(2, GetPlayerMapPosition("player")) or 0',
-check = function(value)
-return type(value) == "number" and value >= 0 and value <= 1
-end,
-},
-},
-}
-
-ns_llua['lua'][139] = {
-type = "vartest",
-title = "Тест 137-2: координаты в процентах",
-helpModules = {137, 10, 14},
-tasks = {
-{
-var = "mapXPercent",
-desc = 'Создай глобальную переменную mapXPercent = math.floor(((GetPlayerMapPosition("player")) or 0) * 100)',
-check = function(value)
-return type(value) == "number" and value >= 0 and value <= 100
-end,
-},
-{
-var = "mapYPercent",
-desc = 'Создай глобальную переменную mapYPercent = math.floor((select(2, GetPlayerMapPosition("player")) or 0) * 100)',
-check = function(value)
-return type(value) == "number" and value >= 0 and value <= 100
-end,
-},
-},
-}
-
-ns_llua['lua'][140] = {
-type = "commenttest",
-title = "Тест 137-3: функция GetPlayerCoordinatesRaw",
-helpModules = {137, 45, 65},
-preloadVars = {
-{var = "GetPlayerCoordinatesRaw", desc = "GetPlayerCoordinatesRaw очищается перед проверкой"},
-{var = "checkError", desc = "checkError очищается перед проверкой"},
-},
-reportVars = {
-"checkError",
-},
-instruction = [=[
-<h>Тест 137-3: функция GetPlayerCoordinatesRaw</h>
+    type = "commenttest",
+    title = "Тест 137-1: функция GetPlayerCoordinatesRaw",
+    helpModules = {137, 45, 65},
+    preloadVars = {
+        {var = "GetPlayerCoordinatesRaw", desc = "GetPlayerCoordinatesRaw очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "debug", desc = "debug очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "debug"},
+    instruction = [=[
+<h>Тест 137-1: функция GetPlayerCoordinatesRaw</h>
 <t>Создай глобальную функцию <k>GetPlayerCoordinatesRaw()</k>.</t>
 <t>Функция должна вернуть два значения:</t>
 <c>1</c> — координату X игрока через <k>GetPlayerMapPosition("player")</k>.
 <c>2</c> — координату Y игрока через <k>GetPlayerMapPosition("player")</k>.
-<t>Если значение равно <k>nil</k>, используй <n>0</n>.</t>
-<t>Ничего выводить не нужно.</t>
 ]=],
-initialCode = [=[
--- Создай глобальную функцию GetPlayerCoordinatesRaw()
+    initialCode = [=[
+function GetPlayerCoordinatesRaw()
+    
+end
 ]=],
-requireKeywords = {
-"GetPlayerCoordinatesRaw",
-"function",
-"GetPlayerMapPosition",
-"return",
-},
-checkCode = function()
-_G.checkError = nil
-if type(_G.GetPlayerCoordinatesRaw) ~= "function" then
-_G.checkError = "GetPlayerCoordinatesRaw не является глобальной функцией"
-return false
-end
-local ok, x, y = pcall(_G.GetPlayerCoordinatesRaw)
-if not ok then
-_G.checkError = "Ошибка вызова GetPlayerCoordinatesRaw: " .. tostring(x)
-return false
-end
-if type(x) ~= "number" or type(y) ~= "number" then
-_G.checkError = "Функция должна вернуть два числа"
-return false
-end
-if x < 0 or x > 1 then
-_G.checkError = "Координата X должна быть от 0 до 1"
-return false
-end
-if y < 0 or y > 1 then
-_G.checkError = "Координата Y должна быть от 0 до 1"
-return false
-end
-return true
-end,
+    requireKeywords = {
+        "GetPlayerCoordinatesRaw",
+        "function",
+        "GetPlayerMapPosition",
+        "return",
+    },
+    checkCode = function()
+        _G.checkError = nil
+        _G.debug = nil
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(_G.GetPlayerCoordinatesRaw) ~= "function" then
+            return fail("GetPlayerCoordinatesRaw не является глобальной функцией")
+        end
+
+        local ok, x, y = pcall(_G.GetPlayerCoordinatesRaw)
+        if not ok then
+            return fail("Ошибка вызова GetPlayerCoordinatesRaw: " .. tostring(x))
+        end
+        if type(x) ~= "number" or type(y) ~= "number" then
+            return fail("Функция должна вернуть два числа")
+        end
+        if x < 0 or x > 1 then
+            return fail("Координата X должна быть от 0 до 1")
+        end
+        if y < 0 or y > 1 then
+            return fail("Координата Y должна быть от 0 до 1")
+        end
+        
+        _G.debug = string.format("X: %.4f, Y: %.4f", x, y)
+        return true
+    end,
 }
 
-ns_llua['lua'][141] = {
-type = "commenttest",
-title = "Тест 137-4: функция GetPlayerCoordinatesPercent",
-helpModules = {137, 45, 10, 14},
-preloadVars = {
-{var = "GetPlayerCoordinatesPercent", desc = "GetPlayerCoordinatesPercent очищается перед проверкой"},
-{var = "checkError", desc = "checkError очищается перед проверкой"},
-},
-reportVars = {
-"checkError",
-},
-instruction = [=[
-<h>Тест 137-4: функция GetPlayerCoordinatesPercent</h>
+ns_llua['lua'][139] = {
+    type = "commenttest",
+    title = "Тест 137-2: функция GetPlayerCoordinatesPercent",
+    helpModules = {137, 45, 10, 14},
+    preloadVars = {
+        {var = "GetPlayerCoordinatesPercent", desc = "GetPlayerCoordinatesPercent очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "debug", desc = "debug очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "debug"},
+    instruction = [=[
+<h>Тест 137-2: функция GetPlayerCoordinatesPercent</h>
 <t>Создай глобальную функцию <k>GetPlayerCoordinatesPercent()</k>.</t>
 <t>Функция должна вернуть два значения:</t>
 <c>1</c> — координату X игрока в процентах от 0 до 100.
 <c>2</c> — координату Y игрока в процентах от 0 до 100.
-<t>Используй:</t>
-<c>GetPlayerMapPosition("player")</c>
-<c>or 0</c>
-<c>math.floor</c>
-<t>Ничего выводить не нужно.</t>
 ]=],
-initialCode = [=[
--- Создай глобальную функцию GetPlayerCoordinatesPercent()
+    initialCode = [=[
+function GetPlayerCoordinatesPercent()
+    
+end
 ]=],
-requireKeywords = {
-"GetPlayerCoordinatesPercent",
-"function",
-"GetPlayerMapPosition",
-"math.floor",
-"return",
-},
-checkCode = function()
-_G.checkError = nil
-if type(_G.GetPlayerCoordinatesPercent) ~= "function" then
-_G.checkError = "GetPlayerCoordinatesPercent не является глобальной функцией"
-return false
-end
-local ok, xPercent, yPercent = pcall(_G.GetPlayerCoordinatesPercent)
-if not ok then
-_G.checkError = "Ошибка вызова GetPlayerCoordinatesPercent: " .. tostring(xPercent)
-return false
-end
-if type(xPercent) ~= "number" or type(yPercent) ~= "number" then
-_G.checkError = "Функция должна вернуть два числа"
-return false
-end
-if xPercent < 0 or xPercent > 100 then
-_G.checkError = "Координата X в процентах должна быть от 0 до 100"
-return false
-end
-if yPercent < 0 or yPercent > 100 then
-_G.checkError = "Координата Y в процентах должна быть от 0 до 100"
-return false
-end
-return true
-end,
+    requireKeywords = {
+        "GetPlayerCoordinatesPercent",
+        "function",
+        "GetPlayerMapPosition",
+        "return",
+    },
+    checkCode = function()
+        _G.checkError = nil
+        _G.debug = nil
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(_G.GetPlayerCoordinatesPercent) ~= "function" then
+            return fail("GetPlayerCoordinatesPercent не является глобальной функцией")
+        end
+
+        local ok, xPercent, yPercent = pcall(_G.GetPlayerCoordinatesPercent)
+        if not ok then
+            return fail("Ошибка вызова GetPlayerCoordinatesPercent: " .. tostring(xPercent))
+        end
+        if type(xPercent) ~= "number" or type(yPercent) ~= "number" then
+            return fail("Функция должна вернуть два числа")
+        end
+        if xPercent < 0 or xPercent > 100 then
+            return fail("Координата X в процентах должна быть от 0 до 100")
+        end
+        if yPercent < 0 or yPercent > 100 then
+            return fail("Координата Y в процентах должна быть от 0 до 100")
+        end
+        if xPercent ~= math.floor(xPercent) then
+            return fail("Координата X должна быть целым числом (math.floor)")
+        end
+        if yPercent ~= math.floor(yPercent) then
+            return fail("Координата Y должна быть целым числом (math.floor)")
+        end
+        
+        _G.debug = string.format("X: %d%%, Y: %d%%", xPercent, yPercent)
+        return true
+    end,
 }
 
-ns_llua['lua'][142] = {
-type = "commenttest",
-title = "Тест 137-5: функция GetCoordinateText",
-helpModules = {137, 45, 14, 7},
-preloadVars = {
-{var = "GetCoordinateText", desc = "GetCoordinateText очищается перед проверкой"},
-{var = "checkError", desc = "checkError очищается перед проверкой"},
-},
-reportVars = {
-"checkError",
-},
-instruction = [=[
-<h>Тест 137-5: функция GetCoordinateText</h>
+ns_llua['lua'][140] = {
+    type = "commenttest",
+    title = "Тест 137-3: функция GetCoordinateText",
+    helpModules = {137, 45, 14, 7},
+    preloadVars = {
+        {var = "GetCoordinateText", desc = "GetCoordinateText очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "result", desc = "result очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "result"},
+    instruction = [=[
+<h>Тест 137-3: функция GetCoordinateText</h>
 <t>Создай глобальную функцию <k>GetCoordinateText()</k>.</t>
 <t>Функция должна вернуть строку с координатами игрока в процентах.</t>
 <t>Формат строки:</t>
 <s>"X: 12.3, Y: 45.6"</s>
-<t>Используй:</t>
-<c>GetPlayerMapPosition("player")</c>
-<c>or 0</c>
-<c>string.format</c>
-<c>%.1f</c>
-<t>Ничего выводить не нужно.</t>
 ]=],
-initialCode = [=[
--- Создай глобальную функцию GetCoordinateText()
+    initialCode = [=[
+function GetCoordinateText()
+    
+end
 ]=],
-requireKeywords = {
-"GetCoordinateText",
-"function",
-"GetPlayerMapPosition",
-"string.format",
-"return",
-},
-checkCode = function()
-_G.checkError = nil
-if type(_G.GetCoordinateText) ~= "function" then
-_G.checkError = "GetCoordinateText не является глобальной функцией"
-return false
+    requireKeywords = {
+        "GetCoordinateText",
+        "function",
+        "GetPlayerMapPosition",
+        "return",
+    },
+    checkCode = function()
+        _G.checkError = nil
+        _G.result = nil
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(_G.GetCoordinateText) ~= "function" then
+            return fail("GetCoordinateText не является глобальной функцией")
+        end
+
+        local ok, text = pcall(_G.GetCoordinateText)
+        if not ok then
+            return fail("Ошибка вызова GetCoordinateText: " .. tostring(text))
+        end
+        if type(text) ~= "string" or text == "" then
+            return fail("Функция должна вернуть строку")
+        end
+        
+        _G.result = text
+        
+        -- Вычисляем ожидаемое значение тем же алгоритмом
+        local x, y = GetPlayerMapPosition("player")
+        x = (x or 0) * 100
+        y = (y or 0) * 100
+        local expected = string.format("X: %.1f, Y: %.1f", x, y)
+
+        if text ~= expected then
+            return fail("Строка не совпадает. Ожидалось: '" .. expected .. "', получено: '" .. text .. "'")
+        end
+
+        return true
+    end,
+}
+
+ns_llua['lua'][141] = {
+    type = "commenttest",
+    title = "Тест 137-4: функция DistanceToPoint",
+    helpModules = {137, 45, 10},
+    preloadVars = {
+        {var = "DistanceToPoint", desc = "DistanceToPoint очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "debug", desc = "debug очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "debug"},
+    instruction = [=[
+<h>Тест 137-4: функция DistanceToPoint</h>
+<t>Создай глобальную функцию <k>DistanceToPoint(targetX, targetY)</k>.</t>
+<t>Аргументы — координаты целевой точки в долях от 0 до 1.</t>
+<t>Функция должна получить текущие координаты игрока и вычислить расстояние до целевой точки по теореме Пифагора:</t>
+<code>math.sqrt((targetX - playerX)^2 + (targetY - playerY)^2)</code>
+<t>Вернуть число — расстояние в долях карты.</t>
+]=],
+    initialCode = [=[
+function DistanceToPoint(targetX, targetY)
+    
 end
-local ok, text = pcall(_G.GetCoordinateText)
-if not ok then
-_G.checkError = "Ошибка вызова GetCoordinateText: " .. tostring(text)
-return false
+]=],
+    requireKeywords = {
+        "DistanceToPoint",
+        "function",
+        "GetPlayerMapPosition",
+        "return",
+    },
+    checkCode = function()
+        _G.checkError = nil
+        _G.debug = nil
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(_G.DistanceToPoint) ~= "function" then
+            return fail("DistanceToPoint не является глобальной функцией")
+        end
+
+        local playerX, playerY = GetPlayerMapPosition("player")
+        if not playerX or not playerY then
+            return fail("Координаты игрока недоступны. Выйди на открытую местность.")
+        end
+        
+        _G.debug = string.format("Игрок: (%.4f, %.4f)", playerX, playerY)
+
+        -- Три тестовые точки
+        local tests = {
+            {name = "Та же точка (расстояние 0)", x = playerX, y = playerY},
+            {name = "Северо-восточный угол", x = 1, y = 0},
+            {name = "Случайная точка", x = 0.37, y = 0.82},
+        }
+
+        for i, test in ipairs(tests) do
+            local ok, result = pcall(_G.DistanceToPoint, test.x, test.y)
+
+            if not ok then
+                return fail("Тест " .. i .. " (" .. test.name .. "): ошибка вызова: " .. tostring(result))
+            end
+            if type(result) ~= "number" then
+                return fail("Тест " .. i .. ": функция должна вернуть число")
+            end
+
+            local dx = test.x - playerX
+            local dy = test.y - playerY
+            local expected = math.sqrt(dx * dx + dy * dy)
+
+            local diff = math.abs(result - expected)
+            _G.debug = _G.debug .. string.format("\nТест %d: цель (%.2f, %.2f) | Получено: %.6f | Ожидалось: %.6f",
+                i, test.x, test.y, result, expected)
+
+            if diff > 0.0001 then
+                return fail("Тест " .. i .. " (" .. test.name .. ") не пройден: разница " .. diff)
+            end
+        end
+
+        return true
+    end,
+}
+
+ns_llua['lua'][142] = {
+    type = "commenttest",
+    title = "Тест 137-5: функция IsPlayerInArea",
+    helpModules = {137, 45, 31, 29},
+    preloadVars = {
+        {var = "IsPlayerInArea", desc = "IsPlayerInArea очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "resultText", desc = "resultText очищается перед проверкой"},
+        {var = "debug", desc = "debug очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "resultText", "debug"},
+    instruction = [=[
+<h>Тест 137-5: функция IsPlayerInArea</h>
+<t>Создай глобальную функцию <k>IsPlayerInArea(minX, minY, maxX, maxY)</k>.</t>
+<t>Аргументы — границы прямоугольной области в долях от 0 до 1.</t>
+<t>Функция должна проверить, находится ли игрок внутри этой области, и вернуть <k>true</k> или <k>false</k>.</t>
+<t>Границы области включаются в проверку (игрок на границе — считается внутри).</t>
+<w>Во время проверки система прогонит функцию через 5 разных прямоугольников.</w>
+]=],
+    initialCode = [=[
+function IsPlayerInArea(minX, minY, maxX, maxY)
+    
 end
-if type(text) ~= "string" or text == "" then
-_G.checkError = "Функция должна вернуть строку"
-return false
-end
-if not text:find("X: ", 1, true) then
-_G.checkError = "Строка должна начинаться с 'X: '"
-return false
-end
-if not text:find(", Y: ", 1, true) then
-_G.checkError = "Строка должна содержать ', Y: '"
-return false
-end
-return true
-end,
+]=],
+    requireKeywords = {
+        "IsPlayerInArea",
+        "function",
+        "GetPlayerMapPosition",
+        "return",
+    },
+    checkCode = function()
+        _G.checkError = nil
+        _G.resultText = nil
+        _G.debug = nil
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(_G.IsPlayerInArea) ~= "function" then
+            return fail("IsPlayerInArea не является глобальной функцией")
+        end
+
+        local x, y = GetPlayerMapPosition("player")
+        if not x or not y then
+            return fail("Не удалось получить координаты игрока. Выйди на открытую местность.")
+        end
+        
+        _G.debug = string.format("Игрок: (%.4f, %.4f)", x, y)
+
+        -- 5 разных прямоугольников для проверки
+        local tests = {
+            {
+                name = "Вся карта",
+                minX = 0, minY = 0, maxX = 1, maxY = 1,
+                expected = true,
+            },
+            {
+                name = "За пределами карты",
+                minX = 2, minY = 2, maxX = 3, maxY = 3,
+                expected = false,
+            },
+            {
+                name = "Область вокруг игрока",
+                minX = math.max(0, x - 0.01),
+                minY = math.max(0, y - 0.01),
+                maxX = math.min(1, x + 0.01),
+                maxY = math.min(1, y + 0.01),
+                expected = true,
+            },
+            {
+                name = "Отрицательные координаты (заведомо мимо)",
+                minX = -1, minY = -1, maxX = -0.5, maxY = -0.5,
+                expected = false,
+            },
+            {
+                name = "Левая половина карты",
+                minX = 0, minY = 0, maxX = 0.5, maxY = 1,
+                expected = x <= 0.5,
+            },
+        }
+
+        local lines = {}
+        local passed = 0
+
+        for i, test in ipairs(tests) do
+            local ok, result = pcall(_G.IsPlayerInArea, test.minX, test.minY, test.maxX, test.maxY)
+
+            if not ok then
+                return fail("Тест " .. i .. " (" .. test.name .. "): ошибка вызова: " .. tostring(result))
+            end
+            if type(result) ~= "boolean" then
+                return fail("Тест " .. i .. " (" .. test.name .. "): функция должна вернуть boolean, получено " .. type(result))
+            end
+
+            local status = (result == test.expected) and "+" or "-"
+            lines[#lines + 1] = string.format("%d. %s %s | (%.2f, %.2f)-(%.2f, %.2f) - %s (ожидалось %s)",
+                i, status, test.name,
+                test.minX, test.minY, test.maxX, test.maxY,
+                tostring(result), tostring(test.expected))
+
+            if result == test.expected then
+                passed = passed + 1
+            else
+                _G.resultText = table.concat(lines, "\n")
+                return fail("Тест " .. i .. " (" .. test.name .. ") не пройден: получено " .. tostring(result) .. ", ожидалось " .. tostring(test.expected))
+            end
+        end
+
+        _G.resultText = table.concat(lines, "\n") .. string.format("\n\nПройдено: %d из %d", passed, #tests)
+        return true
+    end,
 }
 
 ns_llua['lua'][143] = {
