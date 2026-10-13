@@ -17,11 +17,76 @@ NSQC4.RegisterModule("ui_ao", function()
     local PREFIX_Q = "nsInfoQ"
 
     local aoNames = {}
+    local lastNick = nil
+
+    -- Дабл-клик — состояние (по образцу MinimapIcon)
+    local lastClickTime   = 0
+    local lastClickButton = nil
+    local lastClickName   = nil
+    local clickPending    = false
+
+    local ClickTimerFrame = CreateFrame("Frame")
+    ClickTimerFrame:Hide()
+    ClickTimerFrame.elapsed = 0
+    ClickTimerFrame:SetScript("OnUpdate", function(self, elapsed)
+        if not clickPending then return end
+        self.elapsed = self.elapsed + elapsed
+        if self.elapsed >= 0.3 then
+            self.elapsed = 0
+            self:Hide()
+            clickPending = false
+
+            -- ОДИНАРНЫЙ клик
+            local button = lastClickButton
+            local name = lastClickName
+
+            if not (name and aoNames[name]) then return end
+
+            if button == "RightButton" then
+                SendAddonMessage(PREFIX_Q, name, "GUILD")
+            elseif button == "LeftButton" then
+                local editBox = ChatFrame1EditBox
+                if editBox then
+                    if not editBox:IsShown() then editBox:Show() end
+                    editBox:Insert(name .. ", ")
+                    editBox:SetFocus()
+                end
+            end
+        end
+    end)
+
+    local function ResetClickState()
+        lastClickTime   = 0
+        lastClickButton = nil
+        lastClickName   = nil
+        clickPending    = false
+        if ClickTimerFrame then
+            ClickTimerFrame.elapsed = 0
+            ClickTimerFrame:Hide()
+        end
+    end
+
+    -- ДЕЙСТВИЕ ДВОЙНОГО КЛИКА
+    local function HandleDoubleClick(button, linkType, name)
+        if button == "LeftButton" then
+            -- Двойной ЛКМ — открыть чат канала, по которому кликнули
+            if linkType == "channel" then
+                -- Открываем чат гильдии/офицера
+                if lastNick and aoNames[lastNick] then
+                    -- Просто открываем гильд-чат
+                    ChatFrame_OpenChat("/g ")
+                end
+            end
+        elseif button == "RightButton" then
+            -- (если нужно — что-то ещё)
+        end
+    end
 
     local function BuildReplacement(letter, code, nick, meta)
         local cleanName = nick:gsub(":+$", "")
         local color = CLASS_COLORS[code] or DEFAULT_COLOR
         aoNames[cleanName] = true
+        lastNick = cleanName
 
         local nickDisplay = cleanName
         if meta and meta ~= "" then
@@ -33,7 +98,6 @@ NSQC4.RegisterModule("ui_ao", function()
     end
 
     local function ReplaceAll(msg)
-        -- [А2:70:1196] Ник: (уровень + репутация)
         msg = msg:gsub(
             "%[\208\144(%d):(%-?%d+):(%-?%d+)%] (%S+): ",
             function(code, level, rep, nick)
@@ -53,7 +117,6 @@ NSQC4.RegisterModule("ui_ao", function()
                 end
             end)
 
-        -- [А2:1196] Ник: (только репутация, уровень 80)
         msg = msg:gsub(
             "%[\208\144(%d):(%-?%d+)%] (%S+): ",
             function(code, rep, nick)
@@ -65,7 +128,6 @@ NSQC4.RegisterModule("ui_ao", function()
                 return BuildReplacement("О", code, nick, ":" .. rep)
             end)
 
-        -- Fallback: [А2] Ник:
         msg = msg:gsub(
             "%[\208\144(%d)%] (%S+): ",
             function(code, nick) return BuildReplacement("А", code, nick) end)
@@ -73,7 +135,6 @@ NSQC4.RegisterModule("ui_ao", function()
             "%[\208\158(%d)%] (%S+): ",
             function(code, nick) return BuildReplacement("О", code, nick) end)
 
-        -- Слияние [G] ... [А] → [GА]
         msg = msg:gsub("%[G%].-%[А%]", "[GА]")
         msg = msg:gsub("%[G%].-%[О%]", "[GО]")
         msg = msg:gsub("%[O%].-%[А%]", "[OА]")
@@ -110,57 +171,53 @@ NSQC4.RegisterModule("ui_ao", function()
         HookChatFrame(_G["ChatFrame"..i])
     end
 
-    local function ProcessChatFrame(chatFrame)
-        if not chatFrame or not chatFrame:IsShown() then return end
-        local regions = { chatFrame:GetRegions() }
-        for _, region in ipairs(regions) do
-            if region.GetText and region:GetObjectType() == "FontString" then
-                local text = region:GetText()
-                if text and text ~= "" then
-                    if text:find("%[G%]") or text:find("%[O%]")
-                       or text:find("Гильдия") or text:find("Офицер")
-                       or text:find("\208\144%d") or text:find("\208\158%d") then
-                        local newText = ReplaceAll(text)
-                        if newText ~= text then
-                            region:SetText(newText)
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    local autoRefresh = CreateFrame("Frame")
-    autoRefresh:SetScript("OnUpdate", function(self, elapsed)
-        self.timer = (self.timer or 0) + elapsed
-        if self.timer < 0.5 then return end
-        self.timer = 0
-        for i = 1, NUM_CHAT_WINDOWS do
-            ProcessChatFrame(_G["ChatFrame" .. i])
-        end
-    end)
-
+    -- Перехват клика с дабл-кликом
     local oldOnHyperlinkShow = ChatFrame_OnHyperlinkShow
     ChatFrame_OnHyperlinkShow = function(self, link, text, button)
         local linkType, linkData = link:match("^(%a+):(.+)$")
+
+        local name = nil
         if linkType == "player" and linkData then
-            local name = linkData:match("^([^:]+)")
-            if name and aoNames[name] then
-                if button == "RightButton" then
-                    SendAddonMessage(PREFIX_Q, name, "GUILD")
-                    return
-                elseif button == "LeftButton" then
-                    local editBox = self.editBox or ChatFrame1EditBox
-                    if editBox then
-                        if not editBox:IsShown() then editBox:Show() end
-                        editBox:Insert(name .. ", ")
-                        editBox:SetFocus()
-                    end
-                    return
-                end
+            name = linkData:match("^([^:]+)")
+        elseif linkType == "channel" then
+            if lastNick and aoNames[lastNick] then
+                name = lastNick
             end
         end
-        return oldOnHyperlinkShow(self, link, text, button)
+
+        if not (name and aoNames[name]) then
+            return oldOnHyperlinkShow(self, link, text, button)
+        end
+
+        local now = GetTime()
+
+        if clickPending
+            and (now - lastClickTime < 0.3)
+            and (button == lastClickButton)
+            and (name == lastClickName)
+        then
+            -- ДВОЙНОЙ клик
+            clickPending = false
+            ClickTimerFrame.elapsed = 0
+            ClickTimerFrame:Hide()
+
+            if button == "LeftButton" then
+                -- Двойной ЛКМ — открыть чат канала
+                if linkType == "channel" then
+                    ChatFrame_OpenChat("/g ")
+                end
+            end
+            return
+        else
+            -- ПЕРВЫЙ клик — ждём таймер
+            clickPending    = true
+            lastClickTime   = now
+            lastClickButton = button
+            lastClickName   = name
+            ClickTimerFrame.elapsed = 0
+            ClickTimerFrame:Show()
+            return
+        end
     end
 
 end)
