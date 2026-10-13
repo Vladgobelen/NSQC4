@@ -1,6 +1,7 @@
 -- ============================================================================
 -- NSQC4 / Interface / ChatButtons
--- Кнопки у чат-фреймов: Общение, Вниз, Настройки. Модуль "ui_chat".
+-- Кнопки у чат-фреймов: Общение, Вниз, Настройки, Копировать чат.
+-- Модуль "ui_chat".
 -- ============================================================================
 
 NSQC4.RegisterModule("ui_chat", function()
@@ -28,6 +29,174 @@ NSQC4.RegisterModule("ui_chat", function()
             end
         end
         return ChatFrame1
+    end
+
+    -- ========================================================================
+    -- Получить весь текст чат-фрейма
+    -- ========================================================================
+    local function GetChatFrameText(frame)
+        if not frame or not frame.GetNumMessages then return "" end
+        local num = frame:GetNumMessages()
+        if not num or num == 0 then return "" end
+
+        local lines = {}
+        for i = 1, num do
+            local msg = frame:GetMessageInfo(i)
+            if msg then
+                msg = msg:gsub("|c%x%x%x%x%x%x%x%x", "")
+                msg = msg:gsub("|r", "")
+                msg = msg:gsub("|H.-|h", "")
+                msg = msg:gsub("|h", "")
+                table.insert(lines, msg)
+            end
+        end
+        return table.concat(lines, "\n")
+    end
+
+    -- ========================================================================
+    -- Окно копирования чата
+    -- ========================================================================
+    local CopyWindow = nil
+
+    local function UpdateCopyWindowHeight(win)
+        local edit = win.editBox
+        local scroll = win.scrollFrame
+
+        local text = edit:GetText() or ""
+
+        -- Считаем сколько визуальных строк займёт текст с учётом переносов
+        local font, fontSize, fontFlags = edit:GetFont()
+        local lineHeight = fontSize and (fontSize + 4) or 16
+
+        -- Разбиваем на строки по \n и считаем переносы по ширине
+        local width = edit:GetWidth() or 540
+        local totalLines = 0
+        for line in (text .. "\n"):gmatch("([^\n]*)\n") do
+            local _, wrapped = edit:GetFont()
+            -- Оценка ширины строки
+            local lineWidth = 0
+            if edit.GetStringWidth then
+                lineWidth = edit:GetStringWidth(line) or 0
+            end
+            local wraps = math.max(1, math.ceil(lineWidth / width))
+            totalLines = totalLines + wraps
+        end
+
+        if totalLines < 1 then totalLines = 1 end
+        edit:SetHeight(totalLines * lineHeight + 10)
+
+        if scroll.UpdateScrollChildRect then
+            scroll:UpdateScrollChildRect()
+        end
+    end
+
+    local function EnsureCopyWindow()
+        if CopyWindow then return CopyWindow end
+
+        local f = CreateFrame("Frame", "NSQC4_CopyWindow", UIParent)
+        f:SetSize(600, 400)
+        f:SetPoint("CENTER")
+        f:SetBackdrop({
+            bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true, tileSize = 16, edgeSize = 16,
+            insets = { left = 4, right = 4, top = 4, bottom = 4 }
+        })
+        f:SetBackdropColor(0, 0, 0, 0.9)
+        f:SetMovable(true)
+        f:EnableMouse(true)
+        f:SetClampedToScreen(true)
+        f:RegisterForDrag("LeftButton")
+        f:SetScript("OnDragStart", f.StartMoving)
+        f:SetScript("OnDragStop", f.StopMovingOrSizing)
+        f:Hide()
+        f:SetFrameStrata("DIALOG")
+
+        local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        title:SetPoint("TOP", f, "TOP", 0, -12)
+        title:SetText("Копирование чата (Ctrl+A, Ctrl+C)")
+
+        local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+        closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -2)
+
+        -- === Скроллбар справа ===
+        local slider = CreateFrame("Slider", "NSQC4_CopySlider", f, "UIPanelScrollBarTemplate")
+        slider:SetPoint("TOPLEFT", f, "TOPRIGHT", -22, -40)
+        slider:SetPoint("BOTTOMLEFT", f, "BOTTOMRIGHT", -22, 45)
+        slider:SetWidth(16)
+        slider:SetValueStep(1)
+        slider:SetValue(0)
+        slider:SetScript("OnValueChanged", function(_, value)
+            if f.scrollFrame then
+                f.scrollFrame:SetVerticalScroll(value)
+            end
+        end)
+
+        -- === ScrollFrame ===
+        local scroll = CreateFrame("ScrollFrame", "NSQC4_CopyScroll", f, "UIPanelScrollFrameTemplate")
+        scroll:SetPoint("TOPLEFT", f, "TOPLEFT", 15, -35)
+        scroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -35, 45)
+        scroll:EnableMouseWheel(true)
+        scroll:SetScript("OnMouseWheel", function(self, delta)
+            local cur = self:GetVerticalScroll() or 0
+            local maxScroll = self:GetVerticalScrollRange() or 0
+            local step = 40
+            local new = cur - delta * step
+            if new < 0 then new = 0 end
+            if new > maxScroll then new = maxScroll end
+            self:SetVerticalScroll(new)
+            slider:SetValue(new)
+        end)
+        scroll:SetScript("OnVerticalScroll", function(self, offset)
+            slider:SetValue(offset)
+        end)
+
+        -- === EditBox внутри ScrollFrame ===
+        local edit = CreateFrame("EditBox", nil, scroll)
+        edit:SetMultiLine(true)
+        edit:SetAutoFocus(false)
+        edit:SetFontObject(ChatFontNormal)
+        edit:SetWidth(540)
+        edit:SetHeight(200)
+        edit:SetScript("OnEscapePressed", function() f:Hide() end)
+        edit:SetScript("OnTextChanged", function()
+            UpdateCopyWindowHeight(f)
+        end)
+        scroll:SetScrollChild(edit)
+
+        f.editBox = edit
+        f.scrollFrame = scroll
+        f.slider = slider
+
+        local hint = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        hint:SetPoint("BOTTOM", f, "BOTTOM", 0, 22)
+        hint:SetText("Ctrl+A — выделить всё, Ctrl+C — скопировать. ESC — закрыть.")
+        hint:SetTextColor(0.8, 0.8, 0.8)
+
+        local selectBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+        selectBtn:SetSize(160, 24)
+        selectBtn:SetPoint("BOTTOM", f, "BOTTOM", 0, 45)
+        selectBtn:SetText("Выделить всё")
+        selectBtn:SetScript("OnClick", function()
+            edit:SetFocus()
+            edit:HighlightText()
+        end)
+
+        return f
+    end
+
+    local function CopyChatToWindow(frame)
+        local text = GetChatFrameText(frame)
+        local win = EnsureCopyWindow()
+        win.editBox:SetText(text)
+        win:Show()
+        win.editBox:SetFocus()
+        win.editBox:HighlightText()
+
+        -- Обновить высоту и сбросить скролл
+        UpdateCopyWindowHeight(win)
+        win.scrollFrame:SetVerticalScroll(0)
+        win.slider:SetValue(0)
     end
 
     -- ========================================================================
@@ -112,6 +281,28 @@ NSQC4.RegisterModule("ui_chat", function()
             end
         end)
         downBtn:Hide()
+
+        -- === Кнопка «Копировать чат» ===
+        local copyBtn = CreateFrame("Button", nil, frame)
+        copyBtn:SetSize(20, 20)
+        copyBtn:SetPoint("TOPLEFT", frame, "TOPLEFT", -2, -46)
+        copyBtn:SetNormalTexture("Interface\\Buttons\\UI-GuildButton-PublicNote-Up")
+        copyBtn:SetPushedTexture("Interface\\Buttons\\UI-GuildButton-PublicNote-Down")
+        copyBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight")
+        copyBtn:SetScript("OnClick", function(_, mouseButton)
+            if mouseButton == "LeftButton" then
+                CopyChatToWindow(GetCurrentChatFrame())
+            end
+        end)
+        copyBtn:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText("Копировать чат", 1, 1, 1)
+            GameTooltip:AddLine("Открывает окно с текстом текущего чата.", 0.9, 0.9, 0.9)
+            GameTooltip:AddLine("Ctrl+A — выделить, Ctrl+C — скопировать.", 0.9, 0.9, 0.9)
+            GameTooltip:Show()
+        end)
+        copyBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        copyBtn:Hide()
 
         -- === Кнопка «Настройки» ===
         local settingsBtn = CreateFrame("Button", nil, frame)
@@ -210,10 +401,12 @@ NSQC4.RegisterModule("ui_chat", function()
             if buttonsVisible then
                 button:Show()
                 downBtn:Show()
+                copyBtn:Show()
                 settingsBtn:Show()
             else
                 button:Hide()
                 downBtn:Hide()
+                copyBtn:Hide()
                 settingsBtn:Hide()
             end
         end
@@ -363,6 +556,7 @@ NSQC4.RegisterModule("ui_chat", function()
         frame.socialButton = socialBtn
         frame.menuButton = button
         frame.scrollButton = downBtn
+        frame.copyButton = copyBtn
         frame.settingsButton = settingsBtn
         frame.settingsPanel = settingsPanel
     end
