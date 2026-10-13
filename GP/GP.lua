@@ -999,10 +999,6 @@ function GpDb:Hide()
 end
 
 function GpDb:_UpdateFromGuild()
-    -- Временная отладка.
-    -- Поставь false, когда найдём причину.
-    local DEBUG_GP = false
-
     self.gp_data = {}
     local totalWithGP = 0
 
@@ -1016,265 +1012,135 @@ function GpDb:_UpdateFromGuild()
         return
     end
 
-    GuildRoster()
-
     local db = self
+    if not db.external_gp_cache then db.external_gp_cache = {} end
 
-    if not db.external_gp_cache then
-        db.external_gp_cache = {}
+    local guildRosterInfo = {}
+    for j = 1, GetNumGuildMembers(true) do
+        local name, _, _, _, class5, _, publicNote, officerNote, online, _, class11 = GetGuildRosterInfo(j)
+        if name then
+            local plainName = name:match("^(.-)-") or name
+            local classFileName = class11 or class5
+            local words = {}
+            if officerNote then
+                for word in officerNote:gmatch("%S+") do table.insert(words, word) end
+            end
+            guildRosterInfo[plainName] = {
+                fullName = name,
+                publicNote = publicNote,
+                officerNote = officerNote,
+                classFileName = classFileName,
+                playerID = words[2],
+                gp = tonumber(words[3]) or 0,
+                online = online
+            }
+        end
     end
 
-    local timerFrame = CreateFrame("Frame")
-
-    timerFrame:SetScript("OnUpdate", function(selfFrame, elapsed)
-        selfFrame.elapsed = (selfFrame.elapsed or 0) + elapsed
-
-        if selfFrame.elapsed >= 0.01 then
-            selfFrame:SetScript("OnUpdate", nil)
-
-            local guildRosterInfo = {}
-            local debugCount = 0
-
-            if DEBUG_GP then
-                print(string.format(
-                    tostring(raidOnlyMode),
-                    tostring(showAllGuild),
-                    tostring(showOfflineOnly)
-                ))
-
-                print(string.format(
-                    GetNumGuildMembers(true)
-                ))
-            end
-
-            for j = 1, GetNumGuildMembers(true) do
-                local name, _, _, _, class5, _, publicNote, officerNote, online, _, class11 = GetGuildRosterInfo(j)
-
-                if name then
-                    local plainName = name:match("^(.-)-") or name
-                    local classFileName = class11 or class5
-
-                    local words = {}
-
-                    if officerNote then
-                        for word in officerNote:gmatch("%S+") do
-                            table.insert(words, word)
-                        end
+    if raidOnlyMode then
+        for i = 1, GetNumGroupMembers() do
+            local raidName, _, _, _, _, classFileName = GetRaidRosterInfo(i)
+            if raidName then
+                local plainName = raidName:match("^(.-)-") or raidName
+                local guildInfo = guildRosterInfo[plainName]
+                if guildInfo then
+                    local gp = guildInfo.gp or 0
+                    local publicNote = guildInfo.publicNote or ""
+                    if gp > 0 then totalWithGP = totalWithGP + 1 end
+                    local displayName = raidName
+                    if publicNote ~= "" then
+                        displayName = raidName .. " |cFFFFFF00(" .. publicNote .. ")|r"
                     end
-
-                    local playerID = words[2]
-                    local gp = tonumber(words[3]) or 0
-
-                    if DEBUG_GP then
-                        local nickMatch = true
-
-                        if db.filterText and db.filterText ~= "" then
-                            nickMatch = plainName:lower():find(db.filterText, 1, true) ~= nil
-                        end
-
-                        if nickMatch then
-                            local noteForLog = officerNote or "<nil>"
-
-                            print(string.format(
-                                plainName,
-                                noteForLog,
-                                #words,
-                                tostring(playerID),
-                                tostring(words[3]),
-                                gp
-                            ))
-
-                            debugCount = debugCount + 1
-                        end
-                    end
-
-                    guildRosterInfo[plainName] = {
-                        fullName = name,
-                        publicNote = publicNote,
-                        officerNote = officerNote,
-                        classFileName = classFileName,
-                        playerID = playerID,
+                    table.insert(db.gp_data, {
+                        nick = displayName,
+                        original_nick = plainName,
                         gp = gp,
-                        online = online
-                    }
+                        classColor = RAID_CLASS_COLORS[classFileName]
+                            or RAID_CLASS_COLORS[guildInfo.classFileName]
+                            or { r = 1, g = 1, b = 1 },
+                        classFileName = classFileName or guildInfo.classFileName,
+                        playerID = guildInfo.playerID,
+                        isGuildMember = true
+                    })
+                else
+                    local cachedGp = db.external_gp_cache[plainName] or 0
+                    if cachedGp > 0 then totalWithGP = totalWithGP + 1 end
+                    table.insert(db.gp_data, {
+                        nick = raidName,
+                        original_nick = plainName,
+                        gp = cachedGp,
+                        classColor = RAID_CLASS_COLORS[classFileName] or { r = 1, g = 1, b = 1 },
+                        classFileName = classFileName,
+                        playerID = nil,
+                        isGuildMember = false
+                    })
                 end
             end
-
-            if DEBUG_GP then
-                print(string.format(
-                    debugCount
-                ))
-            end
-
-            if raidOnlyMode then
-                local numRaidMembers = GetNumGroupMembers()
-
-                for i = 1, numRaidMembers do
-                    local raidName, _, _, _, _, classFileName = GetRaidRosterInfo(i)
-
-                    if raidName then
-                        local plainName = raidName:match("^(.-)-") or raidName
-                        local guildInfo = guildRosterInfo[plainName]
-
-                        if guildInfo then
-                            local gp = guildInfo.gp or 0
-                            local publicNote = guildInfo.publicNote or ""
-
-                            if gp > 0 then
-                                totalWithGP = totalWithGP + 1
-                            end
-
-                            local displayName = raidName
-
-                            if publicNote and publicNote ~= "" then
-                                displayName = raidName .. " |cFFFFFF00(" .. publicNote .. ")|r"
-                            end
-
-                            if DEBUG_GP then
-                                print(string.format(
-                                    plainName,
-                                    gp,
-                                    tostring(guildInfo.playerID)
-                                ))
-                            end
-
-                            table.insert(db.gp_data, {
-                                nick = displayName,
-                                original_nick = plainName,
-                                gp = gp,
-                                classColor = RAID_CLASS_COLORS[classFileName]
-                                    or RAID_CLASS_COLORS[guildInfo.classFileName]
-                                    or { r = 1, g = 1, b = 1 },
-                                classFileName = classFileName or guildInfo.classFileName,
-                                playerID = guildInfo.playerID,
-                                isGuildMember = true
-                            })
-                        else
-                            local cachedGp = db.external_gp_cache[plainName] or 0
-
-                            if cachedGp > 0 then
-                                totalWithGP = totalWithGP + 1
-                            end
-
-                            if DEBUG_GP then
-                                print(string.format(
-                                    plainName,
-                                    cachedGp
-                                ))
-                            end
-
-                            table.insert(db.gp_data, {
-                                nick = raidName,
-                                original_nick = plainName,
-                                gp = cachedGp,
-                                classColor = RAID_CLASS_COLORS[classFileName] or { r = 1, g = 1, b = 1 },
-                                classFileName = classFileName,
-                                playerID = nil,
-                                isGuildMember = false
-                            })
-                        end
-                    end
-                end
-
-            elseif showAllGuild then
-                for plainName, guildInfo in pairs(guildRosterInfo) do
-                    if not showOfflineOnly and not guildInfo.online then
-                        -- Пропускаем офлайн, если не включена галочка Off
-                    else
-                        local gp = guildInfo.gp or 0
-
-                        if gp > 0 then
-                            totalWithGP = totalWithGP + 1
-                        end
-
-                        local displayName = guildInfo.fullName
-
-                        if guildInfo.publicNote and guildInfo.publicNote ~= "" then
-                            displayName = guildInfo.fullName .. " |cFFFFFF00(" .. guildInfo.publicNote .. ")|r"
-                        end
-
-                        if DEBUG_GP then
-                            print(string.format(
-                                plainName,
-                                gp,
-                                tostring(guildInfo.online)
-                            ))
-                        end
-
-                        table.insert(db.gp_data, {
-                            nick = displayName,
-                            original_nick = plainName,
-                            gp = gp,
-                            classColor = RAID_CLASS_COLORS[guildInfo.classFileName] or { r = 1, g = 1, b = 1 },
-                            classFileName = guildInfo.classFileName,
-                            playerID = guildInfo.playerID,
-                            isGuildMember = true
-                        })
-                    end
-                end
-
-            else
-                for plainName, guildInfo in pairs(guildRosterInfo) do
-                    if guildInfo.officerNote and guildInfo.officerNote ~= "" then
-                        local gp = guildInfo.gp or 0
-
-                        if gp ~= 0 then
-                            totalWithGP = totalWithGP + 1
-
-                            local displayName = guildInfo.fullName
-
-                            if guildInfo.publicNote and guildInfo.publicNote ~= "" then
-                                displayName = guildInfo.fullName .. " |cFFFFFF00(" .. guildInfo.publicNote .. ")|r"
-                            end
-
-                            if DEBUG_GP then
-                                print(string.format(
-                                    plainName,
-                                    gp
-                                ))
-                            end
-
-                            table.insert(db.gp_data, {
-                                nick = displayName,
-                                original_nick = plainName,
-                                gp = gp,
-                                classColor = RAID_CLASS_COLORS[guildInfo.classFileName] or { r = 1, g = 1, b = 1 },
-                                classFileName = guildInfo.classFileName,
-                                playerID = guildInfo.playerID,
-                                isGuildMember = true
-                            })
-                        end
-                    end
-                end
-            end
-
-            if db.filterText and db.filterText ~= "" then
-                local filteredData = {}
-
-                for _, entry in ipairs(db.gp_data) do
-                    local nickMatch = string.find(entry.original_nick:lower(), db.filterText, 1, true)
-                    local displayMatch = string.find(entry.nick:lower(), db.filterText, 1, true)
-
-                    if nickMatch or displayMatch then
-                        table.insert(filteredData, entry)
-                    end
-                end
-
-                db.gp_data = filteredData
-            end
-
-            db.window.countText:SetText(string.format("Отображается игроков: %d", #db.gp_data))
-            db.window.totalText:SetText(string.format(
-                "Всего игроков с ГП: %d (из %d в гильдии)",
-                totalWithGP,
-                GetNumGuildMembers(true)
-            ))
-
-            db:ClearSelection()
-            db:SortData()
-            db:UpdateWindow()
         end
-    end)
+    elseif showAllGuild then
+        for plainName, guildInfo in pairs(guildRosterInfo) do
+            if showOfflineOnly or guildInfo.online then
+                local gp = guildInfo.gp or 0
+                if gp > 0 then totalWithGP = totalWithGP + 1 end
+                local displayName = guildInfo.fullName
+                if guildInfo.publicNote ~= "" then
+                    displayName = guildInfo.fullName .. " |cFFFFFF00(" .. guildInfo.publicNote .. ")|r"
+                end
+                table.insert(db.gp_data, {
+                    nick = displayName,
+                    original_nick = plainName,
+                    gp = gp,
+                    classColor = RAID_CLASS_COLORS[guildInfo.classFileName] or { r = 1, g = 1, b = 1 },
+                    classFileName = guildInfo.classFileName,
+                    playerID = guildInfo.playerID,
+                    isGuildMember = true
+                })
+            end
+        end
+    else
+        for plainName, guildInfo in pairs(guildRosterInfo) do
+            if guildInfo.officerNote and guildInfo.officerNote ~= "" then
+                local gp = guildInfo.gp or 0
+                if gp ~= 0 then
+                    totalWithGP = totalWithGP + 1
+                    local displayName = guildInfo.fullName
+                    if guildInfo.publicNote ~= "" then
+                        displayName = guildInfo.fullName .. " |cFFFFFF00(" .. guildInfo.publicNote .. ")|r"
+                    end
+                    table.insert(db.gp_data, {
+                        nick = displayName,
+                        original_nick = plainName,
+                        gp = gp,
+                        classColor = RAID_CLASS_COLORS[guildInfo.classFileName] or { r = 1, g = 1, b = 1 },
+                        classFileName = guildInfo.classFileName,
+                        playerID = guildInfo.playerID,
+                        isGuildMember = true
+                    })
+                end
+            end
+        end
+    end
+
+    if db.filterText and db.filterText ~= "" then
+        local filteredData = {}
+        for _, entry in ipairs(db.gp_data) do
+            if string.find(entry.original_nick:lower(), db.filterText, 1, true)
+               or string.find(entry.nick:lower(), db.filterText, 1, true) then
+                table.insert(filteredData, entry)
+            end
+        end
+        db.gp_data = filteredData
+    end
+
+    db.window.countText:SetText(string.format("Отображается игроков: %d", #db.gp_data))
+    db.window.totalText:SetText(string.format(
+        "Всего игроков с ГП: %d (из %d в гильдии)",
+        totalWithGP, GetNumGuildMembers(true)
+    ))
+
+    db:ClearSelection()
+    db:SortData()
+    db:UpdateWindow()
 end
 
 -- Сохраняет ГП игрока не из гильдии в кэш класса
@@ -1310,30 +1176,54 @@ end
 function GpDb:Show()
     self.window:Show()
 
-    -- Принудительно обновляем данные гильдии перед показом
+    -- Очищаем список, чтобы не мелькали старые данные
+    self.gp_data = {}
+    self:UpdateWindow()
+
+    -- Ставим галочку сразу, в зависимости от того, в рейде ли игрок
+    self.window.raidOnlyCheckbox:SetChecked(IsInRaid() and true or false)
+
+    -- Одноразовый слушатель GUILD_ROSTER_UPDATE
+    if not self._rosterListener then
+        self._rosterListener = CreateFrame("Frame")
+        self._rosterListener:SetScript("OnEvent", function(f, event)
+            f:UnregisterEvent("GUILD_ROSTER_UPDATE")
+            self:RequestNonGuildGP()
+            self:_UpdateFromGuild()
+            self:UpdateWindow()
+        end)
+    end
+    self._rosterListener:RegisterEvent("GUILD_ROSTER_UPDATE")
+
     GuildRoster()
 
-    -- === ВЫЗОВ НОВОЙ ФУНКЦИИ ПРИ ОТКРЫТИИ ОКНА ===
-    self:RequestNonGuildGP()
-    -- ==============================================
+    -- Страховка через OnUpdate-фрейм (НЕ скрывать!)
+    if self._showFallback then
+        self._showFallback:SetScript("OnUpdate", nil)
+        self._showFallback:Hide()
+        self._showFallback = nil
+    end
 
-    -- Сохраняем ссылку на оригинальный объект, так как внутри OnUpdate `self` будет указывать на фрейм таймера
-    local ctx = self
-    local timerFrame = CreateFrame("Frame")
-    timerFrame:Hide()
+    local fallback = CreateFrame("Frame")
+    self._showFallback = fallback
+    fallback:Show()   -- ВАЖНО: показать, иначе OnUpdate не сработает
+
     local elapsed = 0
-    local delay = 0.1
+    local delay = 0.3
 
-    timerFrame:SetScript("OnUpdate", function(frame, dt)
+    fallback:SetScript("OnUpdate", function(f, dt)
         elapsed = elapsed + dt
-        if elapsed >= delay then
-            -- Полная остановка и очистка таймера
-            frame:SetScript("OnUpdate", nil)
-            frame:Hide()
+        if elapsed < delay then return end
 
-            -- Выполнение отложенных методов в контексте оригинального объекта
-            ctx:_UpdateFromGuild()
-            ctx:UpdateWindow()
+        f:SetScript("OnUpdate", nil)
+        f:Hide()
+        self._showFallback = nil
+
+        -- Если данных так и нет — обновляем вручную
+        if self.window:IsShown() and #self.gp_data == 0 then
+            self:RequestNonGuildGP()
+            self:_UpdateFromGuild()
+            self:UpdateWindow()
         end
     end)
 end
