@@ -15157,10 +15157,10 @@ end
 }
 
 ns_llua['lua'][131] = {
-type = "info",
-title = "Гильдия",
-helpModules = {113, 65},
-content = [=[
+    type = "info",
+    title = "Гильдия",
+    helpModules = {113, 65},
+    content = [=[
 <h>Гильдия</h>
 <t>WoW API позволяет получать информацию о гильдии игрока.</t>
 <h>GetGuildInfo</h>
@@ -15174,20 +15174,36 @@ content = [=[
 </code>
 <t>Первое значение — всего участников, второе — онлайн.</t>
 <w>Важно:</w> данные гильдии могут быть доступны не мгновенно. Иногда они подгружаются после открытия окна гильдии или после запроса ростера.
+<w>Особенность сервера Циркуль:</w> количество участников, возвращаемое <k>GetNumGuildMembers()</k>, зависит от настройки отображения офлайн-участников. Если игрок не поставил галочку "показывать офлайн" в окне гильдии, функция вернёт только количество онлайн-участников. Чтобы получить полный список, игрок должен открыть окно гильдии и включить отображение офлайн-участников.
+
 <h>GetGuildRosterInfo</h>
+<t>Функция возвращает много значений для участника гильдии по индексу:</t>
 <code>
-/run local name, rank, rankIndex, level = GetGuildRosterInfo(1); print(name, rank, rankIndex, level)
+/run local name, rank, rankIndex, level, class, zone, publicNote, officerNote, online, _, classToken = GetGuildRosterInfo(1); print(name, rank, rankIndex, level, class, zone, classToken)
 </code>
-<t>Функция возвращает данные участника гильдии по индексу.</t>
+<c>1</c> — имя (строка).
+<c>2</c> — название ранга (строка).
+<c>3</c> — индекс ранга (число, 0 = высший ранг).
+<c>4</c> — уровень (число).
+<c>5</c> — класс локализованный (строка, например "Паладин").
+<c>6</c> — текущая локация (строка).
+<c>7</c> — публичная заметка (строка).
+<c>8</c> — офицерская заметка (строка).
+<c>9</c> — онлайн (boolean).
+<c>10</c> — зарезервировано.
+<c>11</c> — токен класса латинский (строка, например "PALADIN").
+
 <h>Безопасный пример</h>
 <code>
 /run local guildName = GetGuildInfo("player"); if guildName then print("Гильдия:", guildName) else print("Игрок без гильдии") end
 </code>
 <h>Таблица участников</h>
 <code>
-/run guildOnline = {}; local total, online = GetNumGuildMembers(); if online then for i = 1, online do local name = GetGuildRosterInfo(i); if name then table.insert(guildOnline, name) end end end; print("Онлайн:", #guildOnline)
+/run guildOnline = {}; local total, online = GetNumGuildMembers(); if total then for i = 1, total do local name, _, _, _, _, _, _, _, isOnline = GetGuildRosterInfo(i); if isOnline then table.insert(guildOnline, name) end end end; print("Онлайн:", #guildOnline)
 </code>
 <w>Примечание:</w> если ростер гильдии ещё не загружен, значения могут быть <k>nil</k>. Позже, в модуле событий, мы научимся обновлять такие данные по событию.
+<w>Важно:</w> цикл идёт по <k>total</k> (всего участников), а не по <k>online</k>. Функция <k>GetGuildRosterInfo</k> индексируется по общему списку, а не по онлайн-участникам.
+
 <h>Безопасные значения по умолчанию</h>
 <code>
 /run local total = GetNumGuildMembers() or 0; local online = select(2, GetNumGuildMembers()) or 0; print("Всего:", total, "Онлайн:", online)
@@ -15196,202 +15212,946 @@ content = [=[
 }
 
 ns_llua['lua'][132] = {
-type = "vartest",
-title = "Тест 131-1: имя гильдии",
-helpModules = {131, 65},
-tasks = {
-{
-var = "guildName",
-desc = 'Создай глобальную переменную guildName = GetGuildInfo("player") or "Без гильдии"',
-check = function(value)
-return type(value) == "string" and value ~= ""
-end,
-},
-},
+    type = "commenttest",
+    title = "Тест 131-1: функция GetGuildReport",
+    helpModules = {131, 45, 44},
+    preloadVars = {
+        {var = "GetGuildReport", desc = "GetGuildReport очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "test1", desc = "test1 очищается перед проверкой"},
+        {var = "test2", desc = "test2 очищается перед проверкой"},
+        {var = "test3", desc = "test3 очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "test1", "test2", "test3"},
+    instruction = [=[
+<h>Тест 131-1: функция GetGuildReport</h>
+<t>Создай глобальную функцию <k>GetGuildReport()</k>.</t>
+<t>Функция должна вернуть таблицу со статистикой по гильдии игрока:</t>
+<c>guildName</c> — имя гильдии (строка).
+<c>total</c> — общее количество участников (число).
+<c>online</c> — количество участников онлайн (число).
+<c>onlinePercent</c> — процент онлайн-участников (число, округлённое вниз через <k>math.floor</k>).
+<t>Если игрок не состоит в гильдии, вернуть:</t>
+<s>{guildName = "Без гильдии", total = 0, online = 0, onlinePercent = 0}</s>
+<w>Во время проверки система прогонит функцию через 3 разных сценария.</w>
+]=],
+    initialCode = [=[
+function GetGuildReport()
+    
+end
+]=],
+    requireKeywords = {
+        "GetGuildReport",
+        "function",
+        "GetGuildInfo",
+        "GetNumGuildMembers",
+        "math.floor",
+        "return",
+    },
+
+    mockGlobals = {
+        GetGuildInfo = function(u)
+            local scenario = _G._currentScenario or 1
+            local names = {
+                [1] = {"Герои Азерота", "Офицер"},
+                [2] = {"Рыцари Света", "Рекрут"},
+                [3] = {nil, nil},
+            }
+            local data = names[scenario]
+            return data[1], data[2]
+        end,
+        GetNumGuildMembers = function()
+            local scenario = _G._currentScenario or 1
+            local counts = {
+                [1] = {100, 25},
+                [2] = {50, 10},
+                [3] = {0, 0},
+            }
+            local data = counts[scenario]
+            return data[1], data[2]
+        end,
+    },
+
+    checkCode = function(env)
+        _G.checkError = nil
+        for i = 1, 3 do _G["test" .. i] = nil end
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(env) ~= "table" then
+            return fail("Внутренняя ошибка: окружение не передано")
+        end
+
+        local fn = env.GetGuildReport
+        if type(fn) ~= "function" then
+            return fail("GetGuildReport не является глобальной функцией")
+        end
+
+        local scenarios = {
+            {
+                name = "Гильдия с 25% онлайна",
+                expected = {guildName = "Герои Азерота", total = 100, online = 25, onlinePercent = 25},
+            },
+            {
+                name = "Гильдия с 20% онлайна",
+                expected = {guildName = "Рыцари Света", total = 50, online = 10, onlinePercent = 20},
+            },
+            {
+                name = "Без гильдии",
+                expected = {guildName = "Без гильдии", total = 0, online = 0, onlinePercent = 0},
+            },
+        }
+
+        for i, test in ipairs(scenarios) do
+            _G._currentScenario = i
+            local ok, result = pcall(fn)
+
+            if not ok then
+                _G._currentScenario = nil
+                return fail("Тест " .. i .. " (" .. test.name .. "): ошибка вызова: " .. tostring(result))
+            end
+
+            if type(result) ~= "table" then
+                _G._currentScenario = nil
+                return fail("Тест " .. i .. ": функция должна вернуть таблицу")
+            end
+
+            local errors = {}
+            if result.guildName ~= test.expected.guildName then
+                table.insert(errors, "guildName: ожидалось '" .. test.expected.guildName .. "', получено '" .. tostring(result.guildName) .. "'")
+            end
+            if result.total ~= test.expected.total then
+                table.insert(errors, "total: ожидалось " .. test.expected.total .. ", получено " .. tostring(result.total))
+            end
+            if result.online ~= test.expected.online then
+                table.insert(errors, "online: ожидалось " .. test.expected.online .. ", получено " .. tostring(result.online))
+            end
+            if result.onlinePercent ~= test.expected.onlinePercent then
+                table.insert(errors, "onlinePercent: ожидалось " .. test.expected.onlinePercent .. ", получено " .. tostring(result.onlinePercent))
+            end
+
+            if #errors > 0 then
+                _G["test" .. i] = test.name .. " | ОШИБКИ: " .. table.concat(errors, "; ")
+                _G._currentScenario = nil
+                return fail("Тест " .. i .. " (" .. test.name .. ") не пройден")
+            else
+                _G["test" .. i] = test.name .. " | ОК"
+            end
+        end
+
+        _G._currentScenario = nil
+        return true
+    end,
 }
 
 ns_llua['lua'][133] = {
-type = "vartest",
-title = "Тест 131-2: количество участников гильдии",
-helpModules = {131, 65},
-tasks = {
-{
-var = "guildTotal",
-desc = 'Создай глобальную переменную guildTotal = GetNumGuildMembers() or 0',
-check = function(value)
-return type(value) == "number" and value >= 0
-end,
-},
-{
-var = "guildOnline",
-desc = 'Создай глобальную переменную guildOnline = select(2, GetNumGuildMembers()) or 0',
-check = function(value)
-return type(value) == "number" and value >= 0
-end,
-},
-},
+    type = "commenttest",
+    title = "Тест 131-2: функция GetOnlineGuildMembers",
+    helpModules = {131, 45, 44},
+    preloadVars = {
+        {var = "GetOnlineGuildMembers", desc = "GetOnlineGuildMembers очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "result", desc = "result очищается перед проверкой"},
+        {var = "debug", desc = "debug очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "result", "debug"},
+    instruction = [=[
+<h>Тест 131-2: функция GetOnlineGuildMembers</h>
+<t>Создай глобальную функцию <k>GetOnlineGuildMembers()</k>.</t>
+<t>Функция должна вернуть массив имён всех онлайн-участников гильдии, отсортированный по алфавиту.</t>
+<t>Если игрок не состоит в гильдии или ростер не загружен, вернуть пустой массив.</t>
+<w>Перед проверкой убедись, что ты состоишь в гильдии и ростер загружен.</w>
+]=],
+    initialCode = [=[
+function GetOnlineGuildMembers()
+    
+end
+]=],
+    requireKeywords = {
+        "GetOnlineGuildMembers",
+        "function",
+        "GetNumGuildMembers",
+        "GetGuildRosterInfo",
+        "table.sort",
+        "return",
+    },
+    checkCode = function()
+        _G.checkError = nil
+        _G.result = nil
+        _G.debug = nil
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(_G.GetOnlineGuildMembers) ~= "function" then
+            return fail("GetOnlineGuildMembers не является глобальной функцией")
+        end
+
+        local guildName = GetGuildInfo("player")
+        if not guildName then
+            return fail("Ты не состоишь в гильдии. Вступи в гильдию и нажми проверку снова.")
+        end
+
+        local total = GetNumGuildMembers()
+        if not total or total == 0 then
+            return fail("Ростер гильдии не загружен или пуст")
+        end
+
+        local ok, result = pcall(_G.GetOnlineGuildMembers)
+
+        if ok and type(result) == "table" then
+            _G.result = result
+        elseif ok then
+            _G.result = "ОШИБКА: функция вернула " .. type(result)
+        else
+            _G.result = "ОШИБКА: " .. tostring(result)
+        end
+
+        if not ok then
+            return fail("Ошибка вызова GetOnlineGuildMembers: " .. tostring(result))
+        end
+        if type(result) ~= "table" then
+            return fail("GetOnlineGuildMembers должна вернуть массив (таблицу)")
+        end
+
+        -- Строим expected той же логикой, что и функция студента
+        local expected = {}
+        for i = 1, total do
+            local name, _, _, _, _, _, _, _, isOnline = GetGuildRosterInfo(i)
+            if name and isOnline then
+                table.insert(expected, name)
+            end
+        end
+        
+        table.sort(expected)
+        
+        _G.debug = string.format("Гильдия: %s | Всего: %d | Ожидается онлайн: %d | Получено: %d", 
+            guildName, total, #expected, #result)
+
+        if #expected == 0 then
+            return fail("Нет онлайн-участников в гильдии. Подожди или зайди в игру с другим персонажем.")
+        end
+
+        if #result ~= #expected then
+            return fail("Количество участников не совпадает: ожидалось " .. #expected .. ", получено " .. #result)
+        end
+
+        for i = 1, #expected do
+            if result[i] ~= expected[i] then
+                return fail("Элемент " .. i .. " не совпадает. Ожидалось: '" .. expected[i] .. "', получено: '" .. tostring(result[i]) .. "'")
+            end
+        end
+
+        return true
+    end,
 }
 
 ns_llua['lua'][134] = {
-type = "commenttest",
-title = "Тест 131-3: функция GetGuildNameSafe",
-helpModules = {131, 45, 65},
-preloadVars = {
-{var = "GetGuildNameSafe", desc = "GetGuildNameSafe очищается перед проверкой"},
-{var = "checkError", desc = "checkError очищается перед проверкой"},
-},
-reportVars = {
-"checkError",
-},
-instruction = [=[
-<h>Тест 131-3: функция GetGuildNameSafe</h>
-<t>Создай глобальную функцию <k>GetGuildNameSafe()</k>.</t>
-<t>Функция должна вернуть имя гильдии игрока через:</t>
-<code>
-GetGuildInfo("player")
-</code>
-<t>Если имя не является непустой строкой, функция должна вернуть строку:</t>
-<s>"Без гильдии"</s>
-<t>Используй:</t>
-<c>GetGuildInfo</c>
-<c>type</c>
-<c>return</c>
-<t>Ничего выводить не нужно.</t>
+    type = "commenttest",
+    title = "Тест 131-3: функция FindGuildMembersByLevel",
+    helpModules = {131, 45, 31, 29},
+    preloadVars = {
+        {var = "FindGuildMembersByLevel", desc = "FindGuildMembersByLevel очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "test1", desc = "test1 очищается перед проверкой"},
+        {var = "test2", desc = "test2 очищается перед проверкой"},
+        {var = "test3", desc = "test3 очищается перед проверкой"},
+        {var = "test4", desc = "test4 очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "test1", "test2", "test3", "test4"},
+    instruction = [=[
+<h>Тест 131-3: функция FindGuildMembersByLevel</h>
+<t>Создай глобальную функцию <k>FindGuildMembersByLevel(minLevel)</k>.</t>
+<t>Аргумент <k>minLevel</k> — минимальный уровень.</t>
+<t>Функция должна вернуть массив таблиц с информацией об участниках гильдии, у которых уровень больше или равен <k>minLevel</k>.</t>
+<t>Каждая таблица должна содержать поля:</t>
+<c>name</c> — имя участника (строка).
+<c>level</c> — уровень (число).
+<c>rank</c> — название ранга в гильдии (строка).
+<t>Порядок участников в результирующем массиве должен совпадать с порядком в ростере гильдии.</t>
+<t>Если <k>minLevel</k> не число, верни пустой массив.</t>
+<w>Во время проверки система прогонит функцию через 4 разных сценария.</w>
 ]=],
-initialCode = [=[
--- Создай глобальную функцию GetGuildNameSafe()
+    initialCode = [=[
+function FindGuildMembersByLevel(minLevel)
+    
+end
 ]=],
-requireKeywords = {
-"GetGuildNameSafe",
-"function",
-"GetGuildInfo",
-"type",
-"return",
-},
-checkCode = function()
-_G.checkError = nil
-if type(_G.GetGuildNameSafe) ~= "function" then
-_G.checkError = "GetGuildNameSafe не является глобальной функцией"
-return false
-end
-local ok, result = pcall(_G.GetGuildNameSafe)
-if not ok then
-_G.checkError = "Ошибка вызова GetGuildNameSafe: " .. tostring(result)
-return false
-end
-if type(result) ~= "string" or result == "" then
-_G.checkError = "Функция должна вернуть непустую строку"
-return false
-end
-return true
-end,
+    requireKeywords = {
+        "FindGuildMembersByLevel",
+        "function",
+        "return",
+    },
+
+    mockGlobals = {
+        GetNumGuildMembers = function()
+            return 5, 5
+        end,
+        GetGuildRosterInfo = function(i)
+            -- name, rankName, rankIndex, level, class, zone, publicNote, officerNote, online, ?, classToken
+            local mock = {
+                [1] = {"Вася",  "Офицер",  1, 80, "Воин",         "Элвиннский лес", "пуб", "оф", true,  "", "WARRIOR"},
+                [2] = {"Петя",  "Рекрут",  3, 75, "Маг",          "Штормград",      "пуб", "оф", true,  "", "MAGE"},
+                [3] = {"Сидр",  "Ветеран", 2, 60, "Жрец",         "Стальгорн",      "пуб", "оф", false, "", "PRIEST"},
+                [4] = {"Коля",  "Рекрут",  3, 85, "Разбойник",    "Подгород",       "пуб", "оф", true,  "", "ROGUE"},
+                [5] = {"Аня",   "Офицер",  1, 70, "Друид",        "Тельдрассил",    "пуб", "оф", false, "", "DRUID"},
+            }
+            local data = mock[i]
+            if not data then return nil end
+            return data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9], data[10], data[11]
+        end,
+    },
+
+    checkCode = function(env)
+        _G.checkError = nil
+        for i = 1, 4 do _G["test" .. i] = nil end
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(env) ~= "table" then
+            return fail("Внутренняя ошибка: окружение не передано")
+        end
+
+        local fn = env.FindGuildMembersByLevel
+        if type(fn) ~= "function" then
+            return fail("FindGuildMembersByLevel не является глобальной функцией")
+        end
+
+        local scenarios = {
+            {
+                name = "Уровень >= 80",
+                minLevel = 80,
+                exp = {
+                    {name = "Вася", level = 80, rank = "Офицер"},
+                    {name = "Коля", level = 85, rank = "Рекрут"},
+                },
+            },
+            {
+                name = "Уровень >= 70",
+                minLevel = 70,
+                exp = {
+                    {name = "Вася", level = 80, rank = "Офицер"},
+                    {name = "Петя", level = 75, rank = "Рекрут"},
+                    {name = "Коля", level = 85, rank = "Рекрут"},
+                    {name = "Аня",  level = 70, rank = "Офицер"},
+                },
+            },
+            {
+                name = "Уровень >= 90 (никто)",
+                minLevel = 90,
+                exp = {},
+            },
+            {
+                name = "Некорректный ввод",
+                minLevel = "bad",
+                exp = {},
+            },
+        }
+
+        for i, test in ipairs(scenarios) do
+            local ok, result = pcall(fn, test.minLevel)
+
+            if not ok then
+                return fail("Тест " .. i .. " (" .. test.name .. "): ошибка вызова: " .. tostring(result))
+            end
+
+            if type(result) ~= "table" then
+                return fail("Тест " .. i .. ": функция должна вернуть таблицу")
+            end
+
+            if #result ~= #test.exp then
+                _G["test" .. i] = test.name .. " | Получено: " .. #result .. " | Ожидалось: " .. #test.exp
+                return fail("Тест " .. i .. " не пройден: не совпадает длина массива")
+            end
+
+            for j = 1, #result do
+                local r = result[j]
+                local e = test.exp[j]
+                if type(r) ~= "table" then
+                    return fail("Тест " .. i .. ": элемент " .. j .. " должен быть таблицей")
+                end
+                if r.name ~= e.name then
+                    return fail("Тест " .. i .. ": элемент " .. j .. ", name не совпадает")
+                end
+                if r.level ~= e.level then
+                    return fail("Тест " .. i .. ": элемент " .. j .. ", level не совпадает")
+                end
+                if r.rank ~= e.rank then
+                    return fail("Тест " .. i .. ": элемент " .. j .. ", rank не совпадает")
+                end
+            end
+
+            _G["test" .. i] = test.name .. " | " .. #result .. " элементов | ОК"
+        end
+
+        return true
+    end,
 }
 
 ns_llua['lua'][135] = {
-type = "commenttest",
-title = "Тест 131-4: функция GetGuildMemberCountSafe",
-helpModules = {131, 45, 65},
-preloadVars = {
-{var = "GetGuildMemberCountSafe", desc = "GetGuildMemberCountSafe очищается перед проверкой"},
-{var = "checkError", desc = "checkError очищается перед проверкой"},
-},
-reportVars = {
-"checkError",
-},
-instruction = [=[
-<h>Тест 131-4: функция GetGuildMemberCountSafe</h>
-<t>Создай глобальную функцию <k>GetGuildMemberCountSafe()</k>.</t>
-<t>Функция должна вернуть общее количество участников гильдии через:</t>
-<code>
-GetNumGuildMembers()
-</code>
-<t>Если значение не является числом или меньше нуля, функция должна вернуть <n>0</n>.</t>
-<t>Ничего выводить не нужно.</t>
+    type = "commenttest",
+    title = "Тест 131-4: функция GetHighestLevelGuildMember",
+    helpModules = {131, 45, 17, 7},
+    preloadVars = {
+        {var = "GetHighestLevelGuildMember", desc = "GetHighestLevelGuildMember очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "result", desc = "result очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "result"},
+    instruction = [=[
+<h>Тест 131-4: функция GetHighestLevelGuildMember</h>
+<t>Создай глобальную функцию <k>GetHighestLevelGuildMember()</k>.</t>
+<t>Функция должна найти участника гильдии с наибольшим уровнем и вернуть строку в формате:</t>
+<s>"Имя: Вася, Уровень: 80, Ранг: Офицер"</s>
+<t>Если у нескольких участников одинаковый максимальный уровень, вернуть первого из них.</t>
+<t>Если игрок не состоит в гильдии, вернуть строку:</t>
+<s>"Нет гильдии"</s>
+<w>Перед проверкой убедись, что ты состоишь в гильдии.</w>
 ]=],
-initialCode = [=[
--- Создай глобальную функцию GetGuildMemberCountSafe()
+    initialCode = [=[
+function GetHighestLevelGuildMember()
+    
+end
 ]=],
-requireKeywords = {
-"GetGuildMemberCountSafe",
-"function",
-"GetNumGuildMembers",
-"return",
-},
-checkCode = function()
-_G.checkError = nil
-if type(_G.GetGuildMemberCountSafe) ~= "function" then
-_G.checkError = "GetGuildMemberCountSafe не является глобальной функцией"
-return false
-end
-local ok, result = pcall(_G.GetGuildMemberCountSafe)
-if not ok then
-_G.checkError = "Ошибка вызова GetGuildMemberCountSafe: " .. tostring(result)
-return false
-end
-if type(result) ~= "number" then
-_G.checkError = "Функция должна вернуть число"
-return false
-end
-if result < 0 then
-_G.checkError = "Количество участников гильдии не может быть отрицательным"
-return false
-end
-return true
-end,
+    requireKeywords = {
+        "GetHighestLevelGuildMember",
+        "function",
+        "GetGuildInfo",
+        "GetNumGuildMembers",
+        "GetGuildRosterInfo",
+        "string.format",
+        "return",
+    },
+    checkCode = function()
+        _G.checkError = nil
+        _G.result = nil
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(_G.GetHighestLevelGuildMember) ~= "function" then
+            return fail("GetHighestLevelGuildMember не является глобальной функцией")
+        end
+
+        local guildName = GetGuildInfo("player")
+        if not guildName then
+            return fail("Ты не состоишь в гильдии. Вступи в гильдию и нажми проверку снова.")
+        end
+
+        local ok, result = pcall(_G.GetHighestLevelGuildMember)
+
+        if ok then
+            _G.result = result
+        else
+            _G.result = "ОШИБКА: " .. tostring(result)
+        end
+
+        if not ok then
+            return fail("Ошибка вызова GetHighestLevelGuildMember: " .. tostring(result))
+        end
+        if type(result) ~= "string" then
+            return fail("Функция должна вернуть строку")
+        end
+
+        local total = GetNumGuildMembers()
+        if not total or total == 0 then
+            return fail("Ростер гильдии пуст")
+        end
+
+        local maxLevel = 0
+        local maxName = nil
+        local maxRank = nil
+
+        for i = 1, total do
+            local name, rank, _, level = GetGuildRosterInfo(i)
+            if name and level and level > maxLevel then
+                maxLevel = level
+                maxName = name
+                maxRank = rank
+            end
+        end
+
+        if not maxName then
+            return fail("Не удалось найти участников гильдии")
+        end
+
+        local expected = string.format("Имя: %s, Уровень: %d, Ранг: %s", maxName, maxLevel, maxRank)
+
+        if result ~= expected then
+            return fail("Результат не совпадает. Ожидалось: '" .. expected .. "', получено: '" .. result .. "'")
+        end
+
+        return true
+    end,
 }
 
 ns_llua['lua'][136] = {
-type = "commenttest",
-title = "Тест 131-5: функция GetGuildOnlineCountSafe",
-helpModules = {131, 45, 65},
-preloadVars = {
-{var = "GetGuildOnlineCountSafe", desc = "GetGuildOnlineCountSafe очищается перед проверкой"},
-{var = "checkError", desc = "checkError очищается перед проверкой"},
-},
-reportVars = {
-"checkError",
-},
-instruction = [=[
-<h>Тест 131-5: функция GetGuildOnlineCountSafe</h>
-<t>Создай глобальную функцию <k>GetGuildOnlineCountSafe()</k>.</t>
-<t>Функция должна вернуть количество участников гильдии онлайн.</t>
-<t>Используй:</t>
-<code>
-local total, online = GetNumGuildMembers()
-</code>
-<t>Если <k>online</k> не является числом или меньше нуля, функция должна вернуть <n>0</n>.</t>
-<t>Ничего выводить не нужно.</t>
+    type = "commenttest",
+    title = "Тест 131-5: функция GetGuildRankDistribution",
+    helpModules = {131, 45, 44},
+    preloadVars = {
+        {var = "GetGuildRankDistribution", desc = "GetGuildRankDistribution очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "result", desc = "result очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "result"},
+    instruction = [=[
+<h>Тест 131-5: функция GetGuildRankDistribution</h>
+<t>Создай глобальную функцию <k>GetGuildRankDistribution()</k>.</t>
+<t>Функция должна вернуть таблицу, где ключи — названия рангов, а значения — количество участников с этим рангом.</t>
+<t>Пример результата:</t>
+<code>{["Офицер"] = 2, ["Ветеран"] = 5, ["Рекрут"] = 10}</code>
+<t>Если игрок не состоит в гильдии, вернуть пустую таблицу.</t>
+<w>Во время проверки система подставит свои тестовые значения.</w>
 ]=],
-initialCode = [=[
--- Создай глобальную функцию GetGuildOnlineCountSafe()
+    initialCode = [=[
+function GetGuildRankDistribution()
+    
+end
 ]=],
-requireKeywords = {
-"GetGuildOnlineCountSafe",
-"function",
-"GetNumGuildMembers",
-"return",
-},
-checkCode = function()
-_G.checkError = nil
-if type(_G.GetGuildOnlineCountSafe) ~= "function" then
-_G.checkError = "GetGuildOnlineCountSafe не является глобальной функцией"
-return false
+    requireKeywords = {
+        "GetGuildRankDistribution",
+        "function",
+        "GetGuildInfo",
+        "GetNumGuildMembers",
+        "GetGuildRosterInfo",
+        "return",
+    },
+
+    mockGlobals = {
+        GetGuildInfo = function(u)
+            return "Тестовая Гильдия", "Рекрут"
+        end,
+        GetNumGuildMembers = function()
+            return 7, 7
+        end,
+        GetGuildRosterInfo = function(i)
+            local mock = {
+                [1] = {"Вася", "Офицер"},
+                [2] = {"Петя", "Рекрут"},
+                [3] = {"Сидр", "Ветеран"},
+                [4] = {"Коля", "Рекрут"},
+                [5] = {"Аня", "Офицер"},
+                [6] = {"Боря", "Ветеран"},
+                [7] = {"Вика", "Рекрут"},
+            }
+            local data = mock[i]
+            if not data then return nil end
+            return data[1], data[2]
+        end,
+    },
+
+    checkCode = function(env)
+        _G.checkError = nil
+        _G.result = nil
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(env) ~= "table" then
+            return fail("Внутренняя ошибка: окружение не передано")
+        end
+
+        local fn = env.GetGuildRankDistribution
+        if type(fn) ~= "function" then
+            return fail("GetGuildRankDistribution не является глобальной функцией")
+        end
+
+        local ok, result = pcall(fn)
+
+        if ok and type(result) == "table" then
+            _G.result = result
+        elseif ok then
+            _G.result = "ОШИБКА: функция вернула " .. type(result)
+        else
+            _G.result = "ОШИБКА: " .. tostring(result)
+        end
+
+        if not ok then
+            return fail("Ошибка вызова GetGuildRankDistribution: " .. tostring(result))
+        end
+        if type(result) ~= "table" then
+            return fail("GetGuildRankDistribution должна вернуть таблицу")
+        end
+
+        local expected = {
+            ["Офицер"] = 2,
+            ["Ветеран"] = 2,
+            ["Рекрут"] = 3,
+        }
+
+        local resultCount = 0
+        for _ in pairs(result) do resultCount = resultCount + 1 end
+
+        local expectedCount = 0
+        for _ in pairs(expected) do expectedCount = expectedCount + 1 end
+
+        if resultCount ~= expectedCount then
+            return fail("Количество рангов не совпадает: ожидалось " .. expectedCount .. ", получено " .. resultCount)
+        end
+
+        for rank, count in pairs(expected) do
+            if result[rank] ~= count then
+                return fail("Для ранга '" .. rank .. "' ожидалось " .. count .. ", получено " .. tostring(result[rank]))
+            end
+        end
+
+        return true
+    end,
+}
+
+ns_llua['lua'][136.1] = {
+    type = "commenttest",
+    title = "Тест 131-6: функция SearchGuildNotes",
+    helpModules = {131, 45, 31, 29},
+    preloadVars = {
+        {var = "SearchGuildNotes", desc = "SearchGuildNotes очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "test1", desc = "test1 очищается перед проверкой"},
+        {var = "test2", desc = "test2 очищается перед проверкой"},
+        {var = "test3", desc = "test3 очищается перед проверкой"},
+        {var = "test4", desc = "test4 очищается перед проверкой"},
+        {var = "test5", desc = "test5 очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "test1", "test2", "test3", "test4", "test5"},
+    instruction = [=[
+<h>Тест 131-6: функция SearchGuildNotes</h>
+<t>Создай глобальную функцию <k>SearchGuildNotes(keyword)</k>.</t>
+<t>Аргумент <k>keyword</k> — строка для поиска.</t>
+<t>Функция должна найти всех участников гильдии, у которых в публичной или офицерской заметке содержится <k>keyword</k>.</t>
+<t>Вернуть массив таблиц с полями:</t>
+<c>name</c> — имя участника.
+<c>rank</c> — название ранга.
+<c>publicNote</c> — публичная заметка (строка).
+<c>officerNote</c> — офицерская заметка (строка).
+<c>matchType</c> — где найдено: <s>"public"</s>, <s>"officer"</s> или <s>"both"</s>.
+<t>Поиск регистронезависимый.</t>
+<t>Если <k>keyword</k> не строка или пустая, вернуть пустой массив.</t>
+<w>Во время проверки система прогонит функцию через 5 сценариев.</w>
+]=],
+    initialCode = [=[
+function SearchGuildNotes(keyword)
+    
 end
-local ok, result = pcall(_G.GetGuildOnlineCountSafe)
-if not ok then
-_G.checkError = "Ошибка вызова GetGuildOnlineCountSafe: " .. tostring(result)
-return false
+]=],
+    requireKeywords = {
+        "SearchGuildNotes",
+        "function",
+        "GetGuildInfo",
+        "GetNumGuildMembers",
+        "GetGuildRosterInfo",
+        "string.lower",
+        "string.find",
+        "return",
+    },
+
+    mockGlobals = {
+        GetGuildInfo = function(u)
+            return "Тестовая Гильдия", "Рекрут"
+        end,
+        GetNumGuildMembers = function()
+            return 6, 6
+        end,
+        GetGuildRosterInfo = function(i)
+            local mock = {
+                [1] = {"Вася",  "Офицер",  1, 80, "Воин",      "Элвинн",   "Альт мага",    "DKP: 50",      true,  "", "WARRIOR"},
+                [2] = {"Петя",  "Рекрут",  3, 75, "Маг",       "Шторм",    "Main",         "альт Вася",    true,  "", "MAGE"},
+                [3] = {"Сидр",  "Ветеран", 2, 60, "Жрец",      "Сталь",    "",             "DKP: 100",     false, "", "PRIEST"},
+                [4] = {"Коля",  "Рекрут",  3, 85, "Разбойник", "Подгород", "Альт Сидр",    "",             true,  "", "ROGUE"},
+                [5] = {"Аня",   "Офицер",  1, 70, "Друид",     "Тельд",    "Альт",         "Альт Петра",   false, "", "DRUID"},
+                [6] = {"Боря",  "Ветеран", 2, 55, "Охотник",   "Оргр",     "Main",         "No alt",       true,  "", "HUNTER"},
+            }
+            local data = mock[i]
+            if not data then return nil end
+            return data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9], data[10], data[11]
+        end,
+    },
+
+    checkCode = function(env)
+        _G.checkError = nil
+        for i = 1, 5 do _G["test" .. i] = nil end
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(env) ~= "table" then
+            return fail("Внутренняя ошибка: окружение не передано")
+        end
+
+        local fn = env.SearchGuildNotes
+        if type(fn) ~= "function" then
+            return fail("SearchGuildNotes не является глобальной функцией")
+        end
+
+        local scenarios = {
+            {
+                name = "Поиск 'альт' (4 результата)",
+                keyword = "альт",
+                exp = {
+                    {name = "Вася", rank = "Офицер",  publicNote = "Альт мага", officerNote = "DKP: 50",    matchType = "public"},
+                    {name = "Петя", rank = "Рекрут",  publicNote = "Main",      officerNote = "альт Вася",  matchType = "officer"},
+                    {name = "Коля", rank = "Рекрут",  publicNote = "Альт Сидр", officerNote = "",           matchType = "public"},
+                    {name = "Аня",  rank = "Офицер",  publicNote = "Альт",      officerNote = "Альт Петра", matchType = "both"},
+                },
+            },
+            {
+                name = "Поиск 'DKP' (2 результата)",
+                keyword = "DKP",
+                exp = {
+                    {name = "Вася", rank = "Офицер",  publicNote = "Альт мага", officerNote = "DKP: 50",  matchType = "officer"},
+                    {name = "Сидр", rank = "Ветеран", publicNote = "",          officerNote = "DKP: 100", matchType = "officer"},
+                },
+            },
+            {
+                name = "Поиск 'Main' (2 результата)",
+                keyword = "Main",
+                exp = {
+                    {name = "Петя", rank = "Рекрут",  publicNote = "Main", officerNote = "альт Вася", matchType = "public"},
+                    {name = "Боря", rank = "Ветеран", publicNote = "Main", officerNote = "No alt",    matchType = "public"},
+                },
+            },
+            {
+                name = "Поиск 'XYZ' (0 результатов)",
+                keyword = "XYZ",
+                exp = {},
+            },
+            {
+                name = "Пустая строка",
+                keyword = "",
+                exp = {},
+            },
+        }
+
+        for i, test in ipairs(scenarios) do
+            local ok, result = pcall(fn, test.keyword)
+
+            if not ok then
+                return fail("Тест " .. i .. " (" .. test.name .. "): ошибка вызова: " .. tostring(result))
+            end
+
+            if type(result) ~= "table" then
+                return fail("Тест " .. i .. ": функция должна вернуть таблицу")
+            end
+
+            if #result ~= #test.exp then
+                _G["test" .. i] = test.name .. " | Получено: " .. #result .. " | Ожидалось: " .. #test.exp
+                return fail("Тест " .. i .. " не пройден: не совпадает длина массива")
+            end
+
+            for j = 1, #result do
+                local r = result[j]
+                local e = test.exp[j]
+                if type(r) ~= "table" then
+                    return fail("Тест " .. i .. ": элемент " .. j .. " должен быть таблицей")
+                end
+                if r.name ~= e.name then
+                    return fail("Тест " .. i .. ": элемент " .. j .. ", name не совпадает")
+                end
+                if r.rank ~= e.rank then
+                    return fail("Тест " .. i .. ": элемент " .. j .. ", rank не совпадает")
+                end
+                if r.publicNote ~= e.publicNote then
+                    return fail("Тест " .. i .. ": элемент " .. j .. ", publicNote не совпадает")
+                end
+                if r.officerNote ~= e.officerNote then
+                    return fail("Тест " .. i .. ": элемент " .. j .. ", officerNote не совпадает")
+                end
+                if r.matchType ~= e.matchType then
+                    return fail("Тест " .. i .. ": элемент " .. j .. ", matchType не совпадает. Ожидалось '" .. e.matchType .. "', получено '" .. tostring(r.matchType) .. "'")
+                end
+            end
+
+            _G["test" .. i] = test.name .. " | " .. #result .. " элементов | ОК"
+        end
+
+        return true
+    end,
+}
+
+ns_llua['lua'][136.2] = {
+    type = "commenttest",
+    title = "Тест 131-7: функция UpdateGuildNoteByName",
+    helpModules = {131, 45, 31, 29},
+    preloadVars = {
+        {var = "UpdateGuildNoteByName", desc = "UpdateGuildNoteByName очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "test1", desc = "test1 очищается перед проверкой"},
+        {var = "test2", desc = "test2 очищается перед проверкой"},
+        {var = "test3", desc = "test3 очищается перед проверкой"},
+        {var = "test4", desc = "test4 очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "test1", "test2", "test3", "test4"},
+    instruction = [=[
+<h>Тест 131-7: функция UpdateGuildNoteByName</h>
+<t>Создай глобальную функцию <k>UpdateGuildNoteByName(targetName, newNote, noteType)</k>.</t>
+<t>Аргументы:</t>
+<c>targetName</c> — имя участника гильдии (строка).
+<c>newNote</c> — новая заметка (строка).
+<c>noteType</c> — тип заметки: <s>"public"</s> или <s>"officer"</s>.
+<t>Функция должна найти участника по имени и установить ему заметку указанного типа.</t>
+<t>Вернуть <k>true</k> если заметка успешно установлена, <k>false</k> если участник не найден.</t>
+<t>Для установки заметок используй:</t>
+<c>SetGuildRosterPublicNote(index, newNote)</c> — для публичной заметки.
+<c>SetGuildRosterOfficerNote(index, newNote)</c> — для офицерской заметки.
+<t>Если аргументы некорректны, вернуть <k>false</k>.</t>
+<w>Во время проверки система прогонит функцию через 4 сценария.</w>
+]=],
+    initialCode = [=[
+function UpdateGuildNoteByName(targetName, newNote, noteType)
+    
 end
-if type(result) ~= "number" then
-_G.checkError = "Функция должна вернуть число"
-return false
-end
-if result < 0 then
-_G.checkError = "Количество участников онлайн не может быть отрицательным"
-return false
-end
-return true
-end,
+]=],
+    requireKeywords = {
+        "UpdateGuildNoteByName",
+        "function",
+        "GetGuildInfo",
+        "GetNumGuildMembers",
+        "GetGuildRosterInfo",
+        "SetGuildRosterPublicNote",
+        "SetGuildRosterOfficerNote",
+        "return",
+    },
+
+    mockGlobals = {
+        GetGuildInfo = function(u)
+            return "Тестовая Гильдия", "Рекрут"
+        end,
+        GetNumGuildMembers = function()
+            return 5, 5
+        end,
+        GetGuildRosterInfo = function(i)
+            local mock = {
+                [1] = {"Вася",  "Офицер",  1, 80, "Воин",      "Элвинн",   "старая1", "оф1", true,  "", "WARRIOR"},
+                [2] = {"Петя",  "Рекрут",  3, 75, "Маг",       "Шторм",    "старая2", "оф2", true,  "", "MAGE"},
+                [3] = {"Сидр",  "Ветеран", 2, 60, "Жрец",      "Сталь",    "старая3", "оф3", false, "", "PRIEST"},
+                [4] = {"Коля",  "Рекрут",  3, 85, "Разбойник", "Подгород", "старая4", "оф4", true,  "", "ROGUE"},
+                [5] = {"Аня",   "Офицер",  1, 70, "Друид",     "Тельд",    "старая5", "оф5", false, "", "DRUID"},
+            }
+            local data = mock[i]
+            if not data then return nil end
+            return data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9], data[10], data[11]
+        end,
+        SetGuildRosterPublicNote = function(index, note)
+            _G._lastSetPublic = {index = index, note = note}
+        end,
+        SetGuildRosterOfficerNote = function(index, note)
+            _G._lastSetOfficer = {index = index, note = note}
+        end,
+    },
+
+    checkCode = function(env)
+        _G.checkError = nil
+        for i = 1, 4 do _G["test" .. i] = nil end
+        _G._lastSetPublic = nil
+        _G._lastSetOfficer = nil
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(env) ~= "table" then
+            return fail("Внутренняя ошибка: окружение не передано")
+        end
+
+        local fn = env.UpdateGuildNoteByName
+        if type(fn) ~= "function" then
+            return fail("UpdateGuildNoteByName не является глобальной функцией")
+        end
+
+        local scenarios = {
+            {
+                name = "Публичная заметка для Васи",
+                targetName = "Вася",
+                newNote = "Альт мага",
+                noteType = "public",
+                expIndex = 1,
+                expResult = true,
+            },
+            {
+                name = "Офицерская заметка для Пети",
+                targetName = "Петя",
+                newNote = "DKP: 100",
+                noteType = "officer",
+                expIndex = 2,
+                expResult = true,
+            },
+            {
+                name = "Несуществующий участник",
+                targetName = "Никита",
+                newNote = "тест",
+                noteType = "public",
+                expIndex = nil,
+                expResult = false,
+            },
+            {
+                name = "Некорректный тип заметки",
+                targetName = "Вася",
+                newNote = "тест",
+                noteType = "invalid",
+                expIndex = nil,
+                expResult = false,
+            },
+        }
+
+        for i, test in ipairs(scenarios) do
+            _G._lastSetPublic = nil
+            _G._lastSetOfficer = nil
+            
+            local ok, result = pcall(fn, test.targetName, test.newNote, test.noteType)
+
+            if not ok then
+                return fail("Тест " .. i .. " (" .. test.name .. "): ошибка вызова: " .. tostring(result))
+            end
+
+            if result ~= test.expResult then
+                _G["test" .. i] = test.name .. " | Результат: " .. tostring(result) .. " | Ожидалось: " .. tostring(test.expResult)
+                return fail("Тест " .. i .. " не пройден: неправильный результат")
+            end
+
+            if test.expResult then
+                if test.noteType == "public" then
+                    if not _G._lastSetPublic then
+                        return fail("Тест " .. i .. ": SetGuildRosterPublicNote не был вызван")
+                    end
+                    if _G._lastSetPublic.index ~= test.expIndex then
+                        return fail("Тест " .. i .. ": неправильный индекс. Ожидалось " .. test.expIndex .. ", получено " .. _G._lastSetPublic.index)
+                    end
+                    if _G._lastSetPublic.note ~= test.newNote then
+                        return fail("Тест " .. i .. ": неправильная заметка")
+                    end
+                elseif test.noteType == "officer" then
+                    if not _G._lastSetOfficer then
+                        return fail("Тест " .. i .. ": SetGuildRosterOfficerNote не был вызван")
+                    end
+                    if _G._lastSetOfficer.index ~= test.expIndex then
+                        return fail("Тест " .. i .. ": неправильный индекс")
+                    end
+                    if _G._lastSetOfficer.note ~= test.newNote then
+                        return fail("Тест " .. i .. ": неправильная заметка")
+                    end
+                end
+            end
+
+            _G["test" .. i] = test.name .. " | ОК"
+        end
+
+        return true
+    end,
 }
 
 ns_llua['lua'][137] = {
