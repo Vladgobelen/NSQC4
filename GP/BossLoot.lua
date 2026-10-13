@@ -1,6 +1,6 @@
 -- ============================================================================
 -- NSQC4 / GP / BossLoot
--- Панель начисления ГП при открытии лута. Бан. Аук по СКМ.
+-- Панель начисления ГП при открытии лута. Бан. Аук по СКМ. Ролл по СКМ.
 -- Модуль: "gp".
 -- ============================================================================
 
@@ -15,6 +15,7 @@ NSQC4.RegisterModule("gp", function()
     local RARITY_EPIC    = 4
     local DEFAULT_SPOT_RADIUS = 0.005
     local BAN_ICON       = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
+    local ROLL_TIME      = 15
 
     -- ========================================================================
     -- Хранилище
@@ -25,6 +26,7 @@ NSQC4.RegisterModule("gp", function()
     gpDb.doneSpots     = gpDb.doneSpots     or {}
     gpDb.bannedPlayers = gpDb.bannedPlayers or {}
     gpDb.bannedSpots   = gpDb.bannedSpots   or {}
+    gpDb.rollMode      = gpDb.rollMode      or false
 
     -- ========================================================================
     -- Состояние модуля
@@ -32,9 +34,13 @@ NSQC4.RegisterModule("gp", function()
     local panel
     local editBox
     local banWindow
+    local rollCheckbox
+    local panelLastBannedOnly = false
 
     local guildCache = {}
     local guildCacheReady = false
+
+    local rollState = nil
 
     -- ========================================================================
     -- Утилиты
@@ -299,6 +305,8 @@ NSQC4.RegisterModule("gp", function()
     local function ShowPanel(bannedOnly)
         if not panel then CreatePanel() end
 
+        panelLastBannedOnly = bannedOnly and true or false
+
         for _, el in ipairs(panel.gpButtons) do
             if bannedOnly then
                 el:Hide()
@@ -326,19 +334,164 @@ NSQC4.RegisterModule("gp", function()
     end
 
     -- ========================================================================
-    -- Сбор ссылок на эпик-лут
+    -- Чекбокс режима «Ролл»
     -- ========================================================================
-    local function GetEpicLinks()
-        local links = {}
-        for i = 1, GetNumLootItems() do
-            local link = GetLootSlotLink(i)
-            local _, _, _, rarity = GetLootSlotInfo(i)
-            if link and rarity and rarity >= RARITY_EPIC then
-                table.insert(links, link)
+    local function CreateRollCheckbox()
+        local cb = CreateFrame("CheckButton", "NSQC4RollCheckbox", UIParent, "UICheckButtonTemplate")
+        cb:SetSize(24, 24)
+        cb:SetPoint("BOTTOMLEFT", LootFrame, "TOPLEFT", 65, -13)
+
+        cb.text = cb:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        cb.text:SetPoint("LEFT", cb, "RIGHT", 4, 0)
+        cb.text:SetText("Режим ролла")
+        cb.text:SetTextColor(1, 0.82, 0)
+
+        cb:SetScript("OnClick", function(self)
+            gpDb.rollMode = self:GetChecked() and true or false
+        end)
+
+        cb:SetScript("OnEnter", function(self)
+            if panel then panel:Hide() end
+
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText("Режим ролла", 1, 0.82, 0)
+            GameTooltip:AddLine("Если включён — СКМ по вещи запускает ролл на 15 сек.", 1, 1, 1, true)
+            GameTooltip:AddLine("Побеждает наибольший ролл (1-100).", 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+
+        cb:SetScript("OnLeave", function()
+            GameTooltip:Hide()
+            if panel then
+                ShowPanel(panelLastBannedOnly)
+            end
+        end)
+
+        rollCheckbox = cb
+        return cb
+    end
+
+    -- ========================================================================
+    -- Ролл
+    -- ========================================================================
+    local function FinishRoll()
+        if not rollState then return end
+
+        local winnerName = nil
+        local winnerValue = -1
+
+        for _, r in ipairs(rollState.rolls) do
+            if r.value > winnerValue then
+                winnerValue = r.value
+                winnerName = r.name
             end
         end
-        return links
+
+        local itemLink = rollState.itemLink
+        local slot     = rollState.slot
+
+        if rollState.timerFrame then
+            rollState.timerFrame:SetScript("OnUpdate", nil)
+            rollState.timerFrame:Hide()
+        end
+
+        if not LootFrame or not LootFrame:IsShown() then
+            SendChatMessage("Ролл завершён, но окно лута закрыто. Выдать вручную: " .. (itemLink or "?"), "RAID_WARNING")
+            rollState = nil
+            return
+        end
+
+        if not winnerName then
+            SendChatMessage("Ролл по " .. (itemLink or "?") .. ": никто не бросил.", "RAID_WARNING")
+            rollState = nil
+            return
+        end
+
+        local currentLink = GetLootSlotLink(slot)
+        if not currentLink or currentLink ~= itemLink then
+            SendChatMessage("Ролл завершён, но предмет исчез из слота. Выдать вручную: " .. (itemLink or "?"), "RAID_WARNING")
+            rollState = nil
+            return
+        end
+
+        local lowerWinner = string.lower(winnerName)
+        local found = false
+
+        if GetNumRaidMembers() > 0 then
+            for i = 1, GetNumRaidMembers() do
+                local cand = GetMasterLootCandidate(i)
+                if cand and string.lower(cand) == lowerWinner then
+                    GiveMasterLoot(slot, i)
+                    found = true
+                    break
+                end
+            end
+        elseif GetNumPartyMembers() > 0 then
+            for i = 1, GetNumPartyMembers() + 1 do
+                local cand = GetMasterLootCandidate(i)
+                if cand and string.lower(cand) == lowerWinner then
+                    GiveMasterLoot(slot, i)
+                    found = true
+                    break
+                end
+            end
+        end
+
+        if found then
+            SendChatMessage(winnerName .. " выиграл " .. (itemLink or "?") .. " с роллом " .. winnerValue, "RAID_WARNING")
+        else
+            SendChatMessage("Ролл выиграл " .. winnerName .. " (" .. winnerValue .. "), но выдать не удалось. Слот: " .. tostring(slot) .. ", предмет: " .. (itemLink or "?"), "RAID_WARNING")
+        end
+
+        rollState = nil
     end
+
+    local function StartRoll(itemLink, slot)
+        if rollState then return end
+
+        rollState = {
+            itemLink = itemLink,
+            slot     = slot,
+            rolls    = {},
+            seen     = {},
+            startAt  = GetTime(),
+        }
+
+        SendChatMessage("РОЛЛ " .. itemLink, "RAID")
+
+        local frame = CreateFrame("Frame")
+        rollState.timerFrame = frame
+        local elapsed = 0
+
+        frame:SetScript("OnUpdate", function(self, dt)
+            elapsed = elapsed + dt
+            if elapsed >= ROLL_TIME then
+                self:SetScript("OnUpdate", nil)
+                FinishRoll()
+            end
+        end)
+    end
+
+    local sysFrame = CreateFrame("Frame")
+    sysFrame:RegisterEvent("CHAT_MSG_SYSTEM")
+    sysFrame:SetScript("OnEvent", function(_, _, msg)
+        if not rollState then return end
+        if type(msg) ~= "string" then return end
+
+        local name, n, min, max = msg:match("^(%S+)%s+выбрасывает%s+(%d+)%s+%((%d+)%-(%d+)%)$")
+        if not name then return end
+
+        local value = tonumber(n)
+        local minV  = tonumber(min)
+        local maxV  = tonumber(max)
+
+        if not value or not minV or not maxV then return end
+        if minV ~= 1 or maxV ~= 100 then return end
+
+        if rollState.seen[name] then return end
+        rollState.seen[name] = true
+        table.insert(rollState.rolls, { name = name, value = value })
+    end)
 
     -- ========================================================================
     -- LOOT_OPENED / LOOT_CLOSED
@@ -349,6 +502,7 @@ NSQC4.RegisterModule("gp", function()
     lootFrame:SetScript("OnEvent", function(_, event)
         if event == "LOOT_CLOSED" then
             HidePanel()
+            if rollCheckbox then rollCheckbox:Hide() end
             return
         end
 
@@ -358,21 +512,15 @@ NSQC4.RegisterModule("gp", function()
 
         if IsBanned() then
             ShowPanel(true)
-            return
+        elseif HasEpicLoot() then
+            ShowPanel(false)
         end
 
-        if not HasEpicLoot() then return end
-        ShowPanel(false)
-
-        -- Отправка эпик-лута в рейд-чат (только мастер-лутер)
-        local links = GetEpicLinks()
-        if #links > 0 then
-            if InCombatLockdown() then
-                SendChatMessage("Лут: " .. table.concat(links, ", "), "RAID")
-            else
-                SendChatMessage("Лут: " .. table.concat(links, ", "), "RAID_WARNING")
-            end
+        if not rollCheckbox then
+            CreateRollCheckbox()
         end
+        rollCheckbox:SetChecked(gpDb.rollMode == true)
+        rollCheckbox:Show()
     end)
 
     -- ========================================================================
@@ -390,7 +538,7 @@ NSQC4.RegisterModule("gp", function()
     end)
 
     -- ========================================================================
-    -- АУК по СКМ
+    -- СКМ по кнопке лута
     -- ========================================================================
     local function GetButtonText(b)
         if not b then return nil end
@@ -410,7 +558,7 @@ NSQC4.RegisterModule("gp", function()
         for i = 1, GetNumLootItems() do
             local link = GetLootSlotLink(i)
             if link and GetItemInfo(link) == name then
-                return link
+                return link, i
             end
         end
         return nil
@@ -427,18 +575,19 @@ NSQC4.RegisterModule("gp", function()
             if button == "MiddleButton" then
                 if not AmIMasterLooter() then return end
 
+                if rollState then return end
+
                 local txt = GetButtonText(self)
-                local link = FindLinkByName(txt)
+                local link, slot = FindLinkByName(txt)
                 if not link then
                     print("|cffff0000[NSQC4]|r Не удалось получить ссылку на предмет.")
                     return
                 end
 
-                if InCombatLockdown() then
-                    -- В бою RAID_WARNING недоступен, шлём в RAID
-                    SendChatMessage("АУК " .. link, "RAID")
+                if gpDb.rollMode then
+                    StartRoll(link, slot)
                 else
-                    SendChatMessage("АУК " .. link, "RAID_WARNING")
+                    SendChatMessage("АУК " .. link, "RAID")
                 end
                 return
             end
