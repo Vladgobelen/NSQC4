@@ -27,6 +27,8 @@ Guild\Recruiter\Init.lua
 Guild\Recruiter\Storage.lua
 Guild\Recruiter\Logic.lua
 Guild\Recruiter\UI.lua
+Guild\BlackList.lua
+Guild\r.lua
 Interface\Mail.lua
 Interface\ChatButtons.lua
 Interface\AOClick.lua
