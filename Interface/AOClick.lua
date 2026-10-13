@@ -1,8 +1,3 @@
--- ============================================================================
--- NSQC4 / Interface / AOClick
--- Кликабельные ники. Формат: [А8] Ник: текст / [О1] Ник: текст
--- ============================================================================
-
 NSQC4.RegisterModule("ui_ao", function()
 
     local CLASS_COLORS = {
@@ -13,21 +8,12 @@ NSQC4.RegisterModule("ui_ao", function()
         ["9"] = "|cff9482C9", ["0"] = "|cffFF7D0A",
     }
 
-    local DEFAULT_COLOR = "|cFFC0C0C0"
+    local DEFAULT_COLOR    = "|cFFC0C0C0"
     local NICK_COLOR_RESET = "|r"
 
-    local aoNames = {}
+    local PREFIX_Q = "nsInfoQ"
 
-    local f = CreateFrame("Frame")
-    f:RegisterEvent("CHAT_MSG_ADDON")
-    f:SetScript("OnEvent", function(_, _, prefix, text, channel)
-        if prefix == "giveMeInfo" and channel == "GUILD" then
-            local nick = text:match("^(%S+)")
-            if nick then
-                SendAddonMessage("giveMeInfoR", nick, "RAID")
-            end
-        end
-    end)
+    local aoNames = {}
 
     local function BuildReplacement(letter, code, nick)
         local cleanName = nick:gsub(":+$", "")
@@ -38,7 +24,6 @@ NSQC4.RegisterModule("ui_ao", function()
     end
 
     local function ReplaceAll(msg)
-        -- С префиксом: |Hplayer:Шеф|h[Шеф]|h: [А2] Ник:
         msg = msg:gsub(
             "|Hplayer:[^|]+|h%[[^%]]+%]|h: %[\208\144(%d)%] (%S+): ",
             function(code, nick) return BuildReplacement("А", code, nick) end)
@@ -46,7 +31,6 @@ NSQC4.RegisterModule("ui_ao", function()
             "|Hplayer:[^|]+|h%[[^%]]+%]|h: %[\208\158(%d)%] (%S+): ",
             function(code, nick) return BuildReplacement("О", code, nick) end)
 
-        -- Без префикса: [А2] Ник:
         msg = msg:gsub(
             "%[\208\144(%d)%] (%S+): ",
             function(code, nick) return BuildReplacement("А", code, nick) end)
@@ -81,7 +65,7 @@ NSQC4.RegisterModule("ui_ao", function()
             local name = linkData:match("^([^:]+)")
             if name and aoNames[name] then
                 if button == "RightButton" then
-                    SendAddonMessage("giveMeInfo", name, "GUILD")
+                    SendAddonMessage(PREFIX_Q, name, "GUILD")
                     return
                 elseif button == "LeftButton" then
                     local editBox = self.editBox or ChatFrame1EditBox
@@ -96,4 +80,5 @@ NSQC4.RegisterModule("ui_ao", function()
         end
         return oldOnHyperlinkShow(self, link, text, button)
     end
+
 end)
