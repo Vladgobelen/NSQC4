@@ -14,7 +14,6 @@ NSQC4.RegisterModule("gp", function()
     local FRAME_WIDTH    = 330
     local RARITY_EPIC    = 4
     local DEFAULT_SPOT_RADIUS = 0.005
-    local BAN_ICON       = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
     local ROLL_TIME      = 15
 
     -- ========================================================================
@@ -27,6 +26,7 @@ NSQC4.RegisterModule("gp", function()
     gpDb.bannedPlayers = gpDb.bannedPlayers or {}
     gpDb.bannedSpots   = gpDb.bannedSpots   or {}
     gpDb.rollMode      = gpDb.rollMode      or false
+    gpDb.collapsed     = gpDb.collapsed     or {}
 
     -- ========================================================================
     -- Состояние модуля
@@ -91,6 +91,39 @@ NSQC4.RegisterModule("gp", function()
     end
 
     -- ========================================================================
+    -- Ключ состояния панели (таргет + подлокация)
+    -- ========================================================================
+    local function GetCollapseKey()
+        local sz = GetSubZoneText()
+        if not sz or sz == "" then sz = GetRealZoneText() end
+        if not sz then return nil end
+
+        if UnitExists("target") then
+            local nick = ShortName(UnitName("target"))
+            if nick then return "P:" .. nick .. "@" .. sz end
+        end
+        return "S:" .. sz
+    end
+
+    local function IsCollapsed()
+        local key = GetCollapseKey()
+        if not key then return false end
+        return gpDb.collapsed[key] == true
+    end
+
+    local function ToggleCollapsed()
+        local key = GetCollapseKey()
+        if not key then return false end
+        if gpDb.collapsed[key] then
+            gpDb.collapsed[key] = nil
+            return false
+        else
+            gpDb.collapsed[key] = true
+            return true
+        end
+    end
+
+    -- ========================================================================
     -- Начисление ГП рейду
     -- ========================================================================
     local function AssignGpToRaid(value)
@@ -128,6 +161,7 @@ NSQC4.RegisterModule("gp", function()
         SendAddonMessage("nsGPlog", log, "GUILD")
         print("|cff00ff00[NSQC4]|r Начислено " .. value .. " ГП " .. count .. " игрокам рейда")
     end
+
     -- ========================================================================
     -- done / banned
     -- ========================================================================
@@ -206,6 +240,9 @@ NSQC4.RegisterModule("gp", function()
     -- ========================================================================
     -- Панель
     -- ========================================================================
+    local COLLAPSE_X_OFFSET   -- вычисляется в CreatePanel
+    local COLLAPSE_Y_OFFSET = -25
+
     local function CreatePanel()
         local f = CreateFrame("Frame", "NSQC4BossLootFrame", UIParent)
         f:SetSize(FRAME_WIDTH, FRAME_HEIGHT)
@@ -223,7 +260,7 @@ NSQC4.RegisterModule("gp", function()
         for _, value in ipairs(GP_VALUES) do
             local btn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
             btn:SetSize(40, 20)
-            btn:SetPoint("TOPLEFT", f, "TOPLEFT", xOffset, -25)
+            btn:SetPoint("TOPLEFT", f, "TOPLEFT", xOffset, COLLAPSE_Y_OFFSET)
             btn:SetText(tostring(value))
             btn:SetScript("OnClick", function()
                 AssignGpToRaid(value)
@@ -236,7 +273,7 @@ NSQC4.RegisterModule("gp", function()
 
         local qBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
         qBtn:SetSize(30, 20)
-        qBtn:SetPoint("TOPLEFT", f, "TOPLEFT", xOffset, -25)
+        qBtn:SetPoint("TOPLEFT", f, "TOPLEFT", xOffset, COLLAPSE_Y_OFFSET)
         qBtn:SetText("?")
         qBtn:SetScript("OnClick", function()
             if editBox then
@@ -249,7 +286,7 @@ NSQC4.RegisterModule("gp", function()
 
         local eb = CreateFrame("EditBox", "NSQC4BossLootEditBox", f, "InputBoxTemplate")
         eb:SetSize(60, 20)
-        eb:SetPoint("TOPLEFT", f, "TOPLEFT", xOffset, -25)
+        eb:SetPoint("TOPLEFT", f, "TOPLEFT", xOffset, COLLAPSE_Y_OFFSET)
         eb:SetAutoFocus(false)
         eb:SetMaxLetters(6)
         eb:SetScript("OnEnterPressed", function(self)
@@ -272,64 +309,92 @@ NSQC4.RegisterModule("gp", function()
         editBox = eb
         table.insert(gpButtons, eb)
 
-        local banBtn = CreateFrame("Button", nil, f)
-        banBtn:SetSize(20, 20)
-        banBtn:SetPoint("TOPLEFT", f, "TOPLEFT", xOffset + 65, -25)
-        banBtn:SetNormalTexture(BAN_ICON)
-        banBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight")
-        banBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        -- координата для кнопки сворачивания (после editBox)
+        COLLAPSE_X_OFFSET = xOffset + 10
 
-        banBtn:SetScript("OnClick", function(_, button)
-            if button == "LeftButton" then
-                MarkBanned()
-                f:Hide()
-            elseif button == "RightButton" then
-                NSQC4.ShowBanWindow()
+        local collapseBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+        collapseBtn:SetSize(30, 20)
+        collapseBtn:SetPoint("TOPLEFT", f, "TOPLEFT", COLLAPSE_X_OFFSET, COLLAPSE_Y_OFFSET)
+        collapseBtn:SetText("<<")
+        collapseBtn:SetScript("OnClick", function()
+            if not GetCollapseKey() then
+                print("|cffff0000[NSQC4]|r Не удалось определить подлокацию")
+                return
             end
+            ToggleCollapsed()
+            ShowPanel(panelLastBannedOnly)
         end)
-
-        banBtn:SetScript("OnEnter", function(self)
+        collapseBtn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText("Бан")
-            GameTooltip:AddLine("ЛКМ — забанить цель или точку", 1, 1, 1)
-            GameTooltip:AddLine("ПКМ — список банов", 1, 1, 1)
+            GameTooltip:SetText("Свернуть/развернуть")
+            GameTooltip:AddLine("Состояние запоминается для текущего таргета и подлокации", 1, 1, 1, true)
+            GameTooltip:AddLine("Подлокация: " .. (GetSubZoneText() or "?"), 0.7, 0.7, 0.7)
             GameTooltip:Show()
         end)
-        banBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        collapseBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-        f.gpButtons = gpButtons
-        f.banBtn    = banBtn
-        f.title     = title
-        f.editBox   = eb
+        f.gpButtons   = gpButtons
+        f.collapseBtn = collapseBtn
+        f.title       = title
+        f.editBox     = eb
 
         panel = f
     end
 
-    local function ShowPanel(bannedOnly)
+    function ShowPanel(bannedOnly)  -- forward declaration через глобальную ссылку модуля
+    end
+
+    local function ShowPanelImpl(bannedOnly)
         if not panel then CreatePanel() end
 
         panelLastBannedOnly = bannedOnly and true or false
 
-        for _, el in ipairs(panel.gpButtons) do
-            if bannedOnly then
-                el:Hide()
-            else
-                if el == editBox then
+        local collapsed = IsCollapsed()
+
+        if collapsed then
+            for _, el in ipairs(panel.gpButtons) do el:Hide() end
+            panel.title:Hide()
+            if editBox then editBox:Hide() end
+
+            panel.collapseBtn:ClearAllPoints()
+            panel.collapseBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, COLLAPSE_Y_OFFSET)
+            panel.collapseBtn:SetText(">>")
+            panel.collapseBtn:Show()
+
+            panel:SetSize(50, 30)
+        else
+            panel:SetSize(FRAME_WIDTH, FRAME_HEIGHT)
+            panel.title:Show()
+
+            for _, el in ipairs(panel.gpButtons) do
+                if bannedOnly then
                     el:Hide()
                 else
-                    el:Show()
+                    if el == editBox then
+                        el:Hide()
+                    else
+                        el:Show()
+                    end
                 end
             end
-        end
 
-        if bannedOnly then
-            panel.title:SetText("|cffff8000Забанено|r — только бан")
-        else
-            panel.title:SetText("Начислить ГП рейду:")
+            if bannedOnly then
+                panel.title:SetText("|cffff8000Забанено|r — только бан")
+            else
+                panel.title:SetText("Начислить ГП рейду:")
+            end
+
+            panel.collapseBtn:ClearAllPoints()
+            panel.collapseBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", COLLAPSE_X_OFFSET, COLLAPSE_Y_OFFSET)
+            panel.collapseBtn:SetText("<<")
+            panel.collapseBtn:Show()
         end
 
         panel:Show()
     end
+
+    -- подменяем forward-объявление на реализацию
+    ShowPanel = ShowPanelImpl
 
     local function HidePanel()
         if panel then panel:Hide() end
@@ -513,9 +578,7 @@ NSQC4.RegisterModule("gp", function()
 
         if IsDone() then return end
 
-        if IsBanned() then
-            ShowPanel(true)
-        elseif HasEpicLoot() then
+        if HasEpicLoot() then
             ShowPanel(false)
         end
 
