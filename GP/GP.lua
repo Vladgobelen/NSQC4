@@ -1175,10 +1175,16 @@ end
 
 function GpDb:Show()
     self.window:Show()
+
     self.gp_data = {}
     self:UpdateWindow()
+
     self.window.raidOnlyCheckbox:SetChecked(IsInRaid() and true or false)
 
+    -- Запрашиваем свежий ростер гильдии
+    GuildRoster()
+
+    -- Ждём GUILD_ROSTER_UPDATE
     if not self._rosterListener then
         self._rosterListener = CreateFrame("Frame")
         self._rosterListener:SetScript("OnEvent", function(f, event)
@@ -1186,18 +1192,82 @@ function GpDb:Show()
             self:RequestNonGuildGP()
             self:_UpdateFromGuild()
             self:UpdateWindow()
-            -- ▼▼▼ ДОБАВЬ ЭТУ СТРОКУ ▼▼▼
             self:ReportNonGuild()
         end)
     end
     self._rosterListener:RegisterEvent("GUILD_ROSTER_UPDATE")
 
-    GuildRoster()
+    -- Страховка — 2 секунды
+    if self._showFallback then
+        self._showFallback:SetScript("OnUpdate", nil)
+        self._showFallback:Hide()
+        self._showFallback = nil
+    end
 
-    -- ... остальной код Show() БЕЗ изменений ...
+    local fallback = CreateFrame("Frame")
+    self._showFallback = fallback
+    fallback:Show()
 
-    -- ▼▼▼ И В КОНЕЦ Show(), ПОСЛЕ fallback, ДОБАВЬ ▼▼▼
-    self:ReportNonGuild()
+    local elapsed = 0
+    local delay = 2.0
+    local fired = false
+
+    fallback:SetScript("OnUpdate", function(f, dt)
+        elapsed = elapsed + dt
+        if elapsed < delay then return end
+
+        f:SetScript("OnUpdate", nil)
+        f:Hide()
+        self._showFallback = nil
+
+        if fired then return end
+        fired = true
+
+        self:RequestNonGuildGP()
+        self:_UpdateFromGuild()
+        self:UpdateWindow()
+        self:ReportNonGuild()
+    end)
+end
+
+-- ============================================================================
+-- Вывод в офицерский: не-гильдейские из рейда и их ГП
+-- ============================================================================
+function GpDb:ReportNonGuild()
+    if not IsInRaid() then
+        SendChatMessage("[GP] Не в рейде — не-гильдейских нет", "OFFICER")
+        return
+    end
+
+    -- Список гильдейских (актуальный ростер)
+    local guildNames = {}
+    local guildCount = 0
+    for i = 1, GetNumGuildMembers(true) do
+        local name = GetGuildRosterInfo(i)
+        if name then
+            guildNames[name:match("^(.-)-") or name] = true
+            guildCount = guildCount + 1
+        end
+    end
+
+    -- Считаем не-гильдейских
+    local list = {}
+    for i = 1, GetNumGroupMembers() do
+        local raidName = GetRaidRosterInfo(i)
+        if raidName then
+            local plain = raidName:match("^(.-)-") or raidName
+            if not guildNames[plain] then
+                local cache = self.external_gp_cache or {}
+                list[#list+1] = plain .. " => " .. tostring(cache[plain] or "nil")
+            end
+        end
+    end
+
+    SendChatMessage("[GP] В гильдии: " .. guildCount ..
+                    ", не-гильдейских в рейде: " .. #list, "OFFICER")
+    for _, line in ipairs(list) do
+        SendChatMessage("[GP] " .. line, "OFFICER")
+    end
 end
 
 -- ============================================================================
