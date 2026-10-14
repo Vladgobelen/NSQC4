@@ -243,6 +243,8 @@ NSQC4.RegisterModule("gp", function()
     local COLLAPSE_X_OFFSET   -- вычисляется в CreatePanel
     local COLLAPSE_Y_OFFSET = -25
 
+    local ShowPanel   -- forward declaration
+
     local function CreatePanel()
         local f = CreateFrame("Frame", "NSQC4BossLootFrame", UIParent)
         f:SetSize(FRAME_WIDTH, FRAME_HEIGHT)
@@ -265,7 +267,6 @@ NSQC4.RegisterModule("gp", function()
             btn:SetScript("OnClick", function()
                 AssignGpToRaid(value)
                 MarkDone()
-                f:Hide()
             end)
             table.insert(gpButtons, btn)
             xOffset = xOffset + 45
@@ -298,7 +299,6 @@ NSQC4.RegisterModule("gp", function()
             self:SetText("")
             self:ClearFocus()
             self:Hide()
-            f:Hide()
         end)
         eb:SetScript("OnEscapePressed", function(self)
             self:SetText("")
@@ -341,10 +341,7 @@ NSQC4.RegisterModule("gp", function()
         panel = f
     end
 
-    function ShowPanel(bannedOnly)  -- forward declaration через глобальную ссылку модуля
-    end
-
-    local function ShowPanelImpl(bannedOnly)
+    ShowPanel = function(bannedOnly)
         if not panel then CreatePanel() end
 
         panelLastBannedOnly = bannedOnly and true or false
@@ -392,9 +389,6 @@ NSQC4.RegisterModule("gp", function()
 
         panel:Show()
     end
-
-    -- подменяем forward-объявление на реализацию
-    ShowPanel = ShowPanelImpl
 
     local function HidePanel()
         if panel then panel:Hide() end
