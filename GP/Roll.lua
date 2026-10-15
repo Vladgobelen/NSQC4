@@ -33,19 +33,19 @@ NSQC4.RegisterModule("gp", function()
             or UnitIsPartyLeader("player") == 1
     end
 
-    local function GetClassByName(name)
+    local function GetClassAndNote(name)
         local short = ShortName(name)
-        if not short then return "WARRIOR" end
+        if not short then return "WARRIOR", "" end
         for i = 1, GetNumGuildMembers(true) do
-            local gName, _, _, _, _, _, _, _, _, _, classFile = GetGuildRosterInfo(i)
+            local gName, _, _, _, _, _, publicNote, _, _, _, classFile = GetGuildRosterInfo(i)
             if gName then
                 local gShort = ShortName(gName)
                 if gShort == short then
-                    return classFile or "WARRIOR"
+                    return classFile or "WARRIOR", publicNote or ""
                 end
             end
         end
-        return "WARRIOR"
+        return "WARRIOR", ""
     end
 
     local function GetItemIdFromLink(link)
@@ -214,14 +214,20 @@ NSQC4.RegisterModule("gp", function()
             row:SetPoint("TOPLEFT", 10, -totalHeight)
             row:SetPoint("TOPRIGHT", -10, -totalHeight)
             row:EnableMouse(true)
-            local cc = CLASS_COLORS[GetClassByName(entry.name)] or CLASS_COLORS.WARRIOR
+
+            local class, publicNote = GetClassAndNote(entry.name)
+            local cc = CLASS_COLORS[class] or CLASS_COLORS.WARRIOR
 
             local nt = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
             nt:SetPoint("LEFT", 5, 0)
             local nameColor = entry.banned and "|cffff0000"
                 or (entry.name == myName and "|cffffd100" or cc)
             local banSuffix = entry.banned and " |cffff0000[ЗАБАНЕН]|r" or ""
-            nt:SetText(nameColor .. entry.name .. banSuffix .. "|r")
+            local dn = entry.name
+            if publicNote and publicNote ~= "" then
+                dn = dn .. " (" .. publicNote .. ")"
+            end
+            nt:SetText(nameColor .. dn .. banSuffix .. "|r")
 
             local bt = row:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
             bt:SetPoint("RIGHT", -5, 0)
