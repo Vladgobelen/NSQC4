@@ -1,6 +1,6 @@
 -- ============================================================================
 -- NSQC4 / GP / BossLoot
--- Панель начисления ГП при открытии лута. Бан. Аук по СКМ. Ролл — через Roll.lua.
+-- Панель начисления ГП при открытии лута. Аук по СКМ. Ролл — через Roll.lua.
 -- Модуль: "gp".
 -- ============================================================================
 
@@ -20,10 +20,6 @@ NSQC4.RegisterModule("gp", function()
     -- ========================================================================
     nsDbc4.settings.gp = nsDbc4.settings.gp or {}
     local gpDb = nsDbc4.settings.gp
-    gpDb.donePlayers   = gpDb.donePlayers   or {}
-    gpDb.doneSpots     = gpDb.doneSpots     or {}
-    gpDb.bannedPlayers = gpDb.bannedPlayers or {}
-    gpDb.bannedSpots   = gpDb.bannedSpots   or {}
     gpDb.rollMode      = gpDb.rollMode      or false
     gpDb.collapsed     = gpDb.collapsed     or {}
     gpDb.pinned        = gpDb.pinned        or false
@@ -34,7 +30,6 @@ NSQC4.RegisterModule("gp", function()
     -- ========================================================================
     local panel
     local editBox
-    local banWindow
     local rollCheckbox
     local panelLastBannedOnly = false
 
@@ -47,21 +42,6 @@ NSQC4.RegisterModule("gp", function()
     local function ShortName(name)
         if not name then return nil end
         return name:match("^([^%-]+)") or name
-    end
-
-    local function SpotRadius(spot)
-        if spot and spot.radius then return spot.radius end
-        return DEFAULT_SPOT_RADIUS
-    end
-
-    local function InSpotList(list, x, y)
-        if not list or not x or not y then return false end
-        for _, spot in ipairs(list) do
-            local r = SpotRadius(spot)
-            local dx, dy = spot.x - x, spot.y - y
-            if dx*dx + dy*dy <= r*r then return true end
-        end
-        return false
     end
 
     local function IsInMyGuild(name)
@@ -77,20 +57,17 @@ NSQC4.RegisterModule("gp", function()
         return guildCache[ShortName(name)] == true
     end
 
-    local function DistanceBetweenSpots(x1, y1, x2, y2)
-        local dx = (x2 - x1)
-        local dy = (y2 - y1)
-        return math.sqrt(dx*dx + dy*dy) * 10000
-    end
-
     local function AmIMasterLooter()
         local method, mlParty, mlRaid = GetLootMethod()
         if method ~= "master" then return false end
+        if IsInRaid() then
+            return (mlRaid ~= nil and mlRaid ~= 0) or (mlParty == 0)
+        end
         return mlParty == 0
     end
 
     -- ========================================================================
-    -- Привязка чекбокса ролла под кнопкой 50 (4-я кнопка панели)
+    -- Привязка чекбокса ролла под кнопкой 50
     -- ========================================================================
     local function AttachRollCheckboxToPanel(p)
         if not rollCheckbox or not p then return end
@@ -167,73 +144,6 @@ NSQC4.RegisterModule("gp", function()
         end
         SendAddonMessage("nsGPlog", log, "GUILD")
         print("|cff00ff00[NSQC4]|r Начислено " .. value .. " ГП " .. count .. " игрокам рейда")
-    end
-
-    -- ========================================================================
-    -- done / banned
-    -- ========================================================================
-    local function MarkDone()
-        if UnitExists("target") then
-            local nick = ShortName(UnitName("target"))
-            if nick then gpDb.donePlayers[nick] = true end
-        else
-            local zone = GetRealZoneText()
-            local x, y = GetPlayerMapPosition("player")
-            if zone and x and y and x > 0 and y > 0 then
-                gpDb.doneSpots[zone] = gpDb.doneSpots[zone] or {}
-                table.insert(gpDb.doneSpots[zone], {
-                    x = x, y = y, radius = DEFAULT_SPOT_RADIUS,
-                })
-            end
-        end
-    end
-
-    local function MarkBanned()
-        if UnitExists("target") then
-            local nick = ShortName(UnitName("target"))
-            if nick then
-                gpDb.bannedPlayers[nick] = true
-                print("|cffff8000[NSQC4]|r Забанен игрок: "..nick)
-            end
-        else
-            local zone = GetRealZoneText()
-            local x, y = GetPlayerMapPosition("player")
-            if zone and x and y and x > 0 and y > 0 then
-                gpDb.bannedSpots[zone] = gpDb.bannedSpots[zone] or {}
-                table.insert(gpDb.bannedSpots[zone], {
-                    x = x, y = y, radius = DEFAULT_SPOT_RADIUS,
-                })
-                print("|cffff8000[NSQC4]|r Забанено место: "..zone)
-            end
-        end
-    end
-
-    local function IsBanned()
-        if UnitExists("target") then
-            local nick = ShortName(UnitName("target"))
-            if nick and gpDb.bannedPlayers[nick] then return true end
-        else
-            local zone = GetRealZoneText()
-            local x, y = GetPlayerMapPosition("player")
-            if zone and x and y and x > 0 and y > 0 then
-                if InSpotList(gpDb.bannedSpots[zone], x, y) then return true end
-            end
-        end
-        return false
-    end
-
-    local function IsDone()
-        if UnitExists("target") then
-            local nick = ShortName(UnitName("target"))
-            if nick and gpDb.donePlayers[nick] then return true end
-        else
-            local zone = GetRealZoneText()
-            local x, y = GetPlayerMapPosition("player")
-            if zone and x and y and x > 0 and y > 0 then
-                if InSpotList(gpDb.doneSpots[zone], x, y) then return true end
-            end
-        end
-        return false
     end
 
     local function HasEpicLoot()
@@ -338,7 +248,6 @@ NSQC4.RegisterModule("gp", function()
             btn:SetText(tostring(value))
             btn:SetScript("OnClick", function()
                 AssignGpToRaid(value)
-                MarkDone()
             end)
             table.insert(gpButtons, btn)
             xOffset = xOffset + 45
@@ -366,7 +275,6 @@ NSQC4.RegisterModule("gp", function()
             local v = tonumber(self:GetText())
             if v then
                 AssignGpToRaid(v)
-                MarkDone()
             end
             self:SetText("")
             self:ClearFocus()
@@ -584,7 +492,34 @@ NSQC4.RegisterModule("gp", function()
 
         if not AmIMasterLooter() then return end
 
-        if IsDone() then return end
+        -- Список предметов — в рейд
+        local items = {}
+        for i = 1, GetNumLootItems() do
+            local link = GetLootSlotLink(i)
+            if link then
+                table.insert(items, link)
+            end
+        end
+
+        if #items > 0 then
+            local idx = 1
+            local timer = CreateFrame("Frame")
+            local elapsed = 0
+            timer:SetScript("OnUpdate", function(self, dt)
+                elapsed = elapsed + dt
+                if elapsed >= 0.5 then
+                    elapsed = 0
+                    if items[idx] then
+                        SendChatMessage(items[idx], "RAID")
+                        idx = idx + 1
+                    else
+                        self:SetScript("OnUpdate", nil)
+                        self:Hide()
+                    end
+                end
+            end)
+            timer:Show()
+        end
 
         if HasEpicLoot() then
             ShowPanel(false)
@@ -679,10 +614,10 @@ NSQC4.RegisterModule("gp", function()
                 end
 
                 if gpDb.rollMode then
-                    SendChatMessage("-ролл " .. link, "RAID")
+                    SendChatMessage("-ролл " .. link, "RAID_WARNING")
                     SendAddonMessage("AUC_ROLL_START", link .. "|20", "RAID")
                 else
-                    SendChatMessage("АУК " .. link, "RAID")
+                    SendChatMessage("АУК " .. link, "RAID_WARNING")
                 end
                 return
             end
@@ -704,232 +639,6 @@ NSQC4.RegisterModule("gp", function()
     local lootHookFrame = CreateFrame("Frame")
     lootHookFrame:RegisterEvent("LOOT_OPENED")
     lootHookFrame:SetScript("OnEvent", RehookAll)
-
-    -- ========================================================================
-    -- Окно управления банами
-    -- ========================================================================
-    function NSQC4.ShowBanWindow()
-        if banWindow then
-            banWindow:Show()
-            banWindow:Refresh()
-            return
-        end
-
-        local w = CreateFrame("Frame", "NSQC4BanWindow", UIParent)
-        banWindow = w
-        w:SetSize(420, 450)
-        w:SetPoint("CENTER")
-        w:SetMovable(true)
-        w:EnableMouse(true)
-        w:RegisterForDrag("LeftButton")
-        w:SetScript("OnDragStart", w.StartMoving)
-        w:SetScript("OnDragStop", w.StopMovingOrSizing)
-        w:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-            tile = true, tileSize = 32, edgeSize = 32,
-            insets = { left = 11, right = 12, top = 12, bottom = 11 },
-        })
-
-        local closeBtn = CreateFrame("Button", nil, w, "UIPanelCloseButton")
-        closeBtn:SetPoint("TOPRIGHT", -5, -5)
-
-        local title = w:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-        title:SetPoint("TOP", 0, -18)
-        title:SetText("Список банов")
-
-        local scroll = CreateFrame("ScrollFrame", "NSQC4BanScroll", w, "UIPanelScrollFrameTemplate")
-        scroll:SetPoint("TOPLEFT", 15, -45)
-        scroll:SetPoint("BOTTOMRIGHT", -35, 15)
-
-        local content = CreateFrame("Frame", nil, scroll)
-        content:SetSize(360, 1)
-        scroll:SetScrollChild(content)
-
-        local entries = {}
-
-        local function GetCurrentKey()
-            if UnitExists("target") then
-                local nick = ShortName(UnitName("target"))
-                if nick and gpDb.bannedPlayers[nick] then
-                    return "player", nick
-                end
-            else
-                local zone = GetRealZoneText()
-                local x, y = GetPlayerMapPosition("player")
-                if zone and x and y and x > 0 and y > 0 then
-                    local list = gpDb.bannedSpots[zone]
-                    if list then
-                        for idx, spot in ipairs(list) do
-                            local r = SpotRadius(spot)
-                            local dx, dy = spot.x - x, spot.y - y
-                            if dx*dx + dy*dy <= r*r then
-                                return "spot", zone, idx
-                            end
-                        end
-                    end
-                end
-            end
-            return nil
-        end
-
-        function w:Refresh()
-            local curKind, curKey, curIdx = GetCurrentKey()
-
-            local rows = {}
-            for nick in pairs(gpDb.bannedPlayers) do
-                table.insert(rows, { kind = "player", nick = nick })
-            end
-            for zone, list in pairs(gpDb.bannedSpots) do
-                for idx, spot in ipairs(list) do
-                    table.insert(rows, {
-                        kind = "spot", zone = zone,
-                        x = spot.x, y = spot.y,
-                        radius = spot.radius,
-                        idx = idx,
-                    })
-                end
-            end
-            table.sort(rows, function(a, b)
-                if a.kind ~= b.kind then return a.kind == "player" end
-                if a.kind == "player" then return a.nick < b.nick end
-                if a.zone ~= b.zone then return a.zone < b.zone end
-                return a.idx < b.idx
-            end)
-
-            local rowHeight = 22
-            for i, row in ipairs(rows) do
-                local entry = entries[i]
-                if not entry then
-                    entry = CreateFrame("Button", nil, content)
-                    entry:SetSize(360, rowHeight)
-                    entry.text = entry:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-                    entry.text:SetPoint("LEFT", 5, 0)
-                    entry.text:SetWidth(340)
-                    entry.text:SetJustifyH("LEFT")
-                    entry:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
-                    entry.sel = entry:CreateTexture(nil, "BACKGROUND")
-                    entry.sel:SetAllPoints(true)
-                    entry.sel:SetTexture("Interface\\Buttons\\WHITE8X8")
-                    entry.sel:SetVertexColor(0.3, 0.5, 0.9, 0.5)
-                    entry.sel:Hide()
-                    entry:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-                    entries[i] = entry
-                end
-
-                if row.kind == "player" then
-                    entry.text:SetText("|cffff8000Ник:|r " .. row.nick)
-                else
-                    local rStr = row.radius and string.format("%.0f", row.radius * 10000) or "?"
-                    entry.text:SetText(string.format(
-                        "|cff00ffffЗона:|r %s |cff808080(%.4f, %.4f) r=%s|r",
-                        row.zone, row.x, row.y, rStr))
-                end
-
-                local isCurrent = false
-                if curKind == "player" and row.kind == "player" and row.nick == curKey then
-                    isCurrent = true
-                elseif curKind == "spot" and row.kind == "spot"
-                       and row.zone == curKey and row.idx == curIdx then
-                    isCurrent = true
-                end
-
-                if isCurrent then
-                    entry.sel:Show()
-                else
-                    entry.sel:Hide()
-                end
-
-                entry:SetPoint("TOPLEFT", 0, -(i-1) * rowHeight)
-                entry:Show()
-
-                entry:SetScript("OnClick", function(_, button)
-                    if button == "LeftButton" then
-                        if row.kind == "player" then
-                            gpDb.bannedPlayers[row.nick] = nil
-                        else
-                            local list = gpDb.bannedSpots[row.zone]
-                            if list then
-                                table.remove(list, row.idx)
-                                if #list == 0 then gpDb.bannedSpots[row.zone] = nil end
-                            end
-                        end
-                        w:Refresh()
-                    elseif button == "RightButton" then
-                        if row.kind ~= "spot" then return end
-
-                        local px, py = GetPlayerMapPosition("player")
-                        local zone = GetRealZoneText()
-                        if not px or not py or px == 0 or py == 0 then
-                            print("|cffff0000[NSQC4]|r Не удалось получить вашу позицию")
-                            return
-                        end
-                        if zone ~= row.zone then
-                            print("|cffff0000[NSQC4]|r Вы не в этой локации")
-                            return
-                        end
-
-                        local dx = px - row.x
-                        local dy = py - row.y
-                        local newRadius = math.sqrt(dx*dx + dy*dy)
-                        if newRadius <= 0 then
-                            print("|cffff0000[NSQC4]|r Вы в самой точке — радиус не изменён")
-                            return
-                        end
-
-                        local list = gpDb.bannedSpots[row.zone]
-                        if list and list[row.idx] then
-                            list[row.idx].radius = newRadius
-                            print(string.format("|cff00ff00[NSQC4]|r Радиус обновлён: %.0f ярдов",
-                                newRadius * 10000))
-                        end
-                        w:Refresh()
-                    end
-                end)
-
-                entry:SetScript("OnEnter", function(self)
-                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-
-                    if row.kind == "player" then
-                        GameTooltip:SetText("Забаненный игрок", 1, 0.82, 0)
-                        GameTooltip:AddLine("|cffFF8C00ЛКМ|r — удалить из бана")
-                    else
-                        GameTooltip:SetText("Забаненная точка", 1, 0.82, 0)
-
-                        local px, py = GetPlayerMapPosition("player")
-                        local zone = GetRealZoneText()
-
-                        if px and py and px > 0 and py > 0 and zone == row.zone then
-                            local dist = DistanceBetweenSpots(px, py, row.x, row.y)
-                            GameTooltip:AddLine(string.format("Расстояние: |cff00ff00%.0f|r ярдов", dist))
-                        else
-                            GameTooltip:AddLine("|cff808080Вы не в этой локации|r")
-                        end
-
-                        local rStr = row.radius and string.format("%.0f", row.radius * 10000) or "?"
-                        GameTooltip:AddLine("Текущий радиус: |cff00BFFF" .. rStr .. "|r ярдов")
-
-                        GameTooltip:AddLine(" ")
-                        GameTooltip:AddLine("|cffFF8C00ЛКМ|r — удалить из бана")
-                        GameTooltip:AddLine("|cffF4A460ПКМ|r — переписать радиус по текущему расстоянию")
-                    end
-
-                    GameTooltip:Show()
-                end)
-                entry:SetScript("OnLeave", function() GameTooltip:Hide() end)
-            end
-
-            for i = #rows + 1, #entries do
-                entries[i]:Hide()
-            end
-
-            content:SetHeight(math.max(#rows * rowHeight, 1))
-            scroll:UpdateScrollRect()
-        end
-
-        w:Refresh()
-        w:Show()
-    end
 
     -- ========================================================================
     -- Восстановление закреплённой панели после /reload

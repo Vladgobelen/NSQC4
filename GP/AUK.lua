@@ -253,7 +253,7 @@ function NSAuk.SyncMyGP()
 end
 
 -- ============================================================================
--- ShowConfirm (переименовано, теперь глобально доступно как NSQC4.ShowConfirm)
+-- ShowConfirm
 -- ============================================================================
 function NSQC4.ShowConfirm(title, text, onYes, onNo)
     if NSQC4.confirmFrame and NSQC4.confirmFrame:IsShown() then NSQC4.confirmFrame:Hide() end
@@ -297,7 +297,6 @@ function NSQC4.ShowConfirm(title, text, onYes, onNo)
     f:Show()
 end
 
--- Алиас для обратной совместимости
 NSAuk.ShowConfirm = NSQC4.ShowConfirm
 
 function NSAuk.RenderCustomButtons()
@@ -877,7 +876,7 @@ end
 local function AnnounceRaid(msg)
     local db = NSAuk.EnsureDB()
     if db.active and db.active.startedBy == UnitName("player") then
-        SendChatMessage(msg, "RAID")
+        SendChatMessage(msg, "RAID_WARNING")
     end
 end
 
@@ -1096,7 +1095,6 @@ function NSAuk.UpdateAuctionWindow()
         row:SetPoint("TOPLEFT", 10, -totalHeight)
         row:SetPoint("TOPRIGHT", -10, -totalHeight)
         row:EnableMouse(true)
-        row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
         local cc = CLASS_COLORS[bid.data.class] or CLASS_COLORS.WARRIOR
         local isPassed = bid.data.passed

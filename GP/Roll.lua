@@ -157,7 +157,7 @@ NSQC4.RegisterModule("gp", function()
                 print("|cffff0000[Roll]|r Только РЛ может продлить таймер.")
                 return
             end
-            SendChatMessage("-время 10", "RAID")
+            SendChatMessage("-время 10", "RAID_WARNING")
         end)
         f.addBtn = addBtn
 
@@ -391,7 +391,7 @@ NSQC4.RegisterModule("gp", function()
         NSQC4.Roll_GiveTo(winner, winnerValue)
     end
 
-    function NSQC4.Roll_Start(itemLink, itemName, duration)
+    function NSQC4.Roll_Start(itemLink, itemName, duration, silent)
         if rollState then return end
         rollState = {
             itemLink = itemLink,
@@ -401,6 +401,9 @@ NSQC4.RegisterModule("gp", function()
             timerEnd = GetTime() + (duration or DEFAULT_ROLL_TIME),
             isLeader = IsRaidLeader(),
         }
+        if not silent and rollState.isLeader and itemLink then
+            SendChatMessage("-ролл " .. itemLink, "RAID_WARNING")
+        end
         StartTicker()
         local f = CreateRollFrame()
         f:Show()
@@ -428,6 +431,11 @@ NSQC4.RegisterModule("gp", function()
         value = tonumber(value)
         if not name or not value then return end
         if rollState.banned and rollState.banned[name] then return end
+
+        if rollState.rolls[name] then
+            return
+        end
+
         rollState.rolls[name] = value
         RefreshRollFrame()
     end
@@ -457,14 +465,20 @@ NSQC4.RegisterModule("gp", function()
         if event == "CHAT_MSG_RAID" or event == "CHAT_MSG_RAID_LEADER" or event == "CHAT_MSG_RAID_WARNING" then
             local msg = ...
             if not msg then return end
+
             local itemLink = msg:match("^%s*%-ролл%s*(|c%x+|Hitem:.-|h.-|h|r)")
             if itemLink then
-                if not rollState then
-                    local itemName = itemLink:match("|h%[(.-)%]|h") or "Предмет"
-                    NSQC4.Roll_Start(itemLink, itemName, DEFAULT_ROLL_TIME)
-                end
+                local itemName = itemLink:match("|h%[(.-)%]|h") or "Предмет"
+                NSQC4.Roll_Start(itemLink, itemName, DEFAULT_ROLL_TIME, true)
                 return
             end
+
+            local plainName = msg:match("^%s*%-ролл%s*%[(.-)%]")
+            if plainName then
+                NSQC4.Roll_Start(plainName, plainName, DEFAULT_ROLL_TIME, true)
+                return
+            end
+
             local addTime = tonumber(msg:match("^%s*%-время%s+(%d+)"))
             if addTime and rollState then
                 rollState.timerEnd = rollState.timerEnd + addTime
@@ -480,7 +494,7 @@ NSQC4.RegisterModule("gp", function()
                 local itemLink, duration = addonMsg:match("^([^|]+)|(%d+)$")
                 if itemLink then
                     local itemName = itemLink:match("|h%[(.-)%]|h") or "Предмет"
-                    NSQC4.Roll_Start(itemLink, itemName, tonumber(duration) or DEFAULT_ROLL_TIME)
+                    NSQC4.Roll_Start(itemLink, itemName, tonumber(duration) or DEFAULT_ROLL_TIME, true)
                 end
                 return
             end
