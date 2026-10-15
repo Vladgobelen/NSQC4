@@ -1,6 +1,5 @@
 -- ============================================================================
 -- NSQC4 / GP / ExternalGP
--- Обмен ГП не-гильдейских игроков.
 -- ============================================================================
 
 NSQC4.RegisterModule("gp", function()
@@ -12,6 +11,12 @@ NSQC4.RegisterModule("gp", function()
     local myName  = UnitName("player") or ""
     local plainMe = myName:match("^(.-)-") or myName
 
+    -- Универсальный парсер "<gp><sep><nick>", где sep — обычный ИЛИ неразрывный пробел
+    local function ParseGpNick(text)
+        if not text then return nil, nil end
+        return text:match("^(%d+)[%s\160\194\129]+(.+)$")
+    end
+
     local function SaveExternalGp(gpStr, nick)
         if not gpStr or not nick or nick == "" then return end
         local gp = tonumber(gpStr)
@@ -19,12 +24,7 @@ NSQC4.RegisterModule("gp", function()
         local cleanNick = nick:match("^(.-)-") or nick
 
         if gpDb and gpDb.SetExternalGp then
-            local oldGp = gpDb.GetExternalGp and gpDb:GetExternalGp(cleanNick) or nil
-            if oldGp and oldGp ~= 0 and gp == 0 then return end
             gpDb:SetExternalGp(cleanNick, gp)
-            if gpDb.window and gpDb.window:IsShown() and gpDb._UpdateFromGuild then
-                gpDb:_UpdateFromGuild()
-            end
         end
     end
 
@@ -32,6 +32,7 @@ NSQC4.RegisterModule("gp", function()
     NSQC4.ChatHandler:Register("ADDON:showgpa", {
         func = function(words, sender, text, channel, prefix)
             if sender == myName then return end
+
             local targetNick = text and text:match("^%s*(.-)%s*$")
             if not targetNick or targetNick == "" then return end
             local plainTarget = targetNick:match("^(.-)-") or targetNick
@@ -62,10 +63,9 @@ NSQC4.RegisterModule("gp", function()
     })
 
     -- enAlToGi — ответ дошёл
-    NSQC4.ChatHandler:Register("ADDON:enaltoi", {
+    NSQC4.ChatHandler:Register("ADDON:enaltogi", {
         func = function(words, sender, text, channel, prefix)
-            if sender == myName then return end
-            local gp, nick = text and text:match("^(%S+)%s+(.+)$")
+            local gp, nick = ParseGpNick(text)
             if not gp or not nick then return end
             SaveExternalGp(gp, nick)
         end,
@@ -75,8 +75,7 @@ NSQC4.RegisterModule("gp", function()
     -- ns_hisGP — прямой ответ сервера
     NSQC4.ChatHandler:Register("ADDON:ns_hisgp", {
         func = function(words, sender, text, channel, prefix)
-            if sender == myName then return end
-            local gp, nick = text and text:match("^(%S+)%s+(.+)$")
+            local gp, nick = ParseGpNick(text)
             if not gp or not nick then return end
             SaveExternalGp(gp, nick)
         end,

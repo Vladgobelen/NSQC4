@@ -23,6 +23,12 @@ local CHAT_EVENTS = {
     ADDON         = "CHAT_MSG_ADDON",
 }
 
+local function dbg(...)
+    if NSQC4.ChatHandler and NSQC4.ChatHandler.debug then
+        print("|cff00ffff[CH-DBG]|r", ...)
+    end
+end
+
 -- ============================================================================
 -- СОЗДАНИЕ
 -- ============================================================================
@@ -32,7 +38,7 @@ function NSQC4.ChatHandler:new(chatTypes, opts)
 
     obj.triggers   = {}
     obj.textPrefix = opts.textPrefix or "-"
-    obj.addonPrefix = opts.addonPrefix or "ns_"
+    obj.addonPrefix = opts.addonPrefix or ""
     obj.debug      = opts.debug or false
     obj.funcCache  = {}
 
@@ -89,13 +95,16 @@ function NSQC4.ChatHandler:OnChatMessage(event, ...)
 
     if event == "CHAT_MSG_ADDON" then
         prefix, text, channel, sender = ...
-        if not prefix or prefix:sub(1, #self.addonPrefix) ~= self.addonPrefix then
+        if not prefix then dbg("ADDON без prefix"); return end
+        if self.addonPrefix ~= "" and prefix:sub(1, #self.addonPrefix) ~= self.addonPrefix then
+            dbg("ADDON prefix=["..prefix.."] не начинается с ["..self.addonPrefix.."] → skip")
             return
         end
+        dbg("ADDON prefix=["..prefix.."] text=["..tostring(text).."] chan="..tostring(channel).." sender="..tostring(sender))
     else
         text, sender = ...
         if not text or text == "" then return end
-        if text:sub(1, #self.textPrefix) ~= self.textPrefix then
+        if self.textPrefix ~= "" and text:sub(1, #self.textPrefix) ~= self.textPrefix then
             if not self.triggers["*"] then return end
         end
     end
@@ -113,20 +122,24 @@ function NSQC4.ChatHandler:OnChatMessage(event, ...)
     -- 1. O(1) — прямой lookup
     local list = self.triggers[key]
     if list then
+        dbg("lookup key=["..key.."] найден")
         if self:RunTriggers(list, event, text, sender, prefix, channel, shortType) then
             return
         end
     end
 
-    -- 2. ADDON по префиксу
+    -- 2. ADDON по префиксу (без канала)
     if event == "CHAT_MSG_ADDON" and prefix then
         local basePrefix = prefix:match("^(%S+)") or prefix
         local pkey = "ADDON:" .. basePrefix:lower()
         local plist = self.triggers[pkey]
         if plist then
+            dbg("lookup pkey=["..pkey.."] найден")
             if self:RunTriggers(plist, event, text, sender, prefix, channel, shortType) then
                 return
             end
+        else
+            dbg("lookup pkey=["..pkey.."] НЕ найден")
         end
     end
 
@@ -200,6 +213,9 @@ function NSQC4.ChatHandler:CheckTrigger(t, event, text, sender, prefix, channel,
     return true
 end
 
-local instance = NSQC4.ChatHandler:new({"GUILD", "ADDON"}, { addonPrefix = "ns" })
+-- ============================================================================
+-- ИНСТАНС
+-- ============================================================================
+local instance = NSQC4.ChatHandler:new({"GUILD", "ADDON"}, { addonPrefix = "", debug = false })
 NSQC4.chat = instance
 NSQC4.ChatHandler = instance
