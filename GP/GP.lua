@@ -1181,21 +1181,20 @@ function GpDb:GetAllExternalGp()
 end
 
 function GpDb:Show()
+    print("|cff00ffff[EXTGP]|r GpDb:Show called")
     self.window:Show()
-
     self.gp_data = {}
     self:UpdateWindow()
 
     self.window.raidOnlyCheckbox:SetChecked(IsInRaid() and true or false)
 
-    -- Запрашиваем свежий ростер гильдии
     GuildRoster()
 
-    -- Ждём GUILD_ROSTER_UPDATE
     if not self._rosterListener then
         self._rosterListener = CreateFrame("Frame")
         self._rosterListener:SetScript("OnEvent", function(f, event)
             f:UnregisterEvent("GUILD_ROSTER_UPDATE")
+            print("|cff00ffff[EXTGP]|r Show: GUILD_ROSTER_UPDATE")
             self:RequestNonGuildGP()
             self:_UpdateFromGuild()
             self:UpdateWindow()
@@ -1204,7 +1203,6 @@ function GpDb:Show()
     end
     self._rosterListener:RegisterEvent("GUILD_ROSTER_UPDATE")
 
-    -- Страховка — 2 секунды
     if self._showFallback then
         self._showFallback:SetScript("OnUpdate", nil)
         self._showFallback:Hide()
@@ -1230,6 +1228,7 @@ function GpDb:Show()
         if fired then return end
         fired = true
 
+        print("|cff00ffff[EXTGP]|r Show: fallback fired")
         self:RequestNonGuildGP()
         self:_UpdateFromGuild()
         self:UpdateWindow()
@@ -1647,7 +1646,9 @@ function GpDb:_CreateRaidSelectionWindow()
     self.raidWindow.awardButton:SetSize(100, 22)
     self.raidWindow.awardButton:SetText("Начислить")
     self.raidWindow.awardButton:SetScript("OnClick", function()
+        print("|cff00ffff[EXTGP]|r awardButton clicked")
         if not NSQC4.CanAssignGp() then
+            print("|cff00ffff[EXTGP]|r awardButton: CanAssignGp() = false")
             return
         end
 
@@ -1702,8 +1703,10 @@ function GpDb:_CreateRaidSelectionWindow()
                 local nick = entry.original_nick
 
                 if entry.isGuildMember then
+                    print("|cff00ffff[EXTGP]|r TX nsGP1:", nick, gpValue)
                     SendAddonMessage("nsGP1 " .. gpValue, nick, "GUILD")
                 else
+                    print("|cff00ffff[EXTGP]|r TX nsGP1A:", nick, gpValue)
                     SendAddonMessage("nsGP1A", gpValue .. " " .. nick, "GUILD")
                     table.insert(nonGuildNicks, nick)
                 end
@@ -1724,6 +1727,8 @@ function GpDb:_CreateRaidSelectionWindow()
         self:UpdateWindow()
         self.raidWindow:Hide()
 
+        print("|cff00ffff[EXTGP]|r awardButton: nonGuild count="..#nonGuildNicks)
+
         if #nonGuildNicks > 0 then
             local timerFrame = CreateFrame("Frame")
             local elapsed = 0
@@ -1739,6 +1744,7 @@ function GpDb:_CreateRaidSelectionWindow()
                     if elapsed >= initialDelay then
                         phase = "sending"
                         elapsed = 0
+                        print("|cff00ffff[EXTGP]|r TX GetGPA (award):", nonGuildNicks[currentIndex])
                         SendAddonMessage("GetGPA", nonGuildNicks[currentIndex], "GUILD")
                         currentIndex = currentIndex + 1
                     end
@@ -1746,9 +1752,11 @@ function GpDb:_CreateRaidSelectionWindow()
                     if elapsed >= betweenDelay then
                         elapsed = 0
                         if currentIndex <= #nonGuildNicks then
+                            print("|cff00ffff[EXTGP]|r TX GetGPA (award2):", nonGuildNicks[currentIndex])
                             SendAddonMessage("GetGPA", nonGuildNicks[currentIndex], "GUILD")
                             currentIndex = currentIndex + 1
                         else
+                            print("|cff00ffff[EXTGP]|r award timer done")
                             frame:SetScript("OnUpdate", nil)
                             frame:Hide()
                         end
@@ -1767,12 +1775,12 @@ function GpDb:_CreateRaidSelectionWindow()
 end
 
 function GpDb:RequestNonGuildGP()
-    -- Проверяем, находимся ли мы в рейде, так как запрос имеет смысл только для рейда
+    print("|cff00ffff[EXTGP]|r RequestNonGuildGP: start, inRaid="..tostring(IsInRaid()))
     if not IsInRaid() then 
+        print("|cff00ffff[EXTGP]|r RequestNonGuildGP: не в рейде, выход")
         return 
     end
     
-    -- Собираем имена всех членов гильдии (без суффикса сервера) в таблицу для быстрого поиска
     local guildNames = {}
     for i = 1, GetNumGuildMembers(true) do
         local name = GetGuildRosterInfo(i)
@@ -1782,19 +1790,19 @@ function GpDb:RequestNonGuildGP()
         end
     end
     
-    -- Проходим по всем участникам рейда
+    local sent = 0
     for i = 1, GetNumGroupMembers() do
         local raidName = GetRaidRosterInfo(i)
         if raidName then
             local plainName = raidName:match("^(.-)-") or raidName
-            
-            -- Если игрока нет в списке гильдии, отправляем запрос данных
             if not guildNames[plainName] then
-                -- Отправляем префикс "GetGPA" и ник игрока в теле сообщения в канал гильдии
+                print("|cff00ffff[EXTGP]|r TX GetGPA (request):", plainName)
                 SendAddonMessage("GetGPA", plainName, "GUILD")
+                sent = sent + 1
             end
         end
     end
+    print("|cff00ffff[EXTGP]|r RequestNonGuildGP: sent="..sent)
 end
 
 function GpDb:_UpdatePlayerInfo()

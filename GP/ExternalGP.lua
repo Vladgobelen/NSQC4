@@ -1,12 +1,6 @@
 -- ============================================================================
 -- NSQC4 / GP / ExternalGP
--- Система обмена ГП не-гильдейских игроков.
--- Префиксы:
---   GetGPA   — запрос ГП (шлётся в GUILD)
---   showGPA  — ретрансляция запроса (в RAID)
---   hisGP    — ответ игрока на showGPA (в RAID)
---   enAlToGi — ретрансляция ответа (в GUILD)
---   ns_hisGP — прямой ответ (когда сервер сам нашёл ГП в гильдии)
+-- Обмен ГП не-гильдейских игроков.
 -- ============================================================================
 
 NSQC4.RegisterModule("gp", function()
@@ -18,41 +12,28 @@ NSQC4.RegisterModule("gp", function()
     local myName  = UnitName("player") or ""
     local plainMe = myName:match("^(.-)-") or myName
 
-    -- ========================================================================
-    -- Сохранить ГП в кэш
-    -- ========================================================================
     local function SaveExternalGp(gpStr, nick)
         if not gpStr or not nick or nick == "" then return end
-
         local gp = tonumber(gpStr)
         if not gp then gp = 0 end
-
         local cleanNick = nick:match("^(.-)-") or nick
 
         if gpDb and gpDb.SetExternalGp then
             local oldGp = gpDb.GetExternalGp and gpDb:GetExternalGp(cleanNick) or nil
-            if oldGp and oldGp ~= 0 and gp == 0 then
-                return
-            end
+            if oldGp and oldGp ~= 0 and gp == 0 then return end
             gpDb:SetExternalGp(cleanNick, gp)
-
-            -- Пересобрать окно, если оно открыто, чтобы ГП сразу отобразился
             if gpDb.window and gpDb.window:IsShown() and gpDb._UpdateFromGuild then
                 gpDb:_UpdateFromGuild()
             end
         end
     end
 
-    -- ========================================================================
-    -- 1. showGPA — если запрос про нас, отвечаем своим ГП в RAID
-    -- ========================================================================
+    -- showGPA — запрос наш? — отвечаем своим ГП
     NSQC4.ChatHandler:Register("ADDON:showgpa", {
         func = function(words, sender, text, channel, prefix)
             if sender == myName then return end
-
             local targetNick = text and text:match("^%s*(.-)%s*$")
             if not targetNick or targetNick == "" then return end
-
             local plainTarget = targetNick:match("^(.-)-") or targetNick
             if plainTarget ~= plainMe then return end
 
@@ -75,35 +56,28 @@ NSQC4.RegisterModule("gp", function()
                     end
                 end
             end
-
-            SendAddonMessage("hisGP " .. tostring(myGP), myName, "RAID")
+            SendAddonMessage("hisGP", tostring(myGP) .. " " .. myName, "RAID")
         end,
         stopOnMatch = true,
     })
 
-    -- ========================================================================
-    -- 2. enAlToGi — сохраняем полученный ГП
-    -- ========================================================================
+    -- enAlToGi — ответ дошёл
     NSQC4.ChatHandler:Register("ADDON:enaltoi", {
         func = function(words, sender, text, channel, prefix)
             if sender == myName then return end
-
-            local gp   = prefix and prefix:match("^%S+%s+(.+)$")
-            local nick = text   and text:match("^%s*(.-)%s*$")
+            local gp, nick = text and text:match("^(%S+)%s+(.+)$")
+            if not gp or not nick then return end
             SaveExternalGp(gp, nick)
         end,
         stopOnMatch = true,
     })
 
-    -- ========================================================================
-    -- 3. ns_hisGP — прямой ответ сервера
-    -- ========================================================================
+    -- ns_hisGP — прямой ответ сервера
     NSQC4.ChatHandler:Register("ADDON:ns_hisgp", {
         func = function(words, sender, text, channel, prefix)
             if sender == myName then return end
-
-            local gp   = prefix and prefix:match("^%S+%s+(.+)$")
-            local nick = text   and text:match("^%s*(.-)%s*$")
+            local gp, nick = text and text:match("^(%S+)%s+(.+)$")
+            if not gp or not nick then return end
             SaveExternalGp(gp, nick)
         end,
         stopOnMatch = true,
