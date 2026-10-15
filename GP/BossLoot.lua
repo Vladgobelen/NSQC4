@@ -1,6 +1,6 @@
 -- ============================================================================
 -- NSQC4 / GP / BossLoot
--- Панель начисления ГП при открытии лута. Бан. Аук по СКМ. Ролл по СКМ.
+-- Панель начисления ГП при открытии лута. Бан. Аук по СКМ. Ролл — через Roll.lua.
 -- Модуль: "gp".
 -- ============================================================================
 
@@ -14,7 +14,6 @@ NSQC4.RegisterModule("gp", function()
     local FRAME_WIDTH    = 330
     local RARITY_EPIC    = 4
     local DEFAULT_SPOT_RADIUS = 0.005
-    local ROLL_TIME      = 15
 
     -- ========================================================================
     -- Хранилище
@@ -27,6 +26,8 @@ NSQC4.RegisterModule("gp", function()
     gpDb.bannedSpots   = gpDb.bannedSpots   or {}
     gpDb.rollMode      = gpDb.rollMode      or false
     gpDb.collapsed     = gpDb.collapsed     or {}
+    gpDb.pinned        = gpDb.pinned        or false
+    gpDb.pinnedPos     = gpDb.pinnedPos     or nil
 
     -- ========================================================================
     -- Состояние модуля
@@ -39,8 +40,6 @@ NSQC4.RegisterModule("gp", function()
 
     local guildCache = {}
     local guildCacheReady = false
-
-    local rollState = nil
 
     -- ========================================================================
     -- Утилиты
@@ -91,7 +90,18 @@ NSQC4.RegisterModule("gp", function()
     end
 
     -- ========================================================================
-    -- Ключ состояния панели (таргет + подлокация)
+    -- Привязка чекбокса ролла под кнопкой 50 (4-я кнопка панели)
+    -- ========================================================================
+    local function AttachRollCheckboxToPanel(p)
+        if not rollCheckbox or not p then return end
+        rollCheckbox:ClearAllPoints()
+        local anchor = (p.gpButtons and p.gpButtons[4]) or p
+        local ox = (p.gpButtons and p.gpButtons[4]) and 0 or 155
+        rollCheckbox:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", ox, 0)
+    end
+
+    -- ========================================================================
+    -- Ключ состояния панели
     -- ========================================================================
     local function GetCollapseKey()
         local sz = GetSubZoneText()
@@ -127,10 +137,7 @@ NSQC4.RegisterModule("gp", function()
     -- Начисление ГП рейду
     -- ========================================================================
     local function AssignGpToRaid(value)
-        if not NSQC4.CanAssignGp() then
-            return
-        end
-
+        if not NSQC4.CanAssignGp() then return end
         value = tonumber(value)
         if not value or value == 0 then return end
         if not IsInGuild() then
@@ -240,16 +247,81 @@ NSQC4.RegisterModule("gp", function()
     -- ========================================================================
     -- Панель
     -- ========================================================================
-    local COLLAPSE_X_OFFSET   -- вычисляется в CreatePanel
+    local COLLAPSE_X_OFFSET
     local COLLAPSE_Y_OFFSET = -25
 
-    local ShowPanel   -- forward declaration
+    local ShowPanel
+
+    local function ResetPanelToLoot(f)
+        gpDb.pinnedPos = nil
+        f:ClearAllPoints()
+        f:SetPoint("BOTTOM", LootFrame, "TOP", 0, 5)
+    end
+
+    local function SavePinPos(self)
+        local point, _, relPoint, x, y = self:GetPoint()
+
+        local cx, cy = self:GetCenter()
+        local lx, ly = LootFrame:GetCenter()
+        if cx and cy and lx and ly then
+            local dx = math.abs(cx - lx)
+            local dy = math.abs(cy - ly)
+            if dx < 80 and dy < 80 then
+                ResetPanelToLoot(self)
+                AttachRollCheckboxToPanel(self)
+                return
+            end
+        end
+
+        gpDb.pinnedPos = {
+            point    = point,
+            relPoint = relPoint,
+            x        = x,
+            y        = y,
+        }
+        AttachRollCheckboxToPanel(self)
+    end
+
+    local function ApplyDragHooks(f)
+        f:SetMovable(true)
+        f:EnableMouse(true)
+        f:RegisterForDrag("LeftButton")
+        f:SetScript("OnDragStart", function(self)
+            self:StartMoving()
+            self:SetScript("OnUpdate", function(s)
+                AttachRollCheckboxToPanel(s)
+            end)
+        end)
+        f:SetScript("OnDragStop", function(self)
+            self:StopMovingOrSizing()
+            self:SetScript("OnUpdate", nil)
+            SavePinPos(self)
+        end)
+    end
+
+    local function RemoveDragHooks(f)
+        f:SetMovable(false)
+        f:EnableMouse(false)
+        f:RegisterForDrag()
+        f:SetScript("OnDragStart", nil)
+        f:SetScript("OnDragStop", nil)
+    end
 
     local function CreatePanel()
         local f = CreateFrame("Frame", "NSQC4BossLootFrame", UIParent)
         f:SetSize(FRAME_WIDTH, FRAME_HEIGHT)
         f:SetFrameStrata("TOOLTIP")
-        f:SetPoint("BOTTOM", LootFrame, "TOP", 0, 5)
+
+        if gpDb.pinned and gpDb.pinnedPos then
+            local p = gpDb.pinnedPos
+            f:SetPoint(
+                p.point    or "CENTER",
+                UIParent,
+                p.relPoint or "CENTER",
+                p.x or 0, p.y or 0)
+        else
+            f:SetPoint("BOTTOM", LootFrame, "TOP", 0, 5)
+        end
 
         local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         title:SetPoint("TOP", f, "TOP", 0, -5)
@@ -309,8 +381,42 @@ NSQC4.RegisterModule("gp", function()
         editBox = eb
         table.insert(gpButtons, eb)
 
-        -- координата для кнопки сворачивания (после editBox)
         COLLAPSE_X_OFFSET = xOffset + 10
+
+        local pinBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+        pinBtn:SetSize(30, 20)
+        pinBtn:SetPoint("TOPLEFT", f, "TOPLEFT", COLLAPSE_X_OFFSET, COLLAPSE_Y_OFFSET)
+        pinBtn:SetText(gpDb.pinned and "З*" or "З")
+        pinBtn:SetScript("OnClick", function()
+            gpDb.pinned = not gpDb.pinned
+            if gpDb.pinned then
+                ApplyDragHooks(f)
+                pinBtn:SetText("З*")
+                ShowPanel(panelLastBannedOnly)
+                print("|cff00ff00[NSQC4]|r Панель закреплена. Перетаскивай ЛКМ.")
+            else
+                RemoveDragHooks(f)
+                pinBtn:SetText("З")
+                ResetPanelToLoot(f)
+                AttachRollCheckboxToPanel(f)
+                if not LootFrame or not LootFrame:IsShown() then
+                    f:Hide()
+                    if rollCheckbox then rollCheckbox:Hide() end
+                end
+                print("|cff00ff00[NSQC4]|r Панель откреплена.")
+            end
+        end)
+        pinBtn:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText("Закрепить панель")
+            GameTooltip:AddLine("Закреплённая панель видна в рейде, перетаскивается ЛКМ.", 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        pinBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+        f.pinBtn = pinBtn
+
+        COLLAPSE_X_OFFSET = COLLAPSE_X_OFFSET + 35
 
         local collapseBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
         collapseBtn:SetSize(30, 20)
@@ -338,6 +444,10 @@ NSQC4.RegisterModule("gp", function()
         f.title       = title
         f.editBox     = eb
 
+        if gpDb.pinned then
+            ApplyDragHooks(f)
+        end
+
         panel = f
     end
 
@@ -353,12 +463,20 @@ NSQC4.RegisterModule("gp", function()
             panel.title:Hide()
             if editBox then editBox:Hide() end
 
+            if panel.pinBtn then
+                panel.pinBtn:ClearAllPoints()
+                panel.pinBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, COLLAPSE_Y_OFFSET)
+                panel.pinBtn:Show()
+            end
+
             panel.collapseBtn:ClearAllPoints()
-            panel.collapseBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, COLLAPSE_Y_OFFSET)
+            panel.collapseBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", 45, COLLAPSE_Y_OFFSET)
             panel.collapseBtn:SetText(">>")
             panel.collapseBtn:Show()
 
-            panel:SetSize(50, 30)
+            AttachRollCheckboxToPanel(panel)
+
+            panel:SetSize(85, 30)
         else
             panel:SetSize(FRAME_WIDTH, FRAME_HEIGHT)
             panel.title:Show()
@@ -381,10 +499,18 @@ NSQC4.RegisterModule("gp", function()
                 panel.title:SetText("Начислить ГП рейду:")
             end
 
+            if panel.pinBtn then
+                panel.pinBtn:ClearAllPoints()
+                panel.pinBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", COLLAPSE_X_OFFSET - 35, COLLAPSE_Y_OFFSET)
+                panel.pinBtn:Show()
+            end
+
             panel.collapseBtn:ClearAllPoints()
             panel.collapseBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", COLLAPSE_X_OFFSET, COLLAPSE_Y_OFFSET)
             panel.collapseBtn:SetText("<<")
             panel.collapseBtn:Show()
+
+            AttachRollCheckboxToPanel(panel)
         end
 
         panel:Show()
@@ -401,7 +527,6 @@ NSQC4.RegisterModule("gp", function()
     local function CreateRollCheckbox()
         local cb = CreateFrame("CheckButton", "NSQC4RollCheckbox", UIParent, "UICheckButtonTemplate")
         cb:SetSize(24, 24)
-        cb:SetPoint("BOTTOMLEFT", LootFrame, "TOPLEFT", 65, -13)
 
         cb.text = cb:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         cb.text:SetPoint("LEFT", cb, "RIGHT", 4, 0)
@@ -417,7 +542,7 @@ NSQC4.RegisterModule("gp", function()
 
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:SetText("Режим ролла", 1, 0.82, 0)
-            GameTooltip:AddLine("Если включён — СКМ по вещи запускает ролл на 15 сек.", 1, 1, 1, true)
+            GameTooltip:AddLine("Если включён — СКМ по вещи запускает ролл.", 1, 1, 1, true)
             GameTooltip:AddLine("Побеждает наибольший ролл (1-100).", 1, 1, 1, true)
             GameTooltip:Show()
         end)
@@ -430,130 +555,15 @@ NSQC4.RegisterModule("gp", function()
         end)
 
         rollCheckbox = cb
+
+        if panel then
+            AttachRollCheckboxToPanel(panel)
+        else
+            cb:SetPoint("BOTTOMLEFT", LootFrame, "TOPLEFT", 65, -13)
+        end
+
         return cb
     end
-
-    -- ========================================================================
-    -- Ролл
-    -- ========================================================================
-    local function FinishRoll()
-        if not rollState then return end
-
-        local winnerName = nil
-        local winnerValue = -1
-
-        for _, r in ipairs(rollState.rolls) do
-            if r.value > winnerValue then
-                winnerValue = r.value
-                winnerName = r.name
-            end
-        end
-
-        local itemLink = rollState.itemLink
-        local slot     = rollState.slot
-
-        if rollState.timerFrame then
-            rollState.timerFrame:SetScript("OnUpdate", nil)
-            rollState.timerFrame:Hide()
-        end
-
-        if not LootFrame or not LootFrame:IsShown() then
-            SendChatMessage("Ролл завершён, но окно лута закрыто. Выдать вручную: " .. (itemLink or "?"), "RAID_WARNING")
-            rollState = nil
-            return
-        end
-
-        if not winnerName then
-            SendChatMessage("Ролл по " .. (itemLink or "?") .. ": никто не бросил.", "RAID_WARNING")
-            rollState = nil
-            return
-        end
-
-        local currentLink = GetLootSlotLink(slot)
-        if not currentLink or currentLink ~= itemLink then
-            SendChatMessage("Ролл завершён, но предмет исчез из слота. Выдать вручную: " .. (itemLink or "?"), "RAID_WARNING")
-            rollState = nil
-            return
-        end
-
-        local lowerWinner = string.lower(winnerName)
-        local found = false
-
-        if GetNumRaidMembers() > 0 then
-            for i = 1, GetNumRaidMembers() do
-                local cand = GetMasterLootCandidate(i)
-                if cand and string.lower(cand) == lowerWinner then
-                    GiveMasterLoot(slot, i)
-                    found = true
-                    break
-                end
-            end
-        elseif GetNumPartyMembers() > 0 then
-            for i = 1, GetNumPartyMembers() + 1 do
-                local cand = GetMasterLootCandidate(i)
-                if cand and string.lower(cand) == lowerWinner then
-                    GiveMasterLoot(slot, i)
-                    found = true
-                    break
-                end
-            end
-        end
-
-        if found then
-            SendChatMessage(winnerName .. " выиграл " .. (itemLink or "?") .. " с роллом " .. winnerValue, "RAID_WARNING")
-        else
-            SendChatMessage("Ролл выиграл " .. winnerName .. " (" .. winnerValue .. "), но выдать не удалось. Слот: " .. tostring(slot) .. ", предмет: " .. (itemLink or "?"), "RAID_WARNING")
-        end
-
-        rollState = nil
-    end
-
-    local function StartRoll(itemLink, slot)
-        if rollState then return end
-
-        rollState = {
-            itemLink = itemLink,
-            slot     = slot,
-            rolls    = {},
-            seen     = {},
-            startAt  = GetTime(),
-        }
-
-        SendChatMessage("РОЛЛ " .. itemLink, "RAID")
-
-        local frame = CreateFrame("Frame")
-        rollState.timerFrame = frame
-        local elapsed = 0
-
-        frame:SetScript("OnUpdate", function(self, dt)
-            elapsed = elapsed + dt
-            if elapsed >= ROLL_TIME then
-                self:SetScript("OnUpdate", nil)
-                FinishRoll()
-            end
-        end)
-    end
-
-    local sysFrame = CreateFrame("Frame")
-    sysFrame:RegisterEvent("CHAT_MSG_SYSTEM")
-    sysFrame:SetScript("OnEvent", function(_, _, msg)
-        if not rollState then return end
-        if type(msg) ~= "string" then return end
-
-        local name, n, min, max = msg:match("^(%S+)%s+выбрасывает%s+(%d+)%s+%((%d+)%-(%d+)%)$")
-        if not name then return end
-
-        local value = tonumber(n)
-        local minV  = tonumber(min)
-        local maxV  = tonumber(max)
-
-        if not value or not minV or not maxV then return end
-        if minV ~= 1 or maxV ~= 100 then return end
-
-        if rollState.seen[name] then return end
-        rollState.seen[name] = true
-        table.insert(rollState.rolls, { name = name, value = value })
-    end)
 
     -- ========================================================================
     -- LOOT_OPENED / LOOT_CLOSED
@@ -563,8 +573,12 @@ NSQC4.RegisterModule("gp", function()
     lootFrame:RegisterEvent("LOOT_CLOSED")
     lootFrame:SetScript("OnEvent", function(_, event)
         if event == "LOOT_CLOSED" then
-            HidePanel()
-            if rollCheckbox then rollCheckbox:Hide() end
+            if not gpDb.pinned then
+                HidePanel()
+            end
+            if rollCheckbox and not gpDb.pinned then
+                rollCheckbox:Hide()
+            end
             return
         end
 
@@ -594,6 +608,28 @@ NSQC4.RegisterModule("gp", function()
         guildCacheReady = false
         if event == "PLAYER_LOGOUT" then
             wipe(guildCache)
+        end
+    end)
+
+    -- ========================================================================
+    -- Реакция на состав рейда
+    -- ========================================================================
+    local raidFrame = CreateFrame("Frame")
+    raidFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+    raidFrame:RegisterEvent("RAID_ROSTER_UPDATE")
+    raidFrame:SetScript("OnEvent", function()
+        if not gpDb.pinned then return end
+
+        if not panel then CreatePanel() end
+
+        if IsInRaid() then
+            if not panel:IsShown() then
+                ShowPanel(panelLastBannedOnly)
+            end
+        else
+            if panel:IsShown() then
+                panel:Hide()
+            end
         end
     end)
 
@@ -635,8 +671,6 @@ NSQC4.RegisterModule("gp", function()
             if button == "MiddleButton" then
                 if not AmIMasterLooter() then return end
 
-                if rollState then return end
-
                 local txt = GetButtonText(self)
                 local link, slot = FindLinkByName(txt)
                 if not link then
@@ -645,7 +679,8 @@ NSQC4.RegisterModule("gp", function()
                 end
 
                 if gpDb.rollMode then
-                    StartRoll(link, slot)
+                    SendChatMessage("-ролл " .. link, "RAID")
+                    SendAddonMessage("AUC_ROLL_START", link .. "|20", "RAID")
                 else
                     SendChatMessage("АУК " .. link, "RAID")
                 end
@@ -889,11 +924,21 @@ NSQC4.RegisterModule("gp", function()
             end
 
             content:SetHeight(math.max(#rows * rowHeight, 1))
-            scroll:UpdateScrollChildRect()
+            scroll:UpdateScrollRect()
         end
 
         w:Refresh()
         w:Show()
+    end
+
+    -- ========================================================================
+    -- Восстановление закреплённой панели после /reload
+    -- ========================================================================
+    if gpDb.pinned then
+        CreatePanel()
+        if IsInRaid() then
+            ShowPanel(false)
+        end
     end
 
 end)

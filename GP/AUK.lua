@@ -2,8 +2,6 @@ NSQC4.RegisterModule("gp", function()
 
 -- ============================================================================
 -- NS Auction System v5.9 - RELEASE (FINAL 3.3.5a COMPATIBLE) - ИСПРАВЛЕНО
--- Для WoW 3.3.5a. Чтение ставок/паса из рейд-чата, адаптивная верстка, GP-расчет, быстрые ставки, тултипы.
--- Исправлено: отправка ГП через аддон-сообщения при старте и ставках
 -- ============================================================================
 
 local NSAuk = {}
@@ -45,17 +43,15 @@ function NSAuk.EnsureDB()
     if not db.windowPosition then db.windowPosition = {x = 0, y = 0, point = "CENTER", relativePoint = "CENTER"} end
     if not db.historyPosition then db.historyPosition = {x = 0, y = 0, point = "CENTER", relativePoint = "CENTER"} end
     if not db.settings then db.settings = {defaultStep = 10, defaultTime = 20} end
-    
-    -- Явная инициализация состояния чекбокса. nil приводится к true по умолчанию.
+
     if db.settings.autoDeductGP == nil then db.settings.autoDeductGP = true end
     db.settings.autoDeductGP = (db.settings.autoDeductGP == true)
-    
+
     if not db.customButtons then db.customButtons = {} end
     if db.active == nil then db.active = nil end
     return db
 end
 
--- Функция отправки своих ГП в рейд
 function NSAuk.BroadcastMyGP()
     local db = NSAuk.EnsureDB()
     if not db.active then return end
@@ -64,10 +60,8 @@ function NSAuk.BroadcastMyGP()
     local myBid = db.active.bids[myName]
     if not myBid then return end
 
-    -- Получаем актуальные ГП через общий хелпер
     local myGP = NSAuk.GetMyGP()
 
-    -- Отправляем свои ГП всем в рейде
     local _, myClass = UnitClass("player")
     local publicNote = ""
     for j = 1, GetNumGuildMembers(true) do
@@ -80,7 +74,6 @@ function NSAuk.BroadcastMyGP()
 
     SendAddonMessage("AUC_GP", myName .. ":" .. myGP .. ":" .. (myClass or "WARRIOR") .. ":" .. publicNote, "RAID")
 
-    -- Обновляем свои данные в bids
     if myBid then
         myBid.gp = myGP
         myBid.class = myClass or "WARRIOR"
@@ -199,10 +192,6 @@ function NSAuk.GetRaidGPData()
     return gpData
 end
 
--- ============================================================================
--- ПОЛУЧЕНИЕ ГП ИГРОКА
--- Возвращает: gp (число), source (строка)
--- ============================================================================
 function NSAuk.GetMyGP()
     local myName = UnitName("player")
     if not myName then return 0, "no-name" end
@@ -230,9 +219,6 @@ function NSAuk.GetMyGP()
     return 0, "unknown"
 end
 
--- ============================================================================
--- ПРОВЕРКА СТАВКИ (для СВОИХ ставок)
--- ============================================================================
 function NSAuk.CanBid(amount)
     if not amount or amount <= 0 then
         return false, "Ставка должна быть положительным числом."
@@ -251,9 +237,6 @@ function NSAuk.CanBid(amount)
     return true
 end
 
--- ============================================================================
--- СИНХРОНИЗАЦИЯ ГП ПЕРЕД СТАВКОЙ
--- ============================================================================
 function NSAuk.SyncMyGP()
     local myName = UnitName("player")
     if not myName then return 0 end
@@ -270,17 +253,18 @@ function NSAuk.SyncMyGP()
 end
 
 -- ============================================================================
--- ИНТЕРФЕЙС И UI
+-- ShowConfirm (переименовано, теперь глобально доступно как NSQC4.ShowConfirm)
 -- ============================================================================
+function NSQC4.ShowConfirm(title, text, onYes, onNo)
+    if NSQC4.confirmFrame and NSQC4.confirmFrame:IsShown() then NSQC4.confirmFrame:Hide() end
 
-function NSAuk.ShowConfirm(title, text, onYes, onNo)
-    if NSAuk.confirmFrame and NSAuk.confirmFrame:IsShown() then NSAuk.confirmFrame:Hide() end
-    
-    local f = CreateFrame("Frame", "NSAukConfirm", UIParent)
+    local f = CreateFrame("Frame", "NSQC4Confirm", UIParent)
     f:SetSize(280, 110)
     f:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", tile = true, tileSize = 32, edgeSize = 32, insets = { left = 11, right = 12, top = 12, bottom = 11 } })
     f:SetBackdropColor(0, 0, 0, 0.9)
     f:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
+    f:SetFrameStrata("DIALOG")
+    f:SetToplevel(true)
     f:EnableMouse(true)
     f:SetMovable(true)
     f:RegisterForDrag("LeftButton")
@@ -309,9 +293,12 @@ function NSAuk.ShowConfirm(title, text, onYes, onNo)
     btnN:SetText("Нет")
     btnN:SetScript("OnClick", function() if onNo then onNo() end f:Hide() end)
 
-    NSAuk.confirmFrame = f
+    NSQC4.confirmFrame = f
     f:Show()
 end
+
+-- Алиас для обратной совместимости
+NSAuk.ShowConfirm = NSQC4.ShowConfirm
 
 function NSAuk.RenderCustomButtons()
     local frame = auctionFrame
@@ -492,7 +479,6 @@ function NSAuk.CreateAuctionFrame()
         if frame.customPanel.isExpanded then frame.customPanel:Show() else frame.customPanel:Hide() end
     end)
 
-    -- Чекбокс
     local autoDeductCB = CreateFrame("CheckButton", "NSAukAutoDeductCB", frame, "UICheckButtonTemplate")
     autoDeductCB:SetPoint("LEFT", togglePanelBtn, "RIGHT", 8, 0)
     autoDeductCB:SetChecked(db.settings.autoDeductGP == true)
@@ -514,7 +500,6 @@ function NSAuk.CreateAuctionFrame()
     autoDeductCB:SetScript("OnLeave", function() GameTooltip:Hide() end)
     frame.autoDeductCB = autoDeductCB
 
-    -- Кнопка закрытия (крестик)
     local closeBtn = CreateFrame("Button", "NSAukCloseBtn", frame, "UIPanelCloseButton")
     closeBtn:SetSize(24, 24)
     closeBtn:SetPoint("TOPRIGHT", -2, -2)
@@ -711,7 +696,7 @@ function NSAuk.CreateAuctionFrame()
 end
 
 function NSAuk.DestroyAuctionWindow()
-    if auctionFrame then 
+    if auctionFrame then
         auctionFrame:Hide()
         if auctionFrame.customPanel then
             auctionFrame.customPanel:Hide()
@@ -719,11 +704,11 @@ function NSAuk.DestroyAuctionWindow()
             auctionFrame.customPanel = nil
         end
         auctionFrame:SetParent(nil)
-        auctionFrame = nil 
+        auctionFrame = nil
     end
-    if resizeAnimation then 
+    if resizeAnimation then
         resizeAnimation:SetScript("OnUpdate", nil)
-        resizeAnimation = nil 
+        resizeAnimation = nil
     end
 end
 
@@ -889,10 +874,6 @@ function NSAuk.CreateSettingsWindow()
     return settingsWindow
 end
 
--- ============================================================================
--- ЛОГИКА АУКЦИОНА
--- ============================================================================
-
 local function AnnounceRaid(msg)
     local db = NSAuk.EnsureDB()
     if db.active and db.active.startedBy == UnitName("player") then
@@ -902,7 +883,7 @@ end
 
 function NSAuk.DeductGPFromRoster(playerName, amount)
     if not playerName or not amount or amount <= 0 then return end
-    
+
     SendAddonMessage("nsGP1 -" .. amount, playerName, "GUILD")
     SendAddonMessage("nsGP1A", "-" .. amount .. " " .. playerName, "GUILD")
     SendAddonMessage("nsGPlog", "Аукцион -" .. amount .. " " .. (playerName or ""), "guild")
@@ -912,57 +893,55 @@ end
 function NSAuk.SetWinner(playerName, winAmount)
     local db = NSAuk.EnsureDB()
     if not db.active then return end
-    
-    if closeTimerFrame then 
+
+    if closeTimerFrame then
         closeTimerFrame:SetScript("OnUpdate", nil)
-        closeTimerFrame = nil 
+        closeTimerFrame = nil
     end
-    
-    -- Сохраняем ссылку на предмет ДО обнуления db.active, т.к. выдача лута может быть отложенной
+
     local winnerItemLink = db.active.itemLink
-    
-    -- Выдача лута через GiveMasterLoot (работает только если мы мастер-лутер и окно добычи открыто)
+
     NSAuk.GiveLootToWinnerDeferred(playerName, winnerItemLink)
-    
+
     if db.active.startedBy == UnitName("player") then
         if db.settings.autoDeductGP and winAmount > 0 then
             NSAuk.DeductGPFromRoster(playerName, winAmount)
         else
-            print(string.format("|cff00FF00[NSAuk]|r Аукцион завершён. Победитель: %s, сумма: %d ГП. (Списание %s).", 
+            print(string.format("|cff00FF00[NSAuk]|r Аукцион завершён. Победитель: %s, сумма: %d ГП. (Списание %s).",
                 playerName, winAmount, db.settings.autoDeductGP and "выполнено" or "отключено"))
         end
     end
-    
+
     local bc = {}
-    for n, d in pairs(db.active.bids) do 
-        bc[n] = { 
-            amount = d.amount, 
-            class = d.class, 
-            public = d.public, 
-            gp = d.gp, 
-            passed = d.passed, 
-            hasAction = d.hasAction 
-        } 
+    for n, d in pairs(db.active.bids) do
+        bc[n] = {
+            amount = d.amount,
+            class = d.class,
+            public = d.public,
+            gp = d.gp,
+            passed = d.passed,
+            hasAction = d.hasAction
+        }
     end
-    table.insert(db.history, { 
-        item = db.active.item, 
+    table.insert(db.history, {
+        item = db.active.item,
         itemLink = db.active.itemLink,
-        endTime = GetTime(), 
-        startedBy = db.active.startedBy, 
-        winner = playerName, 
-        winAmount = winAmount or 0, 
-        bids = bc 
+        endTime = GetTime(),
+        startedBy = db.active.startedBy,
+        winner = playerName,
+        winAmount = winAmount or 0,
+        bids = bc
     })
-    if #db.history > 10 then 
-        table.remove(db.history, 1) 
+    if #db.history > 10 then
+        table.remove(db.history, 1)
     end
-    
+
     if db.active.startedBy == UnitName("player") then
         SendChatMessage(playerName .. " побеждает, поставив " .. (winAmount or 0) .. " ГП. Предмет: " .. db.active.item, "RAID_WARNING")
     end
-    
+
     SendAddonMessage("AUC_END", "", "RAID")
-    
+
     db.active = nil
     isMinimized = false
     NSAuk.DestroyAuctionWindow()
@@ -973,45 +952,45 @@ end
 function NSAuk.FinishAuction(initiator)
     local db = NSAuk.EnsureDB()
     if not db.active then return end
-    
-    if closeTimerFrame then 
+
+    if closeTimerFrame then
         closeTimerFrame:SetScript("OnUpdate", nil)
-        closeTimerFrame = nil 
+        closeTimerFrame = nil
     end
-    
+
     local w, wa = nil, 0
-    for n, d in pairs(db.active.bids) do 
-        if d.hasAction and not d.passed and not d.banned and d.amount > wa then 
-            w, wa = n, d.amount 
-        end 
+    for n, d in pairs(db.active.bids) do
+        if d.hasAction and not d.passed and not d.banned and d.amount > wa then
+            w, wa = n, d.amount
+        end
     end
-    
+
     if w and wa > 0 then
         local bc = {}
-        for n, d in pairs(db.active.bids) do 
-            bc[n] = { 
-                amount = d.amount, 
-                class = d.class, 
-                public = d.public, 
-                gp = d.gp, 
-                passed = d.passed, 
-                hasAction = d.hasAction 
-            } 
+        for n, d in pairs(db.active.bids) do
+            bc[n] = {
+                amount = d.amount,
+                class = d.class,
+                public = d.public,
+                gp = d.gp,
+                passed = d.passed,
+                hasAction = d.hasAction
+            }
         end
-        table.insert(db.history, { 
-            item = db.active.item, 
+        table.insert(db.history, {
+            item = db.active.item,
             itemLink = db.active.itemLink,
-            endTime = GetTime(), 
-            startedBy = db.active.startedBy, 
-            winner = w, 
-            winAmount = wa, 
-            bids = bc 
+            endTime = GetTime(),
+            startedBy = db.active.startedBy,
+            winner = w,
+            winAmount = wa,
+            bids = bc
         })
-        if #db.history > 10 then 
-            table.remove(db.history, 1) 
+        if #db.history > 10 then
+            table.remove(db.history, 1)
         end
     end
-    
+
     db.active = nil
     isMinimized = false
     NSAuk.DestroyAuctionWindow()
@@ -1022,27 +1001,27 @@ end
 function NSAuk.StartCloseTimer()
     local db = NSAuk.EnsureDB()
     if not db.active then return end
-    if closeTimerFrame then 
+    if closeTimerFrame then
         closeTimerFrame:SetScript("OnUpdate", nil)
-        closeTimerFrame = nil 
+        closeTimerFrame = nil
     end
-    
+
     closeTimerFrame = CreateFrame("Frame")
     local lc = GetTime()
     local finished = false
-    
+
     closeTimerFrame:SetScript("OnUpdate", function(self)
         local ct = GetTime()
         if ct - lc < 1 then return end
         lc = ct
-        
+
         local d = NSAuk.EnsureDB()
-        if not d.active then 
+        if not d.active then
             self:SetScript("OnUpdate", nil)
-            closeTimerFrame = nil 
-            return 
+            closeTimerFrame = nil
+            return
         end
-        
+
         if auctionFrame and auctionFrame.countdownText then
             local lastTime = d.active.lastBidTime or d.active.startTime
             local rem = math.max(0, math.floor(d.active.closeTime - (GetTime() - lastTime)))
@@ -1050,20 +1029,20 @@ function NSAuk.StartCloseTimer()
         end
 
         if d.active.startedBy ~= UnitName("player") then return end
-        
+
         if GetTime() - (d.active.lastBidTime or d.active.startTime) >= d.active.closeTime then
             if finished then return end
             finished = true
             self:SetScript("OnUpdate", nil)
             closeTimerFrame = nil
-            
+
             local w, wa = nil, 0
-            for n, bidData in pairs(d.active.bids) do 
-                if bidData.hasAction and not bidData.passed and not bidData.banned and bidData.amount > wa then 
-                    w, wa = n, bidData.amount 
-                end 
+            for n, bidData in pairs(d.active.bids) do
+                if bidData.hasAction and not bidData.passed and not bidData.banned and bidData.amount > wa then
+                    w, wa = n, bidData.amount
+                end
             end
-            
+
             if w and wa > 0 then
                 NSAuk.SetWinner(w, wa)
             else
@@ -1088,7 +1067,7 @@ function NSAuk.UpdateAuctionWindow()
     content.rows = {}
 
     frame.itemTitle:SetText(db.active.item or "Предмет")
-    
+
     local lastTime = db.active.lastBidTime or db.active.startTime
     local remaining = math.max(0, math.floor(db.active.closeTime - (GetTime() - lastTime)))
     frame.infoText:SetText("Шаг: " .. db.active.step .. " GP | Осталось:")
@@ -1098,7 +1077,7 @@ function NSAuk.UpdateAuctionWindow()
     for name, data in pairs(db.active.bids) do
         if data.hasAction then table.insert(sortedBids, {name = name, data = data}) end
     end
-    
+
     table.sort(sortedBids, function(a, b)
         if a.data.passed and not b.data.passed then return false end
         if not a.data.passed and b.data.passed then return true end
@@ -1117,6 +1096,7 @@ function NSAuk.UpdateAuctionWindow()
         row:SetPoint("TOPLEFT", 10, -totalHeight)
         row:SetPoint("TOPRIGHT", -10, -totalHeight)
         row:EnableMouse(true)
+        row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
         local cc = CLASS_COLORS[bid.data.class] or CLASS_COLORS.WARRIOR
         local isPassed = bid.data.passed
@@ -1148,14 +1128,14 @@ function NSAuk.UpdateAuctionWindow()
 
         row:SetScript("OnMouseUp", function(_, button)
             if button == "LeftButton" and isRL and not isBanned and not isPassed then
-                NSAuk.ShowConfirm("Назначить победителем?", "Назначить " .. bid.name .. " победителем и завершить аукцион?",
-                    function() 
-                        NSAuk.SetWinner(bid.name, bid.data.amount) 
+                NSQC4.ShowConfirm("Назначить победителем?", "Назначить " .. bid.name .. " победителем и завершить аукцион?",
+                    function()
+                        NSAuk.SetWinner(bid.name, bid.data.amount)
                     end,
                     nil
                 )
             elseif button == "RightButton" and isRL and not isBanned then
-                NSAuk.ShowConfirm("Забанить игрока?", "Игрок " .. bid.name .. " будет заблокирован до конца аукциона.",
+                NSQC4.ShowConfirm("Забанить игрока?", "Игрок " .. bid.name .. " будет заблокирован до конца аукциона.",
                     function()
                         bid.data.banned = true
                         bid.data.passed = true
@@ -1201,7 +1181,7 @@ function NSAuk.UpdateAuctionWindow()
     content:SetWidth(maxRowWidth)
     NSAuk.SmoothResize(frame, maxRowWidth + 20, totalHeight + 140, 0.15)
     NSAuk.RenderCustomButtons()
-    
+
     if frame.customPanel then
         frame.customPanel:ClearAllPoints()
         frame.customPanel:SetPoint("TOPRIGHT", frame, "TOPLEFT", -5, 0)
@@ -1225,23 +1205,19 @@ function NSAuk.EnableCheckFrame()
     end)
 end
 
--- ============================================================================
--- СОБЫТИЯ И ЧАТ
--- ============================================================================
-
 SLASH_NSAUK1 = "/nsauk"
 SlashCmdList["NSAUK"] = function(msg)
     local db = NSAuk.EnsureDB()
     local cmd = msg:lower():match("^%s*(%S+)%s*$") or ""
-    
+
     if cmd == "reset" then
         NSAuk.ResetAllSettings()
     elseif cmd == "find" then
         NSAuk.HighlightAllFrames()
     elseif cmd == "save" then
-        if auctionFrame then 
+        if auctionFrame then
             NSAuk.SaveWindowPosition(auctionFrame, db.windowPosition)
-            print("|cff00ff00[NSAuk]|r Позиция окна сохранена") 
+            print("|cff00ff00[NSAuk]|r Позиция окна сохранена")
         else
             print("|cffff8080[NSAuk]|r Окно аукциона не открыто.")
         end
@@ -1395,7 +1371,6 @@ local function ProcessRaidMessage(sender, msg, event)
                 end
                 local mn = mx + db.active.step
 
-                -- Проверка достаточности ГП для ЛЮБОГО отправителя
                 local senderGP = bidData.gp or 0
                 if senderGP > 0 and amount > senderGP then
                     if sender == myName then
@@ -1406,7 +1381,6 @@ local function ProcessRaidMessage(sender, msg, event)
                     return true
                 end
 
-                -- Синхронизация своего ГП перед ставкой (для себя)
                 if sender == myName then
                     NSAuk.SyncMyGP()
                 end
@@ -1456,25 +1430,23 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             isMinimized = false
             for pd in (parts[5] or ""):gmatch("([^;]+);") do
                 local n, g, c, p = pd:match("([^:]+):([^:]+):([^:]+):(.*)")
-                if n then 
+                if n then
                     local gpValue = tonumber(g) or 0
-                    db.active.bids[n] = { amount = 0, class = c or "WARRIOR", public = p or "", gp = gpValue, passed = false, hasAction = false, banned = false } 
+                    db.active.bids[n] = { amount = 0, class = c or "WARRIOR", public = p or "", gp = gpValue, passed = false, hasAction = false, banned = false }
                 end
             end
             if not db.active.bids[myName] then
                 local _, c = UnitClass("player")
                 db.active.bids[myName] = { amount = 0, class = c, public = "", gp = 0, passed = false, hasAction = false, banned = false }
             end
-            
-            -- Отправляем свои ГП при получении AUC_START
+
             NSAuk.BroadcastMyGP()
-            
+
             NSAuk.UpdateAuctionWindow()
             NSAuk.StartCloseTimer()
             NSAuk.EnableCheckFrame()
 
         elseif prefix == "AUC_GP" and db.active then
-            -- Получаем ГП от другого игрока
             local n, g, c, p = addonMsg:match("([^:]+):([^:]+):([^:]+):(.*)")
             if n then
                 local gpValue = tonumber(g) or 0
@@ -1495,7 +1467,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
                     local _, c = UnitClass(addonSender)
                     db.active.bids[addonSender] = { amount = 0, class = c or "WARRIOR", public = "", gp = 0, passed = false, hasAction = true, banned = false }
                 end
-                
+
                 if not db.active.bids[addonSender].passed and not db.active.bids[addonSender].banned then
                     db.active.bids[addonSender].amount = a
                     db.active.bids[addonSender].passed = false
@@ -1551,19 +1523,18 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             isMinimized = false
             for pd in (parts[5] or ""):gmatch("([^;]+);") do
                 local n, g, c, p = pd:match("([^:]+):([^:]+):([^:]+):(.*)")
-                if n then 
+                if n then
                     local gpValue = tonumber(g) or 0
-                    db.active.bids[n] = { amount = 0, class = c or "WARRIOR", public = p or "", gp = gpValue, passed = false, hasAction = false, banned = false } 
+                    db.active.bids[n] = { amount = 0, class = c or "WARRIOR", public = p or "", gp = gpValue, passed = false, hasAction = false, banned = false }
                 end
             end
             if not db.active.bids[myName] then
                 local _, c = UnitClass("player")
                 db.active.bids[myName] = { amount = 0, class = c, public = "", gp = 0, passed = false, hasAction = false, banned = false }
             end
-            
-            -- Отправляем свои ГП при синхронизации
+
             NSAuk.BroadcastMyGP()
-            
+
             NSAuk.UpdateAuctionWindow()
             NSAuk.StartCloseTimer()
             NSAuk.EnableCheckFrame()
@@ -1581,7 +1552,6 @@ end)
 -- ВЫДАЧА ЛУТА ЧЕРЕЗ GIVEMASTERLOOT
 -- ============================================================================
 
--- Приватный метод: ищет слот в окне лута, соответствующий itemLink аукциона
 function NSAuk._FindLootSlotByLink(itemLink)
     if not itemLink then return nil end
     local num = GetNumLootItems and GetNumLootItems() or 0
@@ -1602,41 +1572,36 @@ end
 
 function NSAuk.GiveLootToWinner(playerName, itemLink)
     if not playerName then return false end
-    
-    -- Проверяем, что мы мастер-лутер
+
     if GetLootMethod() ~= "master" then
         print("|cffff8080[NSAuk]|r Лут не выдан: рейд не в режиме 'Master Looter'")
         return false
     end
-    
-    -- Проверяем, что окно лута открыто
+
     if not LootFrame or not LootFrame:IsShown() then
         print("|cffff8080[NSAuk]|r Лут не выдан: окно добычи не открыто")
         return false
     end
-    
-    -- Если itemLink не передан — пробуем взять из активного аукциона
+
     if not itemLink then
         local db = NSAuk.EnsureDB()
         itemLink = db.active and db.active.itemLink or nil
     end
-    
+
     if not itemLink then
         print("|cffff8080[NSAuk]|r Лут не выдан: нет ссылки на предмет")
         return false
     end
-    
-    -- Ищем слот, в котором лежит нужный предмет
+
     local slot = NSAuk._FindLootSlotByLink(itemLink)
     if not slot then
         print("|cffff8080[NSAuk]|r Лут не выдан: предмет не найден в окне добычи")
         return false
     end
-    
+
     local lowerPlayer = string.lower(playerName)
     local found = false
-    
-    -- РЕЙД
+
     if GetNumRaidMembers() > 0 then
         for i = 1, GetNumRaidMembers() do
             local cand = GetMasterLootCandidate(i)
@@ -1646,7 +1611,6 @@ function NSAuk.GiveLootToWinner(playerName, itemLink)
                 break
             end
         end
-    -- ГРУППА
     elseif GetNumPartyMembers() > 0 then
         for i = 1, GetNumPartyMembers() + 1 do
             local cand = GetMasterLootCandidate(i)
@@ -1657,7 +1621,7 @@ function NSAuk.GiveLootToWinner(playerName, itemLink)
             end
         end
     end
-    
+
     if found then
         print("|cff00ff00[NSAuk]|r Лут выдан игроку " .. playerName .. " (слот " .. slot .. ")")
     else
@@ -1669,14 +1633,12 @@ end
 function NSAuk.GiveLootToWinnerDeferred(playerName, itemLink)
     if not playerName then return end
     if GetLootMethod() ~= "master" then return end
-    
-    -- Если окно лута уже открыто — выдаём сразу
+
     if LootFrame and LootFrame:IsShown() then
         NSAuk.GiveLootToWinner(playerName, itemLink)
         return
     end
-    
-    -- Иначе ждём до 3 секунд появления окна лута
+
     local waiter = CreateFrame("Frame")
     local elapsed = 0
     waiter:SetScript("OnUpdate", function(self, dt)

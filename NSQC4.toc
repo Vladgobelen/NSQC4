@@ -53,6 +53,7 @@ GP\MinimapGP.lua
 GP\LogReceiver.lua
 GP\ExternalGP.lua
 GP\PveSeason.lua
+GP\Roll.lua
 Course\Modules.lua
 Course\UI.lua
 Course\Logic.lua
