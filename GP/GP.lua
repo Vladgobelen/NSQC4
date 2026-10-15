@@ -917,22 +917,29 @@ end
 
 function GpDb:UpdateRaidWindowVisibility()
     if not self.raidWindow then return end
-
     local hasSelection = next(self.selected_indices) ~= nil
 
     if hasSelection then
         if not self.raidWindow:IsShown() then
-            self.raidWindow:Show()
-            self:RestoreRaidWindowState()
-            self:_UpdateSelectedPlayersText()
-            if self.logWindow and self.logWindow:IsShown() then
-                self.logWindow:SetHeight(self.window:GetHeight() / 2)
+            if InCombatLockdown() then
+                self.raidWindow:SetAlpha(1)
+            else
+                self.raidWindow:Show()
+                self:RestoreRaidWindowState()
+                self:_UpdateSelectedPlayersText()
+                if self.logWindow and self.logWindow:IsShown() then
+                    self.logWindow:SetHeight(self.window:GetHeight() / 2)
+                end
             end
         end
         self:_UpdatePlayerInfo()
     else
         if self.raidWindow:IsShown() then
-            self.raidWindow:Hide()
+            if InCombatLockdown() then
+                self.raidWindow:SetAlpha(0)
+            else
+                self.raidWindow:Hide()
+            end
         end
         if self.logWindow and self.logWindow:IsShown() then
             self.logWindow:SetHeight(self.window:GetHeight())
