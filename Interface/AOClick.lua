@@ -16,13 +16,12 @@ NSQC4.RegisterModule("ui_ao", function()
     local NICK_COLOR_RESET = "|r"
     local PREFIX_Q = "nsInfoQ"
 
+    -- aoNames[name] = { faction = "Horde"/"Alliance" }
     local aoNames = {}
 
-    -- Цвет офицерского канала (hex и r,g,b должны совпадать)
     local OFFICER_COLOR = "|cff00a000"
     local OFFICER_R, OFFICER_G, OFFICER_B = 0.00, 0.63, 0.00
 
-    -- Гильдейский: берём системный
     local function GuildRGB()
         local t = ChatTypeInfo and ChatTypeInfo["GUILD"]
         if t then return t.r or 0.25, t.g or 0.75, t.b or 0.25 end
@@ -33,54 +32,125 @@ NSQC4.RegisterModule("ui_ao", function()
         return "|Hchannel:GUILD|h[G" .. (letter or "") .. "]|h"
     end
 
+    -- Тег [O] — гиперлинк nsqcofficer. Клик обрабатывается через SetItemRef (см. ниже).
     local function OfficerTag(letter)
         return OFFICER_COLOR .. "|Hnsqcofficer|h[O" .. (letter or "") .. "]|h|r"
     end
 
     -- ========================================================================
-    -- Дабл-клик по нику
+    -- Открыть офицерский канал в чате
     -- ========================================================================
-    local lastClickTime   = 0
-    local lastClickButton = nil
-    local lastClickName   = nil
-    local clickPending    = false
+    local function OpenOfficerChat()
+        local eb = ChatFrame1EditBox
+        if not eb then return end
+        if not eb:IsShown() then eb:Show() end
+        eb:SetText("/o ")
+        eb:SetFocus()
+    end
 
-    local ClickTimerFrame = CreateFrame("Frame")
-    ClickTimerFrame:Hide()
-    ClickTimerFrame.elapsed = 0
-    ClickTimerFrame:SetScript("OnUpdate", function(self, elapsed)
-        if not clickPending then return end
-        self.elapsed = self.elapsed + elapsed
-        if self.elapsed >= 0.3 then
-            self.elapsed = 0
-            self:Hide()
-            clickPending = false
-
-            local button = lastClickButton
-            local name = lastClickName
-
-            if not (name and aoNames[name]) then return end
-
-            if button == "RightButton" then
-                SendAddonMessage(PREFIX_Q, name, "GUILD")
-            elseif button == "LeftButton" then
-                local editBox = ChatFrame1EditBox
-                if editBox then
-                    if not editBox:IsShown() then editBox:Show() end
-                    editBox:Insert(name .. ", ")
-                    editBox:SetFocus()
+    -- ========================================================================
+    -- Перехват SetItemRef — ДО Blizzard, чтобы не падало на nsqcofficer
+    -- Ловим и с двоеточием, и без (Blizzard отдаёт |H<...>|h как есть).
+    -- ========================================================================
+    if not NSQC4._AOClick_SetItemRefPatched then
+        NSQC4._AOClick_SetItemRefPatched = true
+        local oldSetItemRef = SetItemRef
+        SetItemRef = function(link, text, button, chatFrame)
+            local raw = link or ""
+            if raw == "nsqcofficer"
+                or raw:match("^nsqcofficer:")
+                or raw:match("^nsqcofficer$") then
+                if button == "LeftButton" or button == nil then
+                    OpenOfficerChat()
                 end
+                return
             end
+            return oldSetItemRef(link, text, button, chatFrame)
         end
-    end)
+    end
+
+    -- ========================================================================
+    -- Контекстное меню по нику
+    -- ========================================================================
+    local menuFrame
+
+    local function EnsureMenu()
+        if menuFrame then return menuFrame end
+        local m = CreateFrame("Frame", "NSQC4AOClickMenu", UIParent, "UIDropDownMenuTemplate")
+        menuFrame = m
+        return m
+    end
+
+    local function InsertNickToChat(name)
+        local eb = ChatFrame1EditBox
+        if not eb then return end
+        if not eb:IsShown() then eb:Show() end
+        eb:Insert(name .. ", ")
+        eb:SetFocus()
+    end
+
+    local function GetFaction(name)
+        local data = aoNames[name]
+        if type(data) == "table" then return data.faction end
+        return nil
+    end
+
+    local function MyFaction()
+        return UnitFactionGroup("player")
+    end
+
+    local function Menu_Info(name)
+        SendAddonMessage(PREFIX_Q, name, "GUILD")
+    end
+
+    local function Menu_Invite(name)
+        local theirFaction = GetFaction(name)
+        local mine = MyFaction()
+        if theirFaction and mine and theirFaction ~= mine then
+            print("|cffff0000[AOClick]|r " .. name .. " — другая фракция, приглашение невозможно.")
+            return
+        end
+        InviteUnit(name)
+    end
+
+local function ShowNickMenu(name)
+    local m = EnsureMenu()
+    m.name = name
+
+    UIDropDownMenu_Initialize(m, function(self, level)
+        local info = UIDropDownMenu_CreateInfo()
+        info.text = "Инфо"
+        info.notCheckable = true
+        info.func = function() Menu_Info(self.name) end
+        UIDropDownMenu_AddButton(info)
+
+        local theirFaction = GetFaction(self.name)
+        local mine = MyFaction()
+        local sameFaction = (not theirFaction) or (not mine) or (theirFaction == mine)
+
+        info = UIDropDownMenu_CreateInfo()
+        if sameFaction then
+            info.text = "Принять в пати"
+            info.notCheckable = true
+            info.func = function() Menu_Invite(self.name) end
+        else
+            info.text = "Принять в пати (другая фракция)"
+            info.notCheckable = true
+            info.disabled = true
+        end
+        UIDropDownMenu_AddButton(info)
+    end, "MENU")
+
+    ToggleDropDownMenu(1, nil, m, "cursor", 0, 0)
+end
 
     -- ========================================================================
     -- Пересборка формата ников NSQS2-релея
     -- ========================================================================
-    local function BuildReplacement(code, nick, meta)
+    local function BuildReplacement(code, nick, meta, faction)
         local cleanName = nick:gsub(":+$", "")
         local color = CLASS_COLORS[code] or DEFAULT_COLOR
-        aoNames[cleanName] = true
+        aoNames[cleanName] = { faction = faction }
 
         local nickDisplay = cleanName
         if meta and meta ~= "" then
@@ -94,69 +164,73 @@ NSQC4.RegisterModule("ui_ao", function()
     end
 
     local function ReplaceAll(msg)
+        -- [О..] — Орда
         msg = msg:gsub(
             "%[\208\158(%d):(%-?%d+):(%-?%d+)%]%s+(%S+):%s*",
             function(code, level, rep, nick)
                 if tonumber(level) == 80 then
-                    return BuildReplacement(code, nick, ":" .. rep)
+                    return BuildReplacement(code, nick, ":" .. rep, "Horde")
                 else
-                    return BuildReplacement(code, nick, ":" .. level .. ":" .. rep)
+                    return BuildReplacement(code, nick, ":" .. level .. ":" .. rep, "Horde")
                 end
             end)
         msg = msg:gsub(
             "%[\208\158(%d):(%-?%d+)%]%s+(%S+):%s*",
-            function(code, rep, nick) return BuildReplacement(code, nick, ":" .. rep) end)
+            function(code, rep, nick) return BuildReplacement(code, nick, ":" .. rep, "Horde") end)
         msg = msg:gsub(
             "%[\208\158(%d)%]%s+(%S+):%s*",
-            function(code, nick) return BuildReplacement(code, nick) end)
+            function(code, nick) return BuildReplacement(code, nick, nil, "Horde") end)
 
+        -- [А..] — Альянс
         msg = msg:gsub(
             "%[\208\144(%d):(%-?%d+):(%-?%d+)%]%s+(%S+):%s*",
             function(code, level, rep, nick)
                 if tonumber(level) == 80 then
-                    return BuildReplacement(code, nick, ":" .. rep)
+                    return BuildReplacement(code, nick, ":" .. rep, "Alliance")
                 else
-                    return BuildReplacement(code, nick, ":" .. level .. ":" .. rep)
+                    return BuildReplacement(code, nick, ":" .. level .. ":" .. rep, "Alliance")
                 end
             end)
         msg = msg:gsub(
             "%[\208\144(%d):(%-?%d+)%]%s+(%S+):%s*",
-            function(code, rep, nick) return BuildReplacement(code, nick, ":" .. rep) end)
+            function(code, rep, nick) return BuildReplacement(code, nick, ":" .. rep, "Alliance") end)
         msg = msg:gsub(
             "%[\208\144(%d)%]%s+(%S+):%s*",
-            function(code, nick) return BuildReplacement(code, nick) end)
+            function(code, nick) return BuildReplacement(code, nick, nil, "Alliance") end)
 
+        -- [O..] — Орда (латиница)
         msg = msg:gsub(
             "%[O(%d):(%-?%d+):(%-?%d+)%]%s+(%S+):%s*",
             function(code, level, rep, nick)
                 if tonumber(level) == 80 then
-                    return BuildReplacement(code, nick, ":" .. rep)
+                    return BuildReplacement(code, nick, ":" .. rep, "Horde")
                 else
-                    return BuildReplacement(code, nick, ":" .. level .. ":" .. rep)
+                    return BuildReplacement(code, nick, ":" .. level .. ":" .. rep, "Horde")
                 end
             end)
         msg = msg:gsub(
             "%[O(%d):(%-?%d+)%]%s+(%S+):%s*",
-            function(code, rep, nick) return BuildReplacement(code, nick, ":" .. rep) end)
+            function(code, rep, nick) return BuildReplacement(code, nick, ":" .. rep, "Horde") end)
         msg = msg:gsub(
             "%[O(%d)%]%s+(%S+):%s*",
-            function(code, nick) return BuildReplacement(code, nick) end)
+            function(code, nick) return BuildReplacement(code, nick, nil, "Horde") end)
 
+        -- [A..] — Альянс (латиница)
         msg = msg:gsub(
             "%[A(%d):(%-?%d+):(%-?%d+)%]%s+(%S+):%s*",
             function(code, level, rep, nick)
                 if tonumber(level) == 80 then
-                    return BuildReplacement(code, nick, ":" .. rep)
+                    return BuildReplacement(code, nick, ":" .. rep, "Alliance")
                 else
-                    return BuildReplacement(code, nick, ":" .. level .. ":" .. rep)
+                    return BuildReplacement(code, nick, ":" .. level .. ":" .. rep, "Alliance")
                 end
             end)
         msg = msg:gsub(
             "%[A(%d):(%-?%d+)%]%s+(%S+):%s*",
-            function(code, rep, nick) return BuildReplacement(code, nick, ":" .. rep) end)
+            function(code, rep, nick) return BuildReplacement(code, nick, ":" .. rep, "Alliance") end)
         msg = msg:gsub(
             "%[A(%d)%]%s+(%S+):%s*",
-            function(code, nick) return BuildReplacement(code, nick) end)
+            function(code, nick) return BuildReplacement(code, nick, nil, "Alliance") end)
 
         return msg
     end
@@ -243,39 +317,14 @@ NSQC4.RegisterModule("ui_ao", function()
     ChatFrame_OnHyperlinkShow = function(self, link, text, button)
         local linkType, linkData = link:match("^(%a+):(.+)$")
 
-        if linkType == "nsqcofficer" then
-            if button == "LeftButton" then
-                local eb = ChatFrame1EditBox
-                if eb then
-                    if not eb:IsShown() then eb:Show() end
-                    eb:SetText("/o ")
-                    eb:SetFocus()
-                end
-            end
-            return
-        end
-
         if linkType == "player" and linkData then
             local name = linkData:match("^([^:]+)")
             if name and aoNames[name] then
-                local now = GetTime()
-
-                if clickPending
-                    and (now - lastClickTime < 0.3)
-                    and (button == lastClickButton)
-                    and (name == lastClickName)
-                then
-                    clickPending = false
-                    ClickTimerFrame.elapsed = 0
-                    ClickTimerFrame:Hide()
+                if button == "LeftButton" then
+                    InsertNickToChat(name)
                     return
-                else
-                    clickPending    = true
-                    lastClickTime   = now
-                    lastClickButton = button
-                    lastClickName   = name
-                    ClickTimerFrame.elapsed = 0
-                    ClickTimerFrame:Show()
+                elseif button == "RightButton" then
+                    ShowNickMenu(name)
                     return
                 end
             end
