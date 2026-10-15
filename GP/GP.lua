@@ -28,35 +28,26 @@ function GpDb:new(input_table)
     return new_object
 end
 
--- Начинает сборку списка РЛов. Принимает первый ник (text).
 function GpDb:BeginRlTooltipList(text)
     if not text or type(text) ~= "string" or text == "" then return end
     self._rl_tooltip_list = { text }
 end
 
--- Добавляет следующий ник и завершает сборку, обновляя тултип чекбокса.
 function GpDb:EndRlTooltipList(text)
     if not text or type(text) ~= "string" or text == "" then
-        -- Если нет последнего, но есть начальный — завершаем без добавления.
         if not self._rl_tooltip_list then return end
     else
-        -- Добавляем последний ник, если список уже начат
         if self._rl_tooltip_list then
             table.insert(self._rl_tooltip_list, text)
         else
-            -- Или начинаем и сразу завершаем
             self._rl_tooltip_list = { text }
         end
     end
 
-    -- Обновляем тултип чекбокса (если он существует)
     if self.raidWindow and self.raidWindow.playerInfoCheckbox then
-        -- Просто перерисовка произойдёт при наведении, но можно принудительно скрыть,
-        -- чтобы пользователь увидел обновлённый тултип при следующем наведении.
         GameTooltip:Hide()
     end
 
-    -- Уничтожаем переменную сборки
     self._rl_tooltip_list = nil
 end
 
@@ -65,7 +56,6 @@ function GpDb:AddRawLogEntry(rawLogString)
         self:_CreateLogWindow()
     end
 
-    -- Парсим: "1760908142 Шеф Тест 5 1Ic"
     local words = {}
     for word in rawLogString:gmatch("%S+") do
         table.insert(words, word)
@@ -78,17 +68,14 @@ function GpDb:AddRawLogEntry(rawLogString)
     local raid = words[3]
     local gpValue = tonumber(words[4]) or 0
 
-    -- Цели — всё, что после 4-го слова
     local targets = {}
     for i = 5, #words do
         table.insert(targets, words[i])
     end
     local targetsStr = table.concat(targets, " ")
 
-    -- Форматируем время из unixtime
     local formattedTime = "|cFFA0A0A0" .. date("%d %H:%M:%S", unixTime) .. "|r"
 
-    -- Получаем цвет класса для РЛ
     local function GetClassColor(name)
         if not name or type(name) ~= "string" or name == "" then 
             return "|cFFFFFFFF" 
@@ -111,7 +98,6 @@ function GpDb:AddRawLogEntry(rawLogString)
     local formattedGp = gpColor .. tostring(gpValue) .. "|r"
     local formattedRaid = "|cFFFFFF00" .. (raid or "Неизвестно") .. "|r"
 
-    -- Декодируем цели (если есть NSQS_dict)
     local formattedTargets = {}
     for _, code in ipairs(targets) do
         local playerName = code
@@ -156,20 +142,17 @@ function GpDb:AddRawLogEntry(rawLogString)
 end
 
 function GpDb:_CreateLogWindow()
-    -- Основное окно логов
     self.logWindow = CreateFrame("Frame", "GpDbLogWindow", self.window)
     self.logWindow:SetFrameStrata("DIALOG")
     self.logWindow:SetSize(600, self.window:GetHeight())
     self.logWindow:SetPoint("TOPLEFT", self.window, "TOPRIGHT", 5, 0)
     self.logWindow:SetMovable(false)
     self.logWindow:Hide()
-    -- Фон окна
     self.logWindow.background = self.logWindow:CreateTexture(nil, "BACKGROUND")
     self.logWindow.background:SetTexture("Interface\\Buttons\\WHITE8X8")
     self.logWindow.background:SetVertexColor(0.1, 0.1, 0.1)
     self.logWindow.background:SetAlpha(0.9)
     self.logWindow.background:SetAllPoints(true)
-    -- Граница окна
     self.logWindow.borderFrame = CreateFrame("Frame", nil, self.logWindow)
     self.logWindow.borderFrame:SetPoint("TOPLEFT", -3, 3)
     self.logWindow.borderFrame:SetPoint("BOTTOMRIGHT", 3, -3)
@@ -178,18 +161,15 @@ function GpDb:_CreateLogWindow()
         edgeSize = 16,
         insets = {left = 4, right = 4, top = 4, bottom = 4}
     })
-    -- Кнопка закрытия
     self.logWindow.closeButton = CreateFrame("Button", nil, self.logWindow, "UIPanelCloseButton")
     self.logWindow.closeButton:SetPoint("TOPRIGHT", -5, -5)
     self.logWindow.closeButton:SetScript("OnClick", function() 
         self.logWindow:Hide() 
     end)
-    -- Фильтры
     self.logWindow.filters = CreateFrame("Frame", nil, self.logWindow)
     self.logWindow.filters:SetPoint("TOPLEFT", 10, -5)
     self.logWindow.filters:SetPoint("RIGHT", -10, 0)
     self.logWindow.filters:SetHeight(30)
-    -- Поле "Количество"
     self.logWindow.countFilter = CreateFrame("EditBox", "EditKolvo", self.logWindow.filters, "InputBoxTemplate")
     self.logWindow.countFilter:SetSize(60, 20)
     self.logWindow.countFilter:SetPoint("LEFT", self.logWindow.filters, "LEFT")
@@ -200,7 +180,6 @@ function GpDb:_CreateLogWindow()
         self.logWindow.countFilter:ClearFocus() 
         self:UpdateLogDisplay()
     end)
-    -- Поле "День" (вместо "Время")
     self.logWindow.timeFilter = CreateFrame("EditBox", "EditDay", self.logWindow.filters, "InputBoxTemplate")
     self.logWindow.timeFilter:SetSize(70, 20)
     self.logWindow.timeFilter:SetPoint("LEFT", self.logWindow.countFilter, "RIGHT", 5, 0)
@@ -211,7 +190,6 @@ function GpDb:_CreateLogWindow()
         self.logWindow.timeFilter:ClearFocus() 
         self:UpdateLogDisplay()
     end)
-    -- Поле "РЛ"
     self.logWindow.rlFilter = CreateFrame("EditBox", "EditRL", self.logWindow.filters, "InputBoxTemplate")
     self.logWindow.rlFilter:SetSize(70, 20)
     self.logWindow.rlFilter:SetPoint("LEFT", self.logWindow.timeFilter, "RIGHT", 5, 0)
@@ -222,7 +200,6 @@ function GpDb:_CreateLogWindow()
         self.logWindow.rlFilter:ClearFocus() 
         self:UpdateLogDisplay()
     end)
-    -- Поле "Рейд"
     self.logWindow.raidFilter = CreateFrame("EditBox", "EditRaid", self.logWindow.filters, "InputBoxTemplate")
     self.logWindow.raidFilter:SetSize(100, 20)
     self.logWindow.raidFilter:SetPoint("LEFT", self.logWindow.rlFilter, "RIGHT", 5, 0)
@@ -233,7 +210,6 @@ function GpDb:_CreateLogWindow()
         self.logWindow.raidFilter:ClearFocus() 
         self:UpdateLogDisplay()
     end)
-    -- Поле "Ник"
     self.logWindow.nameFilter = CreateFrame("EditBox", "EditNik", self.logWindow.filters, "InputBoxTemplate")
     self.logWindow.nameFilter:SetSize(100, 20)
     self.logWindow.nameFilter:SetPoint("LEFT", self.logWindow.raidFilter, "RIGHT", 5, 0)
@@ -244,7 +220,6 @@ function GpDb:_CreateLogWindow()
         self.logWindow.nameFilter:ClearFocus() 
         self:UpdateLogDisplay()
     end)
-    -- Кнопка "Показать"
     self.logWindow.showButton = CreateFrame("Button", nil, self.logWindow.filters, "UIPanelButtonTemplate")
     self.logWindow.showButton:SetSize(80, 22)
     self.logWindow.showButton:SetPoint("LEFT", self.logWindow.nameFilter, "RIGHT", 5, 0)
@@ -265,19 +240,15 @@ function GpDb:_CreateLogWindow()
         local rl = processFilterText(self.logWindow.rlFilter:GetText(), "РЛ")
         local raid = processFilterText(self.logWindow.raidFilter:GetText(), "Рейд")
         
-        -- === Преобразуем имя → код через officerNote ===
         local nameInput = self.logWindow.nameFilter:GetText()
         local name = "_"
         if nameInput ~= "" and nameInput ~= "Ник" then
             local foundCode = nil
-            -- Ищем игрока по имени в гильдии
             for i = 1, GetNumGuildMembers(true) do
                 local guildName, _, _, _, _, _, _, officerNote = GetGuildRosterInfo(i)
                 if guildName and officerNote then
-                    -- Убираем серверную часть из имени (если есть)
                     local plainName = guildName:match("^(.-)-") or guildName
                     if plainName == nameInput then
-                        -- Парсим officerNote: ожидаем формат "что-то КОД ..."
                         local words = {}
                         for w in officerNote:gmatch("%S+") do
                             table.insert(words, w)
@@ -289,7 +260,7 @@ function GpDb:_CreateLogWindow()
                     end
                 end
             end
-            name = foundCode or nameInput  -- если не нашли — отправляем как есть (на случай ручного ввода кода)
+            name = foundCode or nameInput
         end
 
         local request = count .. " " .. time .. " " .. rl .. " " .. raid .. " " .. name
@@ -297,14 +268,12 @@ function GpDb:_CreateLogWindow()
         self:ClearLog()
         SendAddonMessage("NSShowMeLogs", request, "GUILD")
     end)
-    -- Область с прокруткой для логов
     self.logWindow.scrollFrame = CreateFrame("ScrollFrame", "GpDbLogScrollFrame", self.logWindow, "UIPanelScrollFrameTemplate")
     self.logWindow.scrollFrame:SetPoint("TOPLEFT", 0, -35)
     self.logWindow.scrollFrame:SetPoint("BOTTOMRIGHT", 0, 10)
     self.logWindow.scrollChild = CreateFrame("Frame")
     self.logWindow.scrollChild:SetSize(580, 1000)
     self.logWindow.scrollFrame:SetScrollChild(self.logWindow.scrollChild)
-    -- Создаем строки для отображения логов
     self.logRows = {}
     for i = 1, 2000 do
         local row = CreateFrame("Frame", "GpDbLogRow"..i, self.logWindow.scrollChild)
@@ -321,19 +290,13 @@ function GpDb:_CreateLogWindow()
 end
 
 function GpDb:ClearLog()
-    -- Очищаем данные лога
     self.logData = {}
-    
-    -- Очищаем фильтры
     self.logWindow.countFilter:SetText("Кол-во")
     self.logWindow.timeFilter:SetText("День")
     self.logWindow.rlFilter:SetText("РЛ")
     self.logWindow.raidFilter:SetText("Рейд")
     self.logWindow.nameFilter:SetText("Ник")
-    
-    -- Обновляем отображение
     self:UpdateLogDisplay()
-    
     print("|cFFFF0000ГП:|r Лог успешно очищен")
 end
 
@@ -423,7 +386,6 @@ function GpDb:_CreateWindow()
         self.showOnlyNotes = self.window.notesCheckbox:GetChecked()
     end)
 
-    -- Чекбокс ПВЕ-сезон
     self.window.pveSeasonCheckbox = CreateFrame("CheckButton", nil, self.window, "UICheckButtonTemplate")
     self.window.pveSeasonCheckbox:SetPoint("LEFT", self.window.notesCheckbox.text, "RIGHT", 10, 0)
     self.window.pveSeasonCheckbox:SetSize(24, 24)
@@ -490,7 +452,6 @@ function GpDb:_CreateWindow()
 end
 
 function GpDb:_SetupTable()
-    -- Исправляем заголовки для правильной сортировки
     local headers = {
         {text = "Ник", column = "nick"},
         {text = "ГП", column = "gp"}
@@ -499,7 +460,7 @@ function GpDb:_SetupTable()
     for i, header in ipairs(headers) do
         local btn = CreateFrame("Button", nil, self.window.scrollChild)
         btn:SetSize(i == 1 and 290 or 50, 20)
-        btn:SetPoint("TOPLEFT", (i-1)*290 + (i == 2 and 10 or 0), -5) -- Добавляем отступ сверху
+        btn:SetPoint("TOPLEFT", (i-1)*290 + (i == 2 and 10 or 0), -5)
         btn:SetNormalFontObject("GameFontNormal")
         btn:SetHighlightFontObject("GameFontHighlight")
         local text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -511,29 +472,24 @@ function GpDb:_SetupTable()
         end)
     end
 
-    -- Создаем строки таблицы с системой выделения
     self.rows = {}
     for i = 1, 999 do
         local row = CreateFrame("Button", "GpDbRow"..i, self.window.scrollChild)
         row:SetSize(350, 20)
         row:SetPoint("TOPLEFT", 0, -25 - (i-1)*25)
         
-        -- Настройки для кликов
         row:EnableMouse(true)
         row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         
-        -- Текстура для выделения
         row:SetHighlightTexture("Interface\\Buttons\\WHITE8X8")
         row:GetHighlightTexture():SetVertexColor(0.4, 0.4, 0.8, 0.4)
         
-        -- Текстура для выбранного состояния
         row.selection = row:CreateTexture(nil, "BACKGROUND")
         row.selection:SetAllPoints(true)
         row.selection:SetTexture("Interface\\Buttons\\WHITE8X8")
         row.selection:SetVertexColor(0.3, 0.3, 0.7, 0.7)
         row.selection:Hide()
         
-        -- Поля текста
         row.nick = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         row.nick:SetPoint("LEFT", 10, 0)
         row.nick:SetWidth(290)
@@ -544,47 +500,34 @@ function GpDb:_SetupTable()
         row.gp:SetWidth(50)
         row.gp:SetJustifyH("RIGHT")
 
-        -- Переменная для отслеживания времени последнего клика
         row.lastClickTime = 0
         
-        -- Обработчик кликов
         row:SetScript("OnClick", function(_, button, down)
             local offset = FauxScrollFrame_GetOffset(self.window.scrollFrame)
             local dataIndex = i + offset
-            -- Проверяем валидность данных
             if not self.gp_data or not self.gp_data[dataIndex] then return end
-            -- Получаем текущее время
             local currentTime = GetTime()
 
-            ------------------ проверка наличия заметок ------------------
             SendAddonMessage("NSShowMeZametki", self.gp_data[dataIndex].original_nick, "GUILD")
-            ------------------ проверка наличия заметок ------------------
 
-            -- Проверяем двойной клик (только ЛКМ и только если в рейде)
             if button == "LeftButton" and IsInRaid() and (currentTime - row.lastClickTime) < 0.5 then
-                -- Двойной клик - выделяем все элементы
                 self:ClearSelection()
                 for idx = 1, #self.gp_data do
                     self.selected_indices[idx] = true
                 end
                 self.last_selected_index = dataIndex
-                -- Обновляем интерфейс
                 self:_UpdateSelectionCount()
                 self:RefreshRowHighlights()
                 self:UpdateRaidWindowVisibility()
-                -- Обновляем список выбранных игроков
                 if self.raidWindow and self.raidWindow:IsShown() then
                     self:_UpdateSelectedPlayersText()
                 end
-                -- Сбрасываем время клика
                 row.lastClickTime = 0
                 return
             end
-            -- Запоминаем время клика для проверки двойного клика
             row.lastClickTime = currentTime
             if button == "LeftButton" then
                 local wasSelected = self.selected_indices[dataIndex]
-                -- SHIFT+ЛКМ - выделение диапазона
                 if IsShiftKeyDown() then
                     if not self.last_selected_index then
                         self:ClearSelection()
@@ -602,17 +545,13 @@ function GpDb:_SetupTable()
                             end
                         end
                     end
-                -- CTRL+ЛКМ - добавление/удаление из выделения
                 elseif IsControlKeyDown() then
-                    -- Изменяем состояние выделения
                     self.selected_indices[dataIndex] = not wasSelected
-                    -- Очищаем несуществующие выделения
                     for idx in pairs(self.selected_indices) do
                         if not self.gp_data[idx] then
                             self.selected_indices[idx] = nil
                         end
                     end
-                    -- Обновляем last_selected_index
                     if self.selected_indices[dataIndex] then
                         self.last_selected_index = dataIndex
                     else
@@ -624,7 +563,6 @@ function GpDb:_SetupTable()
                             end
                         end
                     end
-                -- Обычный клик
                 else
                     if wasSelected then
                         self:ClearSelection()
@@ -634,11 +572,9 @@ function GpDb:_SetupTable()
                         self.last_selected_index = dataIndex
                     end
                 end
-                -- Принудительное обновление интерфейса
                 self:_UpdateSelectionCount()
                 self:RefreshRowHighlights()
                 self:UpdateRaidWindowVisibility()
-                -- Обновляем список выбранных игроков
                 if self.raidWindow and self.raidWindow:IsShown() then
                     self:_UpdateSelectedPlayersText()
                 end
@@ -648,15 +584,11 @@ function GpDb:_SetupTable()
         self.rows[i] = row
     end
 
-    -- Модифицируем обработчик скрытия окна
     self.window:SetScript("OnHide", function()
-        -- Сбрасываем выделение
         self:ClearSelection()
-        -- Скрываем окно рейда, если оно было открыто
         if self.raidWindow and self.raidWindow:IsShown() then
             self.raidWindow:Hide()
         end
-        -- Скрываем окно логов, если оно было открыто
         if self.logWindow and self.logWindow:IsShown() then
             self.logWindow:Hide()
         end
@@ -697,7 +629,6 @@ function GpDb:ToggleLogWindow()
                             codeFilter
             SendAddonMessage("NSShowMeLogs", request, "GUILD")
         else
-            -- Применяем фильтр "Заметки", если он включён
             if self.window.notesCheckbox and self.window.notesCheckbox:GetChecked() then
                 local filteredLogData = {}
                 for _, entry in ipairs(self.logData) do
@@ -724,11 +655,9 @@ end
 function GpDb:UpdateLogDisplay()
     if not self.logWindow or not self.logWindow:IsShown() then return end
     
-    -- Вычисляем общую высоту
     local totalHeight = 0
     local rowHeights = {}
     
-    -- Сначала вычисляем высоту всех строк
     for i, entry in ipairs(self.logData) do
         local tempText = self.logWindow.scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         tempText:SetWidth(580)
@@ -740,10 +669,9 @@ function GpDb:UpdateLogDisplay()
         tempText:Hide()
     end
 
-    -- Позиционируем строки (старые сверху, новые снизу)
     local currentY = 0
     for i = 1, #self.logRows do
-        local dataIndex = i -- Отображаем записи по порядку (1=самая старая)
+        local dataIndex = i
         if dataIndex <= #self.logData then
             local entry = self.logData[dataIndex]
             local textHeight = rowHeights[dataIndex]
@@ -759,26 +687,22 @@ function GpDb:UpdateLogDisplay()
         end
     end
 
-    -- Обновляем высоту контента
     self.logWindow.scrollChild:SetHeight(totalHeight)
     self.logWindow.scrollFrame:UpdateScrollChildRect()
 end
 
 function GpDb:_UpdateSelectionCount()
     local count = 0
-    -- Считаем ТОЛЬКО действительно выделенные и существующие элементы
     for idx, selected in pairs(self.selected_indices) do
         if selected and self.gp_data[idx] then
             count = count + 1
         else
-            self.selected_indices[idx] = nil -- Очищаем невалидные
+            self.selected_indices[idx] = nil
         end
     end
     
-    -- Обновляем текст
     self.window.countText:SetText(string.format("Выделено: %d", count))
     
-    -- Если нет выделений - сбрасываем last_selected_index
     if count == 0 then
         self.last_selected_index = nil
     end
@@ -798,15 +722,14 @@ function GpDb:RefreshRowHighlights()
         if dataIndex <= #self.gp_data then
             if self.selected_indices[dataIndex] then
                 row.selection:Show()
-                row:GetHighlightTexture():SetAlpha(0.2) -- Снижаем прозрачность ховера при выделении
+                row:GetHighlightTexture():SetAlpha(0.2)
             else
                 row.selection:Hide()
-                row:GetHighlightTexture():SetAlpha(0.4) -- Возвращаем стандартную прозрачность
+                row:GetHighlightTexture():SetAlpha(0.4)
             end
         end
     end
     
-    -- Обновляем счетчик выделенных
     local selectedCount = 0
     for _ in pairs(self.selected_indices) do selectedCount = selectedCount + 1 end
     self.window.countText:SetText(string.format("Выделено: %d", selectedCount))
@@ -831,7 +754,6 @@ function GpDb:GetSelectedEntries()
 end
 
 function GpDb:AddLogEntry(timeStr, gpValue, rl, raid, targets, isDecoded)
-    -- Проверяем наличие окна логов
     if not self.logWindow then
         self:_CreateLogWindow()
     end
@@ -860,14 +782,11 @@ function GpDb:AddLogEntry(timeStr, gpValue, rl, raid, targets, isDecoded)
     local formattedGp = gpColor .. tostring(gpNumValue) .. "|r"
     local formattedRaid = "|cFFFFFF00" .. (raid or "Неизвестно") .. "|r"
 
-    -- Форматируем цели
     local formattedTargets = {}
     if type(targets) == "string" then
         for word in targets:gmatch("%S+") do
             local playerName = word
-            -- Декодируем ТОЛЬКО если это не серверная запись (isDecoded == nil или false)
             if not isDecoded then
-                -- Пытаемся найти имя по коду в officerNote
                 for i = 1, GetNumGuildMembers() do
                     local name, _, _, _, _, _, _, officerNote = GetGuildRosterInfo(i)
                     if name and officerNote then
@@ -952,7 +871,6 @@ function GpDb:UpdateWindow()
 
     local offset = FauxScrollFrame_GetOffset(self.window.scrollFrame)
     
-    -- Уменьшаем количество отображаемых строк
     local visibleRows = math.floor((self.window.scrollFrame:GetHeight() - 30) / 25)
     self.visible_rows = visibleRows
     
@@ -963,11 +881,9 @@ function GpDb:UpdateWindow()
         if dataIndex <= #self.gp_data then
             local entry = self.gp_data[dataIndex]
             
-            -- Обновляем текст
             row.nick:SetText(entry.nick)
             row.gp:SetText(tostring(entry.gp))
             
-            -- Цвета текста
             if entry.classColor then
                 row.nick:SetTextColor(entry.classColor.r, entry.classColor.g, entry.classColor.b)
             else
@@ -980,10 +896,8 @@ function GpDb:UpdateWindow()
         end
     end
 
-    -- Обновляем выделения
     self:RefreshRowHighlights()
     
-    -- Обновление скролла
     FauxScrollFrame_Update(self.window.scrollFrame, #self.gp_data, self.visible_rows, 25)
     self:UpdateRaidWindowVisibility()
 end
@@ -991,10 +905,10 @@ end
 function GpDb:GetNumSelected()
     local count = 0
     for idx in pairs(self.selected_indices) do
-        if self.gp_data[idx] then  -- Проверяем что элемент существует
+        if self.gp_data[idx] then
             count = count + 1
         else
-            self.selected_indices[idx] = nil  -- Очищаем несуществующие
+            self.selected_indices[idx] = nil
         end
     end
     print(string.format("GetNumSelected: найдено %d элементов", count))
@@ -1084,8 +998,6 @@ function GpDb:_UpdateFromGuild()
                 end
             end
         end
-    elseif showAllGuild then
-    elseif showAllGuild then
     elseif showAllGuild then
         for plainName, guildInfo in pairs(guildRosterInfo) do
             if showOfflineOnly or guildInfo.online then
@@ -1267,49 +1179,12 @@ function GpDb:ReportNonGuild()
     end
 end
 
--- ============================================================================
--- Вывод в офицерский: не-гильдейские из рейда и их ГП
--- ============================================================================
-function GpDb:ReportNonGuild()
-    if not IsInRaid() then
-        SendChatMessage("[GP] Не в рейде — не-гильдейских нет", "OFFICER")
-        return
-    end
-
-    -- Список гильдейских
-    local guildNames = {}
-    for i = 1, GetNumGuildMembers(true) do
-        local name = GetGuildRosterInfo(i)
-        if name then
-            guildNames[name:match("^(.-)-") or name] = true
-        end
-    end
-
-    -- Считаем не-гильдейских
-    local list = {}
-    for i = 1, GetNumGroupMembers() do
-        local raidName = GetRaidRosterInfo(i)
-        if raidName then
-            local plain = raidName:match("^(.-)-") or raidName
-            if not guildNames[plain] then
-                local cache = self.external_gp_cache or {}
-                list[#list+1] = plain .. " => " .. tostring(cache[plain] or "nil")
-            end
-        end
-    end
-
-    SendChatMessage("[GP] Не-гильдейских в рейде: " .. #list, "OFFICER")
-    for _, line in ipairs(list) do
-        SendChatMessage("[GP] " .. line, "OFFICER")
-    end
-end
-
 function GpDb:AddGpEntry(nick, gp, playerID)
     table.insert(self.gp_data, {
         nick = nick,
         original_nick = nick,
         gp = tonumber(gp) or 0,
-        playerID = playerID -- Добавляем ID игрока
+        playerID = playerID
     })
     self:SortData()
     self:UpdateWindow()
@@ -1364,7 +1239,6 @@ function GpDb:SortData(column)
         local valA, valB
         
         if self.sort_column == "nick" then
-            -- Используем оригинальное имя для сортировки
             valA = string.lower(a.original_nick or "")
             valB = string.lower(b.original_nick or "")
         else
@@ -1390,12 +1264,10 @@ function GpDb:UpdateWindow()
         if entry then
             row.nick:SetText(entry.nick)
             if entry.classColor then
-                -- Применяем цвет класса только к имени (до скобок)
                 local plainName = entry.nick:match("^[^|]+") or entry.nick
                 row.nick:SetText(plainName)
                 row.nick:SetTextColor(entry.classColor.r, entry.classColor.g, entry.classColor.b)
                 
-                -- Добавляем публичную заметку с желтым цветом
                 local notePart = entry.nick:match("|c.+$")
                 if notePart then
                     local fullText = row.nick:GetText() .. " " .. notePart
@@ -1818,19 +1690,16 @@ function GpDb:_UpdatePlayerInfo()
         end
         return
     end
-    -- === ОТПРАВКА ЗАПРОСА НА ПРОВЕРКУ ПРАВ РЛ ===
     if self.lastCheckedPlayer ~= nick then
         self.lastCheckedPlayer = nick
         local myName = UnitName("player")
         SendAddonMessage("ns_get_rl", myName .. " " .. nick, "GUILD")
     end
-    -- === СОЗДАНИЕ КОНТЕЙНЕРА И ЭЛЕМЕНТОВ ОДИН РАЗ ===
     if not self.raidWindow.playerInfoContainer then
         self.raidWindow.playerInfoContainer = CreateFrame("Frame", nil, self.raidWindow)
         self.raidWindow.playerInfoContainer:SetPoint("TOPRIGHT", -10, -30)
         self.raidWindow.playerInfoContainer:SetSize(230, 240)
 
-        -- === ЧЕКБОКС ПОД КНОПКОЙ ЗАКРЫТИЯ ===
         local checkboxName = "GpDbPlayerInfoCheckbox"
         local checkbox = CreateFrame("CheckButton", checkboxName, self.raidWindow, "ChatConfigCheckButtonTemplate")
         checkbox:SetSize(24, 24)
@@ -1843,7 +1712,6 @@ function GpDb:_UpdatePlayerInfo()
             SendAddonMessage("ns_its_rl", self_cb.targetNick .. " " .. boolStr, "GUILD")
         end)
 
-        -- === ОБНОВЛЁННЫЙ ТУЛТИП ===
         checkbox:SetScript("OnEnter", function(self_cb)
             GameTooltip:SetOwner(self_cb, "ANCHOR_RIGHT")
             local baseText = "Назначить игрока РЛом"
@@ -1868,7 +1736,6 @@ function GpDb:_UpdatePlayerInfo()
             self.raidWindow.playerInfoCheckbox:Enable()
         end
 
-        -- === ЭЛЕМЕНТЫ ИНТЕРФЕЙСА ===
         self.raidWindow.classText = self.raidWindow.playerInfoContainer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         self.raidWindow.classText:SetPoint("TOPLEFT", 0, -5)
         self.raidWindow.classText:SetWidth(230)
@@ -1899,7 +1766,6 @@ function GpDb:_UpdatePlayerInfo()
         self.raidWindow.officerBtn:SetSize(230, 20)
         self.raidWindow.officerBtn:SetPoint("TOPLEFT", 0, -115)
 
-        -- === КНОПКА "ЗАМЕТКИ РЛОВ" ===
         self.raidWindow.rlNotesBtn = CreateFrame("Button", nil, self.raidWindow.playerInfoContainer, "UIPanelButtonTemplate")
         self.raidWindow.rlNotesBtn:SetSize(230, 20)
         self.raidWindow.rlNotesBtn:SetPoint("TOPLEFT", 0, -140)
@@ -1911,7 +1777,6 @@ function GpDb:_UpdatePlayerInfo()
         end
     end
 
-    -- === ОБНОВЛЕНИЕ ДАННЫХ ИГРОКА ===
     local db = self
     local className = "Класс: ?"
     if playerData.classFileName then
@@ -2055,7 +1920,6 @@ function GpDb:_UpdatePlayerInfo()
         StaticPopup_Show("GP_EDIT_OFFICER_NOTE")
     end)
 
-    -- === ОБНОВЛЕНИЕ ONCLICK ДЛЯ КНОПКИ "ЗАМЕТКИ РЛОВ" ===
     self.raidWindow.rlNotesBtn:SetScript("OnClick", function()
         local selectedEntries = self:GetSelectedEntries()
         if #selectedEntries == 1 then
@@ -2069,7 +1933,6 @@ function GpDb:_UpdatePlayerInfo()
         end
     end)
 
-    -- Показываем кнопку, только если чекбокс активен (мы — РЛ)
     if self.raidWindow.playerInfoCheckbox:IsEnabled() then
         self.raidWindow.rlNotesBtn:Show()
     else
@@ -2089,7 +1952,6 @@ function GpDb:_UpdateSelectedPlayersText()
     
     local text = table.concat(names, ", ")
     
-    -- Создаем или обновляем текстовый элемент
     if not self.raidWindow.selectedPlayersText then
         self.raidWindow.selectedPlayersText = self.raidWindow:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         self.raidWindow.selectedPlayersText:SetPoint("TOPLEFT", self.raidWindow.saveCheckbox, "BOTTOMLEFT", 0, -5)
@@ -2099,7 +1961,6 @@ function GpDb:_UpdateSelectedPlayersText()
         self.raidWindow.selectedPlayersText:SetJustifyV("TOP")
         self.raidWindow.selectedPlayersText:SetWordWrap(true)
         
-        -- Создаем фрейм-контейнер для обработки событий мыши
         self.raidWindow.selectedPlayersTextContainer = CreateFrame("Frame", nil, self.raidWindow)
         self.raidWindow.selectedPlayersTextContainer:SetAllPoints(self.raidWindow.selectedPlayersText)
         self.raidWindow.selectedPlayersTextContainer:SetScript("OnEnter", function()
@@ -2115,7 +1976,6 @@ function GpDb:_UpdateSelectedPlayersText()
         end)
     end
     
-    -- Устанавливаем текст с обрезкой если нужно
     if #text > 60 then
         local shortText = string.sub(text, 1, 600) .. "..."
         self.raidWindow.selectedPlayersText:SetText(shortText)
@@ -2129,7 +1989,6 @@ end
 function GpDb:RestoreRaidWindowState()
     if not self.raidWindow then return end
     
-    -- Восстанавливаем значения из сохраненных состояний
     if self.lastSelectionType == "raid" and self.lastRaidId then
         UIDropDownMenu_SetText(self.raidWindow.dropdown, string.format("%d: %s", self.lastRaidId, self.lastRaidName))
         self.raidWindow.editBox:SetText("")
@@ -2148,14 +2007,12 @@ function GpDb:RestoreRaidWindowState()
         self.raidWindow.selectedRaidName = nil
     end
     
-    -- Всегда отображаем lastGPValue, даже если 0
     if not self.lastGPValue then
         self.lastGPValue = 0
     end
     self.raidWindow.gpEditBox:SetText(tostring(self.lastGPValue))
     self.raidWindow.saveCheckbox:SetChecked(self.saveSelectionEnabled)
     
-    -- Обновляем список выбранных игроков
     self:_UpdateSelectedPlayersText()
 end
 
@@ -2166,9 +2023,7 @@ function GpDb:_CheckOfficerRank()
     for i = 1, GetNumGuildMembers(true) do
         local name, _, rankIndex = GetGuildRosterInfo(i)
         if name and name == playerName then
-            -- Получаем информацию о звании
-            local rankName = GuildControlGetRankName(rankIndex + 1) -- rankIndex начинается с 0
-            -- Проверяем, является ли звание офицерским (Капитан или Лейтенант)
+            local rankName = GuildControlGetRankName(rankIndex + 1)
             if rankName == "Капитан" or rankName == "Лейтенант" then
                 return true
             end
@@ -2196,14 +2051,12 @@ function GpDb:ToggleRaidWindow()
 end
 
 function GpDb:ShowRlNotesEditor(targetNick, noteText)
-    -- === 1. Эмулируем нажатие на крестик raidWindow, если он открыт ===
     if self.raidWindow and self.raidWindow:IsShown() and self.raidWindow.closeButton then
         local script = self.raidWindow.closeButton:GetScript("OnClick")
         if script then
             script(self.raidWindow.closeButton)
         end
     end
-    -- === 2. Открываем редактор заметок ===
     if not self.rlNotesEditor then
         self:_CreateRlNotesEditor()
     end
@@ -2239,7 +2092,6 @@ function GpDb:_CreateRlNotesEditor()
     self.rlNotesEditor.title = self.rlNotesEditor:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     self.rlNotesEditor.title:SetPoint("TOP", 0, -10)
     self.rlNotesEditor.title:SetText("Заметки РЛов")
-    -- Кнопка закрытия
     self.rlNotesEditor.closeBtn = CreateFrame("Button", nil, self.rlNotesEditor, "UIPanelCloseButton")
     self.rlNotesEditor.closeBtn:SetPoint("TOPRIGHT", -5, -5)
     self.rlNotesEditor.closeBtn:SetScript("OnClick", function()
@@ -2248,7 +2100,6 @@ function GpDb:_CreateRlNotesEditor()
         end
         self.rlNotesEditor:Hide()
     end)
-    -- Кнопка "Сохранить" (S)
     self.rlNotesEditor.saveBtn = CreateFrame("Button", nil, self.rlNotesEditor, "UIPanelButtonTemplate")
     self.rlNotesEditor.saveBtn:SetSize(24, 24)
     self.rlNotesEditor.saveBtn:SetPoint("TOPLEFT", 8, -8)
@@ -2294,12 +2145,11 @@ function GpDb:_CreateRlNotesEditor()
             table.insert(chunks, header)
         end
         local i = 1
-        -- Создаём фрейм таймера один раз для всей последовательности
         local sendTimer = CreateFrame("Frame")
         sendTimer:Hide()
         local sendElapsed = 0
         local sendDelay = 0.15
-        local ctx = self -- Захватываем внешний self, т.к. внутри OnUpdate self будет указывать на фрейм таймера
+        local ctx = self
 
         local function sendNext()
             if i > #chunks then
@@ -2313,12 +2163,10 @@ function GpDb:_CreateRlNotesEditor()
             SendAddonMessage(prefix, chunks[i], "GUILD")
             i = i + 1
 
-            -- Сбрасываем счётчик и запускаем отложенный вызов
             sendElapsed = 0
             sendTimer:SetScript("OnUpdate", function(frame, dt)
                 sendElapsed = sendElapsed + dt
                 if sendElapsed >= sendDelay then
-                    -- Полная остановка и "очистка" таймера
                     frame:SetScript("OnUpdate", nil)
                     frame:Hide()
                     sendNext()
@@ -2327,7 +2175,6 @@ function GpDb:_CreateRlNotesEditor()
         end
         sendNext()
     end)
-    -- Тултип для "Сохранить"
     self.rlNotesEditor.saveBtn:SetScript("OnEnter", function(self_btn)
         GameTooltip:SetOwner(self_btn, "ANCHOR_RIGHT")
         GameTooltip:SetText("Сохранить")
@@ -2336,7 +2183,6 @@ function GpDb:_CreateRlNotesEditor()
     self.rlNotesEditor.saveBtn:SetScript("OnLeave", function()
         GameTooltip:Hide()
     end)
-    -- Кнопка "Получить историю правок" (F)
     self.rlNotesEditor.fullBtn = CreateFrame("Button", nil, self.rlNotesEditor, "UIPanelButtonTemplate")
     self.rlNotesEditor.fullBtn:SetSize(24, 24)
     self.rlNotesEditor.fullBtn:SetPoint("LEFT", self.rlNotesEditor.saveBtn, "RIGHT", 2, 0)
@@ -2349,7 +2195,6 @@ function GpDb:_CreateRlNotesEditor()
         local targetNick = self.rlNotesEditor.targetNick
         SendAddonMessage("ns_RL_notes_full", targetNick, "GUILD")
     end)
-    -- Тултип для "Получить историю правок"
     self.rlNotesEditor.fullBtn:SetScript("OnEnter", function(self_btn)
         GameTooltip:SetOwner(self_btn, "ANCHOR_RIGHT")
         GameTooltip:SetText("Получить историю правок")
@@ -2358,7 +2203,6 @@ function GpDb:_CreateRlNotesEditor()
     self.rlNotesEditor.fullBtn:SetScript("OnLeave", function()
         GameTooltip:Hide()
     end)
-    -- Скроллируемый контейнер для текста
     local scrollFrame = CreateFrame("ScrollFrame", "GpDbRlNotesScrollFrame", self.rlNotesEditor, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOP", 0, -40)
     scrollFrame:SetPoint("BOTTOM", 0, 40)
@@ -2368,7 +2212,6 @@ function GpDb:_CreateRlNotesEditor()
     scrollChild:SetWidth(360)
     scrollChild:SetHeight(1000)
     scrollFrame:SetScrollChild(scrollChild)
-    -- EditBox внутри скролла
     self.rlNotesEditor.editBox = CreateFrame("EditBox", "jjjj1111", scrollChild, "InputBoxTemplate")
     self.rlNotesEditor.editBox:SetSize(360, 220)
     self.rlNotesEditor.editBox:SetPoint("TOPLEFT")
@@ -2391,7 +2234,6 @@ function GpDb:_CreateRlNotesEditor()
         end
         self.rlNotesEditor:Hide()
     end)
-    -- Фон только внутри EditBox
     local editBg = self.rlNotesEditor.editBox:CreateTexture(nil, "BACKGROUND")
     editBg:SetTexture("Interface\\Buttons\\WHITE8X8")
     editBg:SetVertexColor(0.2, 0.2, 0.2, 0.8)
@@ -2401,9 +2243,6 @@ end
 
 
 
-    -- ========================================================================
-    -- СОЗДАНИЕ ЭКЗЕМПЛЯРА GpDb (сразу, без таймера)
-    -- ========================================================================
     if not gpDb then
         gpDb = GpDb:new({})
     end

@@ -11,7 +11,6 @@ NSQC4.RegisterModule("gp", function()
     local myName  = UnitName("player") or ""
     local plainMe = myName:match("^(.-)-") or myName
 
-    -- Универсальный парсер "<gp><sep><nick>", где sep — обычный ИЛИ неразрывный пробел
     local function ParseGpNick(text)
         if not text then return nil, nil end
         return text:match("^(%d+)[%s\160\194\129]+(.+)$")
@@ -28,7 +27,6 @@ NSQC4.RegisterModule("gp", function()
         end
     end
 
-    -- showGPA — запрос наш? — отвечаем своим ГП
     NSQC4.ChatHandler:Register("ADDON:showgpa", {
         func = function(words, sender, text, channel, prefix)
             if sender == myName then return end
@@ -62,7 +60,6 @@ NSQC4.RegisterModule("gp", function()
         stopOnMatch = true,
     })
 
-    -- enAlToGi — ответ дошёл
     NSQC4.ChatHandler:Register("ADDON:enaltogi", {
         func = function(words, sender, text, channel, prefix)
             local gp, nick = ParseGpNick(text)
@@ -72,7 +69,6 @@ NSQC4.RegisterModule("gp", function()
         stopOnMatch = true,
     })
 
-    -- ns_hisGP — прямой ответ сервера
     NSQC4.ChatHandler:Register("ADDON:ns_hisgp", {
         func = function(words, sender, text, channel, prefix)
             local gp, nick = ParseGpNick(text)
