@@ -32,7 +32,7 @@ NSQC4.RegisterModule("ui_ao", function()
         return "|Hchannel:GUILD|h[G" .. (letter or "") .. "]|h"
     end
 
-    -- Тег [O] — гиперлинк nsqcofficer. Клик обрабатывается через SetItemRef (см. ниже).
+    -- Гиперлинк nsqcofficer — клик ловится через SetItemRef (см. ниже)
     local function OfficerTag(letter)
         return OFFICER_COLOR .. "|Hnsqcofficer|h[O" .. (letter or "") .. "]|h|r"
     end
@@ -49,8 +49,9 @@ NSQC4.RegisterModule("ui_ao", function()
     end
 
     -- ========================================================================
-    -- Перехват SetItemRef — ДО Blizzard, чтобы не падало на nsqcofficer
-    -- Ловим и с двоеточием, и без (Blizzard отдаёт |H<...>|h как есть).
+    -- Перехват SetItemRef — ДО Blizzard.
+    -- Blizzard отдаёт |Hnsqcofficer|h как "nsqcofficer" (без двоеточия),
+    -- поэтому проверяем и точное совпадение, и вариант с ":".
     -- ========================================================================
     if not NSQC4._AOClick_SetItemRefPatched then
         NSQC4._AOClick_SetItemRefPatched = true
@@ -58,8 +59,8 @@ NSQC4.RegisterModule("ui_ao", function()
         SetItemRef = function(link, text, button, chatFrame)
             local raw = link or ""
             if raw == "nsqcofficer"
-                or raw:match("^nsqcofficer:")
-                or raw:match("^nsqcofficer$") then
+               or raw:match("^nsqcofficer:")
+               or raw:match("^nsqcofficer$") then
                 if button == "LeftButton" or button == nil then
                     OpenOfficerChat()
                 end
@@ -113,36 +114,36 @@ NSQC4.RegisterModule("ui_ao", function()
         InviteUnit(name)
     end
 
-local function ShowNickMenu(name)
-    local m = EnsureMenu()
-    m.name = name
+    local function ShowNickMenu(name)
+        local m = EnsureMenu()
+        m.name = name
 
-    UIDropDownMenu_Initialize(m, function(self, level)
-        local info = UIDropDownMenu_CreateInfo()
-        info.text = "Инфо"
-        info.notCheckable = true
-        info.func = function() Menu_Info(self.name) end
-        UIDropDownMenu_AddButton(info)
-
-        local theirFaction = GetFaction(self.name)
-        local mine = MyFaction()
-        local sameFaction = (not theirFaction) or (not mine) or (theirFaction == mine)
-
-        info = UIDropDownMenu_CreateInfo()
-        if sameFaction then
-            info.text = "Принять в пати"
+        UIDropDownMenu_Initialize(m, function(self, level)
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = "Инфо"
             info.notCheckable = true
-            info.func = function() Menu_Invite(self.name) end
-        else
-            info.text = "Принять в пати (другая фракция)"
-            info.notCheckable = true
-            info.disabled = true
-        end
-        UIDropDownMenu_AddButton(info)
-    end, "MENU")
+            info.func = function() Menu_Info(self.name) end
+            UIDropDownMenu_AddButton(info)
 
-    ToggleDropDownMenu(1, nil, m, "cursor", 0, 0)
-end
+            local theirFaction = GetFaction(self.name)
+            local mine = MyFaction()
+            local sameFaction = (not theirFaction) or (not mine) or (theirFaction == mine)
+
+            info = UIDropDownMenu_CreateInfo()
+            if sameFaction then
+                info.text = "Принять в пати"
+                info.notCheckable = true
+                info.func = function() Menu_Invite(self.name) end
+            else
+                info.text = "Принять в пати (другая фракция)"
+                info.notCheckable = true
+                info.disabled = true
+            end
+            UIDropDownMenu_AddButton(info)
+        end, "MENU")
+
+        ToggleDropDownMenu(1, nil, m, "cursor", 0, 0)
+    end
 
     -- ========================================================================
     -- Пересборка формата ников NSQS2-релея
