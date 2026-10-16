@@ -1,5 +1,5 @@
 -- ============================================================================
--- NSQC4 / Interface / AOClick
+-- NSQC4 / Interface / AOClick  (DEBUG)
 -- ============================================================================
 
 NSQC4.RegisterModule("ui_ao", function()
@@ -16,11 +16,14 @@ NSQC4.RegisterModule("ui_ao", function()
     local NICK_COLOR_RESET = "|r"
     local PREFIX_Q = "nsInfoQ"
 
-    -- aoNames[name] = { faction = "Horde"/"Alliance" }
     local aoNames = {}
 
     local OFFICER_COLOR = "|cff00a000"
     local OFFICER_R, OFFICER_G, OFFICER_B = 0.00, 0.63, 0.00
+
+    local function DBG(...)
+        print("|cff00ffff[AO-DBG]|r", ...)
+    end
 
     local function GuildRGB()
         local t = ChatTypeInfo and ChatTypeInfo["GUILD"]
@@ -32,14 +35,10 @@ NSQC4.RegisterModule("ui_ao", function()
         return "|Hchannel:GUILD|h[G" .. (letter or "") .. "]|h"
     end
 
-    -- Гиперлинк nsqcofficer — клик ловится через SetItemRef (см. ниже)
     local function OfficerTag(letter)
         return OFFICER_COLOR .. "|Hnsqcofficer|h[O" .. (letter or "") .. "]|h|r"
     end
 
-    -- ========================================================================
-    -- Открыть офицерский канал в чате
-    -- ========================================================================
     local function OpenOfficerChat()
         local eb = ChatFrame1EditBox
         if not eb then return end
@@ -48,11 +47,6 @@ NSQC4.RegisterModule("ui_ao", function()
         eb:SetFocus()
     end
 
-    -- ========================================================================
-    -- Перехват SetItemRef — ДО Blizzard.
-    -- Blizzard отдаёт |Hnsqcofficer|h как "nsqcofficer" (без двоеточия),
-    -- поэтому проверяем и точное совпадение, и вариант с ":".
-    -- ========================================================================
     if not NSQC4._AOClick_SetItemRefPatched then
         NSQC4._AOClick_SetItemRefPatched = true
         local oldSetItemRef = SetItemRef
@@ -70,9 +64,6 @@ NSQC4.RegisterModule("ui_ao", function()
         end
     end
 
-    -- ========================================================================
-    -- Контекстное меню по нику
-    -- ========================================================================
     local menuFrame
 
     local function EnsureMenu()
@@ -82,12 +73,28 @@ NSQC4.RegisterModule("ui_ao", function()
         return m
     end
 
-    local function InsertNickToChat(name)
-        local eb = ChatFrame1EditBox
-        if not eb then return end
+    -- Ищем EditBox для конкретного chat-фрейма, по которому кликнули
+    local function GetEditBoxForFrame(frame)
+        if not frame then return ChatFrame1EditBox end
+        local name = frame:GetName()
+        if name then
+            local eb = _G[name .. "EditBox"]
+            if eb then return eb end
+        end
+        return ChatFrame1EditBox
+    end
+
+    local function InsertNickToChat(name, frame)
+        local eb = GetEditBoxForFrame(frame)
+        DBG("InsertNickToChat: name=["..tostring(name).."] frame=["..tostring(frame and frame:GetName()).."] eb=["..tostring(eb and eb:GetName()).."]")
+        if not eb then
+            DBG("  EditBox не найден, выход")
+            return
+        end
         if not eb:IsShown() then eb:Show() end
         eb:Insert(name .. ", ")
         eb:SetFocus()
+        DBG("  вставлено в "..tostring(eb:GetName()))
     end
 
     local function GetFaction(name)
@@ -115,6 +122,7 @@ NSQC4.RegisterModule("ui_ao", function()
     end
 
     local function ShowNickMenu(name)
+        DBG("ShowNickMenu: "..tostring(name))
         local m = EnsureMenu()
         m.name = name
 
@@ -145,9 +153,6 @@ NSQC4.RegisterModule("ui_ao", function()
         ToggleDropDownMenu(1, nil, m, "cursor", 0, 0)
     end
 
-    -- ========================================================================
-    -- Пересборка формата ников NSQS2-релея
-    -- ========================================================================
     local function BuildReplacement(code, nick, meta, faction)
         local cleanName = nick:gsub(":+$", "")
         local color = CLASS_COLORS[code] or DEFAULT_COLOR
@@ -165,7 +170,6 @@ NSQC4.RegisterModule("ui_ao", function()
     end
 
     local function ReplaceAll(msg)
-        -- [О..] — Орда
         msg = msg:gsub(
             "%[\208\158(%d):(%-?%d+):(%-?%d+)%]%s+(%S+):%s*",
             function(code, level, rep, nick)
@@ -182,7 +186,6 @@ NSQC4.RegisterModule("ui_ao", function()
             "%[\208\158(%d)%]%s+(%S+):%s*",
             function(code, nick) return BuildReplacement(code, nick, nil, "Horde") end)
 
-        -- [А..] — Альянс
         msg = msg:gsub(
             "%[\208\144(%d):(%-?%d+):(%-?%d+)%]%s+(%S+):%s*",
             function(code, level, rep, nick)
@@ -199,7 +202,6 @@ NSQC4.RegisterModule("ui_ao", function()
             "%[\208\144(%d)%]%s+(%S+):%s*",
             function(code, nick) return BuildReplacement(code, nick, nil, "Alliance") end)
 
-        -- [O..] — Орда (латиница)
         msg = msg:gsub(
             "%[O(%d):(%-?%d+):(%-?%d+)%]%s+(%S+):%s*",
             function(code, level, rep, nick)
@@ -216,7 +218,6 @@ NSQC4.RegisterModule("ui_ao", function()
             "%[O(%d)%]%s+(%S+):%s*",
             function(code, nick) return BuildReplacement(code, nick, nil, "Horde") end)
 
-        -- [A..] — Альянс (латиница)
         msg = msg:gsub(
             "%[A(%d):(%-?%d+):(%-?%d+)%]%s+(%S+):%s*",
             function(code, level, rep, nick)
@@ -314,23 +315,35 @@ NSQC4.RegisterModule("ui_ao", function()
         end
     end)
 
+    -- ========================================================================
+    -- Стек хуков на ChatFrame_OnHyperlinkShow
+    -- ========================================================================
     local oldOnHyperlinkShow = ChatFrame_OnHyperlinkShow
     ChatFrame_OnHyperlinkShow = function(self, link, text, button)
+        DBG("Hyperlink: frame="..tostring(self and self:GetName())
+            .." link=["..tostring(link).."] text=["..tostring(text).."] btn="..tostring(button))
+
         local linkType, linkData = link:match("^(%a+):(.+)$")
+        DBG("  linkType=["..tostring(linkType).."] linkData=["..tostring(linkData).."]")
 
         if linkType == "player" and linkData then
             local name = linkData:match("^([^:]+)")
-            if name and aoNames[name] then
+            DBG("  name=["..tostring(name).."]")
+
+            if name then
                 if button == "LeftButton" then
-                    InsertNickToChat(name)
+                    DBG("  → InsertNickToChat")
+                    InsertNickToChat(name, self)
                     return
                 elseif button == "RightButton" then
+                    DBG("  → ShowNickMenu")
                     ShowNickMenu(name)
                     return
                 end
             end
         end
 
+        DBG("  → oldOnHyperlinkShow")
         return oldOnHyperlinkShow(self, link, text, button)
     end
 
