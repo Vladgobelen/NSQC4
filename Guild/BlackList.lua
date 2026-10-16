@@ -4,6 +4,8 @@
 -- При появлении ника в любом чате (в т.ч. системном) — автоматический кик.
 --
 -- Хранилище: nsDbc4.blacklist[name_lower] = { name, added, by }
+--
+-- Право управлять ЧС через "-чс" имеют только ники из списка ALLOWED.
 -- ============================================================================
 
 NSQC4.RegisterModule("blacklist", function()
@@ -15,6 +17,18 @@ NSQC4.RegisterModule("blacklist", function()
     nsDbc4.blacklist = nsDbc4.blacklist or {}
 
     local DB = nsDbc4.blacklist
+
+    -- ========================================================================
+    -- Кто имеет право управлять ЧС через "-чс"
+    -- ========================================================================
+    local ALLOWED = {
+        ["шеф"]     = true,
+        ["кербес"]  = true,
+        ["хефе"]    = true,
+        ["высшая"]  = true,
+        ["годвар"]  = true,
+        ["воинствующая"]  = true,
+    }
 
     -- ========================================================================
     -- Утилиты: нормализация ников
@@ -29,6 +43,13 @@ NSQC4.RegisterModule("blacklist", function()
         local short = NormalizeName(name)
         if not short then return nil end
         return short:lower()
+    end
+
+    local function IsAllowed(sender)
+        if not sender or sender == "" then return false end
+        local short = NormalizeName(sender)
+        if not short then return false end
+        return ALLOWED[short:lower()] == true
     end
 
     -- ========================================================================
@@ -233,9 +254,11 @@ NSQC4.RegisterModule("blacklist", function()
     --   -чс <Ник>   — добавить
     --   -чс -<Ник>  — удалить
     --   -чс         — показать список
+    --
+    -- Право выполнения: только ники из ALLOWED.
     -- ========================================================================
     local function HandleBlackList(words, sender, text, channel, prefix)
-        if sender ~= UnitName("player") then return end
+        if not IsAllowed(sender) then return end
         if not IsInGuild() then return end
 
         local arg = words[2]
@@ -287,7 +310,7 @@ NSQC4.RegisterModule("blacklist", function()
             return
         end
 
-        if BlackList:Add(name, UnitName("player")) then
+        if BlackList:Add(name, NormalizeName(sender)) then
             SendChatMessage(string.format("[gBlackList] %s — ДОБАВЛЕН в ЧС", name), "OFFICER")
             if IsInGuildByName(name) then
                 KickTarget(name, "добавлен в ЧС")
