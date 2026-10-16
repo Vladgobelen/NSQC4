@@ -28,6 +28,7 @@ Guild\Recruiter\Storage.lua
 Guild\Recruiter\Logic.lua
 Guild\Recruiter\UI.lua
 Guild\BlackList.lua
+Guild\RaidName.lua
 Guild\r.lua
 RaidName.lua
 Interface\Mail.lua

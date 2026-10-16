@@ -60,9 +60,17 @@ NSQC4.RegisterModule("gp", function()
     local function AmIMasterLooter()
         local method, mlParty, mlRaid = GetLootMethod()
         if method ~= "master" then return false end
+
         if IsInRaid() then
-            return (mlRaid ~= nil and mlRaid ~= 0) or (mlParty == 0)
+            local myName = UnitName("player")
+            for i = 1, GetNumRaidMembers() do
+                if UnitName("raid"..i) == myName then
+                    return mlRaid == i
+                end
+            end
+            return false
         end
+
         return mlParty == 0
     end
 
