@@ -1,5 +1,5 @@
 -- ============================================================================
--- NSQC4 / Interface / AOClick  (DEBUG)
+-- NSQC4 / Interface / AOClick
 -- ============================================================================
 
 NSQC4.RegisterModule("ui_ao", function()
@@ -16,14 +16,11 @@ NSQC4.RegisterModule("ui_ao", function()
     local NICK_COLOR_RESET = "|r"
     local PREFIX_Q = "nsInfoQ"
 
+    -- aoNames[name] = { faction = "Horde"/"Alliance" }
     local aoNames = {}
 
     local OFFICER_COLOR = "|cff00a000"
     local OFFICER_R, OFFICER_G, OFFICER_B = 0.00, 0.63, 0.00
-
-    local function DBG(...)
-        print("|cff00ffff[AO-DBG]|r", ...)
-    end
 
     local function GuildRGB()
         local t = ChatTypeInfo and ChatTypeInfo["GUILD"]
@@ -86,15 +83,10 @@ NSQC4.RegisterModule("ui_ao", function()
 
     local function InsertNickToChat(name, frame)
         local eb = GetEditBoxForFrame(frame)
-        DBG("InsertNickToChat: name=["..tostring(name).."] frame=["..tostring(frame and frame:GetName()).."] eb=["..tostring(eb and eb:GetName()).."]")
-        if not eb then
-            DBG("  EditBox не найден, выход")
-            return
-        end
+        if not eb then return end
         if not eb:IsShown() then eb:Show() end
         eb:Insert(name .. ", ")
         eb:SetFocus()
-        DBG("  вставлено в "..tostring(eb:GetName()))
     end
 
     local function GetFaction(name)
@@ -122,7 +114,6 @@ NSQC4.RegisterModule("ui_ao", function()
     end
 
     local function ShowNickMenu(name)
-        DBG("ShowNickMenu: "..tostring(name))
         local m = EnsureMenu()
         m.name = name
 
@@ -315,35 +306,23 @@ NSQC4.RegisterModule("ui_ao", function()
         end
     end)
 
-    -- ========================================================================
-    -- Стек хуков на ChatFrame_OnHyperlinkShow
-    -- ========================================================================
     local oldOnHyperlinkShow = ChatFrame_OnHyperlinkShow
     ChatFrame_OnHyperlinkShow = function(self, link, text, button)
-        DBG("Hyperlink: frame="..tostring(self and self:GetName())
-            .." link=["..tostring(link).."] text=["..tostring(text).."] btn="..tostring(button))
-
         local linkType, linkData = link:match("^(%a+):(.+)$")
-        DBG("  linkType=["..tostring(linkType).."] linkData=["..tostring(linkData).."]")
 
         if linkType == "player" and linkData then
             local name = linkData:match("^([^:]+)")
-            DBG("  name=["..tostring(name).."]")
-
             if name then
                 if button == "LeftButton" then
-                    DBG("  → InsertNickToChat")
                     InsertNickToChat(name, self)
                     return
                 elseif button == "RightButton" then
-                    DBG("  → ShowNickMenu")
                     ShowNickMenu(name)
                     return
                 end
             end
         end
 
-        DBG("  → oldOnHyperlinkShow")
         return oldOnHyperlinkShow(self, link, text, button)
     end
 
