@@ -17,6 +17,7 @@ NSQC4.RegisterModule("ui_ao", function()
     local PREFIX_Q = "nsInfoQ"
 
     -- aoNames[name] = { faction = "Horde"/"Alliance" }
+    -- Заполняется ТОЛЬКО для ретранслируемых ников
     local aoNames = {}
 
     local OFFICER_COLOR = "|cff00a000"
@@ -70,7 +71,6 @@ NSQC4.RegisterModule("ui_ao", function()
         return m
     end
 
-    -- Ищем EditBox для конкретного chat-фрейма, по которому кликнули
     local function GetEditBoxForFrame(frame)
         if not frame then return ChatFrame1EditBox end
         local name = frame:GetName()
@@ -144,6 +144,7 @@ NSQC4.RegisterModule("ui_ao", function()
         ToggleDropDownMenu(1, nil, m, "cursor", 0, 0)
     end
 
+    -- Ссылку |Hplayer:...|h вешаем ТОЛЬКО на ретранслируемые ники
     local function BuildReplacement(code, nick, meta, faction)
         local cleanName = nick:gsub(":+$", "")
         local color = CLASS_COLORS[code] or DEFAULT_COLOR
@@ -154,6 +155,7 @@ NSQC4.RegisterModule("ui_ao", function()
             nickDisplay = cleanName .. meta
         end
 
+        -- Здесь ссылка делается ВСЕГДА, потому что BuildReplacement вызывается только для релей-сообщений
         local nickLink = "|Hplayer:" .. cleanName .. "|h" ..
             color .. "[" .. nickDisplay .. "]" .. NICK_COLOR_RESET .. "|h"
 
@@ -312,7 +314,7 @@ NSQC4.RegisterModule("ui_ao", function()
 
         if linkType == "player" and linkData then
             local name = linkData:match("^([^:]+)")
-            if name then
+            if name and aoNames[name] then
                 if button == "LeftButton" then
                     InsertNickToChat(name, self)
                     return
