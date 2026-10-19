@@ -104,13 +104,12 @@ function NSQC4.ChatHandler:OnChatMessage(event, ...)
     else
         text, sender = ...
         if not text or text == "" then return end
-        if self.textPrefix ~= "" and text:sub(1, #self.textPrefix) ~= self.textPrefix then
-            if not self.triggers["*"] then return end
-        end
+        
     end
 
     if not text then return end
 
+    text = text:gsub("^%s+", ""):gsub("%s+$", "")
     local firstWordRaw = text:match("^(%S+)")
     if not firstWordRaw then return end
 
@@ -126,6 +125,8 @@ function NSQC4.ChatHandler:OnChatMessage(event, ...)
         if self:RunTriggers(list, event, text, sender, prefix, channel, shortType) then
             return
         end
+    else
+        dbg("lookup key=["..key.."] НЕ найден")
     end
 
     -- 2. ADDON по префиксу (без канала)
@@ -216,6 +217,9 @@ end
 -- ============================================================================
 -- ИНСТАНС
 -- ============================================================================
-local instance = NSQC4.ChatHandler:new({"GUILD", "ADDON"}, { addonPrefix = "", debug = false })
+local instance = NSQC4.ChatHandler:new(
+    {"GUILD", "ADDON", "RAID", "RAID_LEADER", "RAID_WARNING"},
+    { addonPrefix = "", debug = false }
+)
 NSQC4.chat = instance
 NSQC4.ChatHandler = instance

@@ -1226,9 +1226,6 @@ SlashCmdList["NSAUK"] = function(msg)
 end
 
 local eventFrame = CreateFrame("Frame")
-eventFrame:RegisterEvent("CHAT_MSG_RAID")
-eventFrame:RegisterEvent("CHAT_MSG_RAID_LEADER")
-eventFrame:RegisterEvent("CHAT_MSG_RAID_WARNING")
 eventFrame:RegisterEvent("CHAT_MSG_ADDON")
 eventFrame:RegisterEvent("PLAYER_LOGOUT")
 
@@ -1403,9 +1400,6 @@ end
 
 eventFrame:SetScript("OnEvent", function(self, event, ...)
     local arg1, arg2 = ...
-    if event == "CHAT_MSG_RAID" or event == "CHAT_MSG_RAID_LEADER" or event == "CHAT_MSG_RAID_WARNING" then
-        if ProcessRaidMessage(arg2, arg1, event) then return end
-    end
 
     if event == "CHAT_MSG_ADDON" then
         local prefix, addonMsg, _, addonSender = ...
@@ -1651,6 +1645,53 @@ function NSAuk.GiveLootToWinnerDeferred(playerName, itemLink)
     end)
 end
 
-    print("|cff00ff00[NS Auction System v5.9]|r Загружен. Команды: /nsauk, /nsauk reset, /nsauk find")
+-- ========================================================================
+-- Команды АУК / -АУК (с дефисом и без)
+-- ========================================================================
+local function HandleAukCommand(words, sender, text, channel, prefix)
+    if sender ~= UnitName("player") then return end
+
+    -- Байтовая проверка префикса "АУК"/"аук" (UTF-8), т.к. Lua 5.1 не матчит кириллицу в [Аа]
+    local s = text:gsub("^%s+", "")
+    if s:sub(1, 1) == "-" then s = s:sub(2) end
+
+    local b1, b2 = s:byte(1, 2)
+    local b3, b4 = s:byte(3, 4)
+    local b5, b6 = s:byte(5, 6)
+
+    local isA = (b1 == 0xD0 and (b2 == 0x90 or b2 == 0xB0))
+    local isU = (b3 == 0xD0 and b4 == 0xA3) or (b3 == 0xD1 and b4 == 0x83)
+    local isK = (b5 == 0xD0 and (b6 == 0x9A or b6 == 0xBA))
+
+    if not (isA and isU and isK) then
+        return
+    end
+
+    local rest = s:sub(7):gsub("^%s+", "")
+
+    if rest == "" then
+        NSAuk.CreateSettingsWindow()
+        if settingsWindow then settingsWindow:Show() end
+        return
+    end
+
+    -- Если предмет задан как [Имя] без ссылки — убираем скобки
+    local plainName = rest:match("^%s*%[(.-)%]%s*$")
+    if plainName then rest = plainName end
+
+    ProcessRaidMessage(sender, "АУК " .. rest, "CHAT_MSG_RAID_WARNING")
+end
+
+NSQC4.ChatHandler:Register("RAID:аук",  { func = HandleAukCommand, stopOnMatch = true })
+NSQC4.ChatHandler:Register("RAID:-аук", { func = HandleAukCommand, stopOnMatch = true })
+
+NSQC4.ChatHandler:Register("RAID_LEADER:аук",  { func = HandleAukCommand, stopOnMatch = true })
+NSQC4.ChatHandler:Register("RAID_LEADER:-аук", { func = HandleAukCommand, stopOnMatch = true })
+
+NSQC4.ChatHandler:Register("RAID_WARNING:аук",  { func = HandleAukCommand, stopOnMatch = true })
+NSQC4.ChatHandler:Register("RAID_WARNING:-аук", { func = HandleAukCommand, stopOnMatch = true })
+
+NSQC4.SlashPanel_RegisterSectionButton("ГП", "А", "-аук", "Запуск аукциона на предмет в рейде от РЛа: -аук предмет")
+print("|cff00ff00[NS Auction System v5.9]|r Загружен. Команды: /nsauk, /nsauk reset, /nsauk find")
 
 end)

@@ -521,4 +521,82 @@ NSQC4.RegisterModule("gp", function()
         end
     end)
 
+    -- ========================================================================
+    -- Команда -р (быстрый ролл)
+    -- ========================================================================
+    local function QuickRoll(sender, words)
+        if sender ~= UnitName("player") then return end
+
+        local arg = words[2]
+        if arg then
+            local minV, maxV = arg:match("^(%d+)%-(%d+)$")
+            if minV and maxV then
+                RandomRoll(tonumber(minV), tonumber(maxV))
+                return
+            end
+        end
+
+        RandomRoll(1, 100)
+    end
+
+    NSQC4.ChatHandler:Register("GUILD:-р", {
+        func = function(words, sender, text, channel, prefix)
+            QuickRoll(sender, words)
+        end,
+        stopOnMatch = true,
+    })
+
+    NSQC4.ChatHandler:Register("RAID:-р", {
+        func = function(words, sender, text, channel, prefix)
+            QuickRoll(sender, words)
+        end,
+        stopOnMatch = true,
+    })
+
+    NSQC4.ChatHandler:Register("RAID_LEADER:-р", {
+        func = function(words, sender, text, channel, prefix)
+            QuickRoll(sender, words)
+        end,
+        stopOnMatch = true,
+    })
+
+    NSQC4.ChatHandler:Register("RAID_WARNING:-р", {
+        func = function(words, sender, text, channel, prefix)
+            QuickRoll(sender, words)
+        end,
+        stopOnMatch = true,
+    })
+
+    -- ========================================================================
+    -- Команды РОЛЛ / -РОЛЛ (с дефисом и без, для гильдии и рейда)
+    -- ========================================================================
+    local function HandleRollCommand(words, sender, text, channel, prefix)
+        if sender ~= UnitName("player") then return end
+
+        local itemLink = text:match("%[(.-)%]")
+        if itemLink then
+            -- Передаем ТОЛЬКО имя предмета (или ссылку) и silent = true,
+            -- чтобы Roll_Start не отправлял в чат "-ролл РОЛЛ [Предмет]"
+            NSQC4.Roll_Start(itemLink, itemLink, DEFAULT_ROLL_TIME, true)
+            return
+        end
+
+        RandomRoll(1, 100)
+    end
+
+    -- Регистрация для гильдии
+    NSQC4.ChatHandler:Register("GUILD:ролл",  { func = HandleRollCommand, stopOnMatch = true })
+    NSQC4.ChatHandler:Register("GUILD:-ролл", { func = HandleRollCommand, stopOnMatch = true })
+
+    -- Регистрация для рейда
+    NSQC4.ChatHandler:Register("RAID:ролл",  { func = HandleRollCommand, stopOnMatch = true })
+    NSQC4.ChatHandler:Register("RAID:-ролл", { func = HandleRollCommand, stopOnMatch = true })
+    NSQC4.ChatHandler:Register("RAID_LEADER:ролл",  { func = HandleRollCommand, stopOnMatch = true })
+    NSQC4.ChatHandler:Register("RAID_LEADER:-ролл", { func = HandleRollCommand, stopOnMatch = true })
+    NSQC4.ChatHandler:Register("RAID_WARNING:ролл",  { func = HandleRollCommand, stopOnMatch = true })
+    NSQC4.ChatHandler:Register("RAID_WARNING:-ролл", { func = HandleRollCommand, stopOnMatch = true })
+
+    NSQC4.SlashPanel_RegisterSectionButton("ГП", "Р", "-ролл", "Запуск ролла на предмет в рейде от РЛа: -ролл предмет")
+    NSQC4.SlashPanel_RegisterSectionButton("ГП", "р", "-р", "Быстрый ролл (-р или -р 1-20")
+
 end)
