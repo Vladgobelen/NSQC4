@@ -2,6 +2,13 @@
 -- NSQC4 / Core / Settings / OptionsPanel
 -- Панель настроек в стандартном меню: Интерфейс → Модификации → NSQC4.
 -- Две колонки чекбоксов + скролл (на случай переполнения).
+--
+-- ВАЖНО: чекбоксы строятся ЛЕНИВО в OnShow, а не на этапе загрузки файла.
+-- Причина: OptionsPanel.lua грузится из .toc РАНЬШЕ, чем большинство модулей
+-- вызывают NSQC4.RegisterModule(...). Если строить список сразу при загрузке,
+-- NSQC4.ModuleMeta ещё пуст (или почти пуст) — чекбоксы не создаются.
+-- К моменту первого OnShow все файлы .toc уже загружены и все модули
+-- зарегистрированы, поэтому GetModules() вернёт полный список.
 -- ============================================================================
 
 NSQC4 = NSQC4 or {}
@@ -48,77 +55,89 @@ local ROW_HEIGHT   = 30       -- высота строки (чекбокс + о�
 local TOP_OFFSET   = -10      -- стартовый отступ сверху
 
 -- ============================================================================
--- Создание чекбоксов
+-- Состояние
 -- ============================================================================
 local checkboxes = {}
-local row = 0
-local col = 1
-
-for _, mod in ipairs(NSQC4.Settings.MODULES) do
-    local xPos = (col == 1) and COL_LEFT_X or COL_RIGHT_X
-    local yPos = TOP_OFFSET - row * ROW_HEIGHT
-
-    local cb = CreateFrame("CheckButton", "NSQC4Module_" .. mod.key, content, "UICheckButtonTemplate")
-    cb:SetPoint("TOPLEFT", xPos, yPos)
-    cb:SetSize(24, 24)
-
-    local label = _G[cb:GetName() .. "Text"]
-    if label then
-        label:SetText(mod.label)
-        label:SetWidth(200)
-        label:SetJustifyH("LEFT")
-    end
-
-    cb.moduleKey = mod.key
-
-    -- Тултип на чекбокс
-    if mod.tooltip then
-        cb:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(mod.label, 1, 0.82, 0)
-            GameTooltip:AddLine(mod.tooltip, 1, 1, 1, true)
-            GameTooltip:Show()
-        end)
-        cb:SetScript("OnLeave", function()
-            GameTooltip:Hide()
-        end)
-    end
-
-    cb:SetScript("OnClick", function(self)
-        local enabled = self:GetChecked() == 1
-        NSQC4.Settings.SetModuleEnabled(self.moduleKey, enabled)
-        print("|cff00ff00[NSQC4]|r Модуль '" .. mod.label .. "': " ..
-              (enabled and "включён" or "выключен") .. " (нужен /reload)")
-    end)
-
-    checkboxes[mod.key] = cb
-
-    -- переход на следующую позицию
-    if col == 1 then
-        col = 2
-    else
-        col = 1
-        row = row + 1
-    end
-end
-
--- Если последний ряд был неполным — увеличим row для правильной высоты
-local totalRows = row + ((col == 2) and 1 or 0)
-content:SetHeight(math.abs(TOP_OFFSET) + totalRows * ROW_HEIGHT + 20)
+local built = false
 
 -- ============================================================================
--- Обновление состояния галочек при показе панели
+-- Ленивая сборка чекбоксов
+-- Вызывается один раз при первом показе панели.
 -- ============================================================================
-local function UpdateCheckboxes()
-    for _, mod in ipairs(NSQC4.Settings.MODULES) do
-        local cb = checkboxes[mod.key]
-        if cb then
-            cb:SetChecked(NSQC4.Settings.IsModuleEnabled(mod.key))
+local function BuildCheckboxes()
+    if built then return end
+    built = true
+
+    local row = 0
+    local col = 1
+
+    for _, mod in ipairs(NSQC4.Settings.GetModules()) do
+        local xPos = (col == 1) and COL_LEFT_X or COL_RIGHT_X
+        local yPos = TOP_OFFSET - row * ROW_HEIGHT
+
+        local cb = CreateFrame("CheckButton", "NSQC4Module_" .. mod.key, content, "UICheckButtonTemplate")
+        cb:SetPoint("TOPLEFT", xPos, yPos)
+        cb:SetSize(24, 24)
+
+        local label = _G[cb:GetName() .. "Text"]
+        if label then
+            label:SetText(mod.label)
+            label:SetWidth(200)
+            label:SetJustifyH("LEFT")
+        end
+
+        cb.moduleKey = mod.key
+
+        -- Тултип на чекбокс
+        if mod.tooltip and mod.tooltip ~= "" then
+            cb:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText(mod.label, 1, 0.82, 0)
+                GameTooltip:AddLine(mod.tooltip, 1, 1, 1, true)
+                GameTooltip:Show()
+            end)
+            cb:SetScript("OnLeave", function()
+                GameTooltip:Hide()
+            end)
+        end
+
+        cb:SetScript("OnClick", function(self)
+            local enabled = self:GetChecked() and true or false
+            NSQC4.Settings.SetModuleEnabled(self.moduleKey, enabled)
+            print("|cff00ff00[NSQC4]|r Модуль '" .. mod.label .. "': " ..
+                  (enabled and "включён" or "выключен") .. " (нужен /reload)")
+        end)
+
+        checkboxes[mod.key] = cb
+
+        -- переход на следующую позицию
+        if col == 1 then
+            col = 2
+        else
+            col = 1
+            row = row + 1
         end
     end
+
+    -- Если последний ряд был неполным — увеличим row для правильной высоты
+    local totalRows = row + ((col == 2) and 1 or 0)
+    content:SetHeight(math.abs(TOP_OFFSET) + totalRows * ROW_HEIGHT + 20)
 end
 
+-- ============================================================================
+-- Обновление состояния галочек (для уже созданных чекбоксов)
+-- ============================================================================
+local function UpdateCheckboxes()
+    for key, cb in pairs(checkboxes) do
+        cb:SetChecked(NSQC4.Settings.IsModuleEnabled(key))
+    end
+end
+
+-- ============================================================================
+-- OnShow: первый раз строим, всегда синхронизируем галочки
+-- ============================================================================
 panel:SetScript("OnShow", function()
+    BuildCheckboxes()
     UpdateCheckboxes()
 end)
 
