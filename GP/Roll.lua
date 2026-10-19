@@ -3,17 +3,15 @@
 -- Модуль ролла. Окно как в AUK.lua. ЛКМ/ПКМ по строке — как в аукционе.
 --
 -- ИСПРАВЛЕНО:
---  1) Добавлена рассылка AUC_ROLL_START по addon-каналу "RAID", чтобы окно
---     открывалось у ВСЕХ участников рейда, а не только у РЛа.
---  2) Парсинг AUC_ROLL_START больше не ломается на '|' внутри itemLink
---     (используем разделитель "@@").
---  3) Команды -ролл / ролл / -РОЛЛ / РОЛЛ (кириллица, любой регистр)
---     ловятся через ChatHandler для RAID / RAID_LEADER / RAID_WARNING /
---     GUILD. Ведущий '-' снимается, регистр нормализуется байтово (UTF-8).
---  4) Роллы (1-100) теперь ловятся И из CHAT_MSG_SYSTEM (у себя), И из
---     CHAT_MSG_RAID* (у остальных — там приходит строка "Имя бросает N (1-100)").
---  5) Roll_Start с silent=true всё равно рассылает addon-сообщение, чтобы
---     остальные открыли окно.
+--  1) Роллы читаются ТОЛЬКО из CHAT_MSG_SYSTEM (там они приходят у всех).
+--     Парсер устойчив: срезает "[...] ", хвостовые пробелы, RU "бросает",
+--     EN "rolls", fallback без слова.
+--  2) Убрано дублирование пересылки в OFFICER (раньше уходило 2 раза).
+--  3) RegisterRoll нормализует имя (срезает "-реалм").
+--  4) CHAT_MSG_RAID* больше не парсит роллы — только -время N.
+--  5) Roll_Start с silent=true всё равно рассылает AUC_ROLL_START,
+--     чтобы окно открывалось у всех.
+--  6) Команды РОЛЛ / ролл / -ролл / -РОЛЛ ловятся байтово (UTF-8).
 -- ============================================================================
 
 NSQC4.RegisterModule("gp", function()
@@ -81,6 +79,44 @@ NSQC4.RegisterModule("gp", function()
             end
         end
         return nil
+    end
+
+    -- ========================================================================
+    -- Парсер строки ролла из CHAT_MSG_SYSTEM
+    --   "Имя бросает 42 (1-100)"
+    --   "Name rolls 42 (1-100)"
+    --   "[Рейд] Имя бросает 42 (1-100)"
+    --   "Имя бросает 42 (1-100) " (хвостовой пробел)
+    -- ========================================================================
+    local function TryParseRoll(msg)
+        if not msg then return nil end
+
+        -- 1) Срезаем префикс канала вида "[Рейд] " / "[Raid] " / "[Гильдия] "
+        local s = msg:gsub("^%[.-%]%s*", "")
+        -- 2) Срезаем хвостовые пробелы
+        s = s:gsub("%s+$", "")
+
+        -- 3) Основной паттерн: "Имя <что-угодно-нежадно> N (min-max)"
+        --    ".-" нежадный, чтобы не съесть лишние цифры.
+        local name, value, minV, maxV =
+            s:match("^(%S+)%s+.-(%d+)%s*%((%d+)%-(%d+)%)$")
+
+        -- 4) Fallback: "Имя N (min-max)" без слова между
+        if not name then
+            name, value, minV, maxV =
+                s:match("^(%S+)%s+(%d+)%s*%((%d+)%-(%d+)%)$")
+        end
+        if not name then return nil end
+
+        local n  = tonumber(value)
+        local mn = tonumber(minV)
+        local mx = tonumber(maxV)
+        if not n or mn ~= 1 or mx ~= 100 then return nil end
+
+        -- 5) Срезаем "-реалм", если есть
+        name = name:match("^([^%-]+)") or name
+
+        return name, n
     end
 
     -- ========================================================================
@@ -430,7 +466,7 @@ NSQC4.RegisterModule("gp", function()
             SendChatMessage("-ролл " .. itemLink, "RAID_WARNING")
         end
 
-        -- РАССЫЛКА ДЛЯ ОСТАЛЬНЫХ
+        -- РАССЫЛКА ДЛЯ ОСТАЛЬНЫХ (независимо от silent)
         if rollState.isLeader and itemLink then
             local payload = itemLink .. ADDON_SEP .. dur
             if #payload > 255 then
@@ -466,11 +502,12 @@ NSQC4.RegisterModule("gp", function()
         if not rollState then return end
         value = tonumber(value)
         if not name or not value then return end
-        if rollState.banned and rollState.banned[name] then return end
 
-        if rollState.rolls[name] then
-            return
-        end
+        -- Нормализация: срезаем "-реалм"
+        name = name:match("^([^%-]+)") or name
+
+        if rollState.banned and rollState.banned[name] then return end
+        if rollState.rolls[name] then return end
 
         rollState.rolls[name] = value
         RefreshRollFrame()
@@ -486,9 +523,9 @@ NSQC4.RegisterModule("gp", function()
         return s
     end
 
-    -- Проверка, что строка начинается с "ролл"/"РОЛЛ"/"Ролл" (и далее пробел или конец)
-    -- Байтово: "р"=D1 80, "Р"=D0 A0; "о"=D0 BE, "О"=D0 9E;
-    --          "л"=D0 BB, "Л"=D0 9B
+    -- Проверка, что строка начинается с "ролл"/"РОЛЛ" (байтово).
+    -- "р"=D1 80, "Р"=D0 A0; "о"=D0 BE, "О"=D0 9E;
+    -- "л"=D0 BB, "Л"=D0 9B
     local function StartsWithRoll(s)
         local r1, r2 = s:byte(1, 2)
         local o1, o2 = s:byte(3, 4)
@@ -518,7 +555,6 @@ NSQC4.RegisterModule("gp", function()
         if not ok then return end
         rest = rest:gsub("^%s+", "")
 
-        -- [Предмет] или ссылка |c...|Hitem:...|h[Имя]|h|r
         local itemLink = rest:match("(|c%x+|Hitem:.-|h.-|h|r)")
         if itemLink then
             local itemName = itemLink:match("|h%[(.-)%]|h") or "Предмет"
@@ -532,13 +568,11 @@ NSQC4.RegisterModule("gp", function()
             return
         end
 
-        -- "ролл" без предмета — быстрый ролл 1-100
         if rest == "" then
             RandomRoll(1, 100)
             return
         end
 
-        -- "ролл 1-20" — быстрый ролл с диапазоном
         local minV, maxV = rest:match("^(%d+)%s*%-%s*(%d+)$")
         if minV and maxV then
             RandomRoll(tonumber(minV), tonumber(maxV))
@@ -565,30 +599,19 @@ NSQC4.RegisterModule("gp", function()
     end
 
     NSQC4.ChatHandler:Register("GUILD:-р", {
-        func = function(words, sender, text, channel, prefix)
-            QuickRoll(sender, words)
-        end,
+        func = function(words, sender, text, channel, prefix) QuickRoll(sender, words) end,
         stopOnMatch = true,
     })
-
     NSQC4.ChatHandler:Register("RAID:-р", {
-        func = function(words, sender, text, channel, prefix)
-            QuickRoll(sender, words)
-        end,
+        func = function(words, sender, text, channel, prefix) QuickRoll(sender, words) end,
         stopOnMatch = true,
     })
-
     NSQC4.ChatHandler:Register("RAID_LEADER:-р", {
-        func = function(words, sender, text, channel, prefix)
-            QuickRoll(sender, words)
-        end,
+        func = function(words, sender, text, channel, prefix) QuickRoll(sender, words) end,
         stopOnMatch = true,
     })
-
     NSQC4.ChatHandler:Register("RAID_WARNING:-р", {
-        func = function(words, sender, text, channel, prefix)
-            QuickRoll(sender, words)
-        end,
+        func = function(words, sender, text, channel, prefix) QuickRoll(sender, words) end,
         stopOnMatch = true,
     })
 
@@ -615,43 +638,37 @@ NSQC4.RegisterModule("gp", function()
     sysFrame:RegisterEvent("CHAT_MSG_RAID_WARNING")
     sysFrame:RegisterEvent("CHAT_MSG_ADDON")
 
-    -- Парсер строки ролла: "Имя бросает 42 (1-100)"
-    local function TryParseRoll(msg)
-        if not msg then return nil end
-        local name, n, min, max = msg:match("^(%S+)%s+бросает%s+(%d+)%s+%((%d+)%-(%d+)%)$")
-        if not name then return nil end
-        local value = tonumber(n)
-        if not value or tonumber(min) ~= 1 or tonumber(max) ~= 100 then return nil end
-        return name, value
-    end
-
     sysFrame:SetScript("OnEvent", function(_, event, ...)
+        -- ====================================================================
+        -- РОЛЛЫ: единственный источник — CHAT_MSG_SYSTEM
+        -- ====================================================================
         if event == "CHAT_MSG_SYSTEM" then
-            local msg = ...
-            if not msg or not rollState then return end
-            local name, value = TryParseRoll(msg)
-            if not name then return end
-            RegisterRoll(name, value)
-
-            SendChatMessage(msg, "OFFICER")
-
-            return
-        end
-
-        if event == "CHAT_MSG_RAID" or event == "CHAT_MSG_RAID_LEADER" or event == "CHAT_MSG_RAID_WARNING" then
             local msg = ...
             if not msg then return end
 
-            -- 1) Строки ролла от других игроков (у себя они приходят как SYSTEM,
-            --    у остальных — как RAID/RAID_LEADER/RAID_WARNING)
-            if rollState then
-                local name, value = TryParseRoll(msg)
-                if name then
-                    RegisterRoll(name, value)
-                end
+            local name, value = TryParseRoll(msg)
+            if not name then return end
+
+            -- Если это наш собственный ролл — пересылаем в офицер-чат ОДИН раз
+            if name == UnitName("player") then
+                SendChatMessage(msg, "OFFICER")
             end
 
-            -- 2) Команда "-время N" — продление таймера (исполняет РЛ)
+            if rollState then
+                RegisterRoll(name, value)
+            end
+            return
+        end
+
+        -- ====================================================================
+        -- RAID*: только "-время N" и старт ролла (фолбэк)
+        -- ====================================================================
+        if event == "CHAT_MSG_RAID"
+           or event == "CHAT_MSG_RAID_LEADER"
+           or event == "CHAT_MSG_RAID_WARNING" then
+            local msg = ...
+            if not msg then return end
+
             local addTime = tonumber(msg:match("^%s*%-время%s+(%d+)"))
             if addTime and rollState and IsRaidLeader() then
                 rollState.timerEnd = rollState.timerEnd + addTime
@@ -659,28 +676,32 @@ NSQC4.RegisterModule("gp", function()
                 return
             end
 
-            -- 3) Старт ролла по чату (если пришло как обычное сообщение, а не
-            --    через ChatHandler). Нужен для случаев, когда один из игроков
-            --    не имеет ChatHandler по какой-то причине.
-            local s = msg:gsub("^%s+", "")
-            s = StripLeadingDash(s)
-            local ok, rest = StartsWithRoll(s)
-            if ok then
-                rest = rest:gsub("^%s+", "")
-                local link = rest:match("(|c%x+|Hitem:.-|h.-|h|r)")
-                if link then
-                    local itemName = link:match("|h%[(.-)%]|h") or "Предмет"
-                    NSQC4.Roll_Start(link, itemName, DEFAULT_ROLL_TIME, true)
-                    return
-                end
-                local plainName = rest:match("^%[(.-)%]")
-                if plainName then
-                    NSQC4.Roll_Start(plainName, plainName, DEFAULT_ROLL_TIME, true)
-                    return
+            -- Фолбэк-старт по чату (на случай, если ChatHandler не сработал)
+            if not rollState then
+                local s = msg:gsub("^%s+", "")
+                s = StripLeadingDash(s)
+                local ok, rest = StartsWithRoll(s)
+                if ok then
+                    rest = rest:gsub("^%s+", "")
+                    local link = rest:match("(|c%x+|Hitem:.-|h.-|h|r)")
+                    if link then
+                        local itemName = link:match("|h%[(.-)%]|h") or "Предмет"
+                        NSQC4.Roll_Start(link, itemName, DEFAULT_ROLL_TIME, true)
+                        return
+                    end
+                    local plainName = rest:match("^%[(.-)%]")
+                    if plainName then
+                        NSQC4.Roll_Start(plainName, plainName, DEFAULT_ROLL_TIME, true)
+                        return
+                    end
                 end
             end
+            return
         end
 
+        -- ====================================================================
+        -- ADDON: старт / отмена / бан
+        -- ====================================================================
         if event == "CHAT_MSG_ADDON" then
             local prefix, addonMsg, _, sender = ...
             if not prefix or not sender then return end
