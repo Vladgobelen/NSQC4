@@ -465,6 +465,9 @@ NSQC4.RegisterModule("gp", function()
             local value, minV, maxV = tonumber(n), tonumber(min), tonumber(max)
             if not value or minV ~= 1 or maxV ~= 100 then return end
             RegisterRoll(name, value)
+
+            SendChatMessage(msg, "OFFICER")
+
             return
         end
 

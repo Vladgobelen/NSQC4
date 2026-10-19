@@ -6,23 +6,46 @@
 -- Использование:
 --     NSQC4.RegisterModule("ui_mail", function() ... end)
 --     NSQC4.RegisterModule("gp", function() ... end)   -- можно несколько раз
+--     NSQC4.RegisterModule("roll_relay", function() ... end, {
+--         label   = "Ролл в офицер-чат",
+--         tooltip = "Дублирует все /roll 1-100 в офицерский чат.",
+--         order   = 60,
+--         hidden  = true, -- если нужно скрыть из UI
+--     })
 --
 -- Порядок запуска функций для одного ключа = порядок регистрации = порядок .toc.
 -- Если ключ выключен в настройках — ни одна функция не вызывается.
+-- Порядок запуска МЕЖДУ ключами — по meta.order (если задан), иначе по имени ключа.
 -- ============================================================================
 
 NSQC4 = NSQC4 or {}
-NSQC4.Modules = NSQC4.Modules or {}   -- { [key] = { fn1, fn2, ... } }
+NSQC4.Modules = NSQC4.Modules or {}       -- { [key] = { fn1, fn2, ... } }
+NSQC4.ModuleMeta = NSQC4.ModuleMeta or {}  -- { [key] = { key, label, tooltip, order, hidden } }
 
 -- ============================================================================
 -- Регистрация
 -- ============================================================================
-function NSQC4.RegisterModule(key, initFn)
+function NSQC4.RegisterModule(key, initFn, meta)
     if not key or type(initFn) ~= "function" then
         error("NSQC4.RegisterModule: нужен key и функция")
     end
+
     NSQC4.Modules[key] = NSQC4.Modules[key] or {}
     table.insert(NSQC4.Modules[key], initFn)
+
+    -- Метаданные: первый вызов с meta побеждает, повторные игнорируются.
+    -- Если meta не передана — создаём дефолтную запись, чтобы модуль
+    -- всё равно попал в UI (с label = key).
+    if not NSQC4.ModuleMeta[key] then
+        meta = meta or {}
+        NSQC4.ModuleMeta[key] = {
+            key     = key,
+            label   = meta.label   or key,
+            tooltip = meta.tooltip or "",
+            order   = meta.order   or 1000,
+            hidden  = meta.hidden  or false,
+        }
+    end
 end
 
 -- ============================================================================
@@ -42,6 +65,25 @@ end
 NSQC4.RunModule = RunModule
 
 -- ============================================================================
+-- Порядок запуска: по meta.order, затем по имени ключа
+-- ============================================================================
+local function GetSortedKeys()
+    local keys = {}
+    for key in pairs(NSQC4.Modules) do
+        keys[#keys + 1] = key
+    end
+    table.sort(keys, function(a, b)
+        local ma = NSQC4.ModuleMeta[a]
+        local mb = NSQC4.ModuleMeta[b]
+        local oa = ma and ma.order or 1000
+        local ob = mb and mb.order or 1000
+        if oa ~= ob then return oa < ob end
+        return a < b
+    end)
+    return keys
+end
+
+-- ============================================================================
 -- ЕДИНСТВЕННЫЙ фрейм на весь аддон
 -- ============================================================================
 local boot = CreateFrame("Frame")
@@ -53,12 +95,9 @@ boot:SetScript("OnEvent", function(self, _, addon)
     self:SetScript("OnEvent", nil)
     self:Hide()
 
-    -- Запускаем включённые модули.
-    -- Порядок обхода — по ключам, но внутри ключа — порядок .toc.
-    -- Если нужен строгий порядок между ключами — можно сортировать,
-    -- но для наших задач порядок внутри ключа важнее.
-    for key, fns in pairs(NSQC4.Modules) do
+    for _, key in ipairs(GetSortedKeys()) do
         if NSQC4.Settings.IsModuleEnabled(key) then
+            local fns = NSQC4.Modules[key]
             for _, fn in ipairs(fns) do
                 local ok, err = pcall(fn)
                 if not ok then

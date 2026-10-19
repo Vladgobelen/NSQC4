@@ -2024,7 +2024,7 @@ function GpDb:_CheckOfficerRank()
         local name, _, rankIndex = GetGuildRosterInfo(i)
         if name and name == playerName then
             local rankName = GuildControlGetRankName(rankIndex + 1)
-            if rankName == "Капитан" or rankName == "Лейтенант" then
+            if rankName == "Капитан" or rankName == "Лейтенант" or rankName == "Командор" then
                 return true
             end
             break
