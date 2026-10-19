@@ -49,6 +49,22 @@ function NSQC4.RegisterModule(key, initFn, meta)
 end
 
 -- ============================================================================
+-- Явная установка/перезапись метаданных модуля.
+-- В отличие от RegisterModule (первый вызов побеждает), эта функция
+-- мержит и перезаписывает meta. Не зависит от порядка .toc.
+-- ============================================================================
+function NSQC4.SetModuleMeta(key, meta)
+    if not key or type(meta) ~= "table" then return end
+    local cur = NSQC4.ModuleMeta[key] or { key = key, order = 1000, hidden = false }
+    cur.key     = key
+    cur.label   = meta.label   or cur.label   or key
+    cur.tooltip = meta.tooltip or cur.tooltip or ""
+    cur.order   = meta.order   or cur.order   or 1000
+    cur.hidden  = (meta.hidden ~= nil) and meta.hidden or (cur.hidden or false)
+    NSQC4.ModuleMeta[key] = cur
+end
+
+-- ============================================================================
 -- Запуск одного модуля
 -- ============================================================================
 local function RunModule(key)

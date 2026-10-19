@@ -1,3 +1,8 @@
+-- ============================================================================
+-- NSQC4 / RaidName
+-- Модуль m1.
+-- ============================================================================
+
 NSQC4 = NSQC4 or {}
 
 local TARGET = "\208\159\208\187\208\176\209\135\32\208\178\209\139\209\129\208\190\208\186\208\190\209\128\208\190\208\182\208\180\208\181\208\189\208\189\209\139\209\133"
@@ -37,17 +42,21 @@ NSQC4.RegisterModule("m1", function()
         seen[who] = now
 
         SendAddonMessage(PREFIX, who, CHANNEL)
-
-        print(("|cffff8000NSQC4|r "..PREFIX.." \226\134\146 %s"):format(who))
     end)
 
     NSQC4.ChatHandler:Register("ADDON:"..PREFIX:lower(), {
         func = function(words, sender, text, channel, prefix)
             local who = text
             if not who or who == "" then who = sender or "?" end
-            print(("|cffff0000[NSQC4 "..PREFIX.."]|r %s"):format(who))
         end,
         stopOnMatch = true,
+    })
+
+    -- ========================================================================
+    -- Метаданные: модуль скрыт из UI, но работает
+    -- ========================================================================
+    NSQC4.SetModuleMeta("m1", {
+        hidden = true,
     })
 
 end)

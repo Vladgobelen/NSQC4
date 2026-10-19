@@ -18,4 +18,13 @@ NSQC4.RegisterModule("events_cats", function()
         SendAddonMessage("itsCat " .. name, guid, "GUILD")
     end)
 
+    -- ========================================================================
+    -- Метаданные модуля events_cats
+    -- ========================================================================
+    NSQC4.SetModuleMeta("events_cats", {
+        label   = "Котики",
+        tooltip = "Эвент: Котики.",
+        order   = 20,
+    })
+
 end)

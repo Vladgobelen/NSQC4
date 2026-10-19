@@ -600,4 +600,13 @@ NSQC4.RegisterModule("ui_frames_move", function()
         ApplyAllSaved()
     end)
 
+    -- ========================================================================
+    -- Метаданные модуля ui_frames_move
+    -- ========================================================================
+    NSQC4.SetModuleMeta("ui_frames_move", {
+        label   = "Перемещение",
+        tooltip = "Перемещение любых фреймов. Команда /ns_fcmove.",
+        order   = 300,
+    })
+
 end)

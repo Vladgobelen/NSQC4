@@ -4,7 +4,7 @@ NSQC4 — КАРТА ФАЙЛОВ
 
 --- КОРЕНЬ ---
 NSQC4.toc                                                — точка входа, порядок загрузки файлов аддона
-VERSION.lua                                             — версия аддона + ответ на запрос версии через addon-чат
+VERSION.lua                                             — версия аддона + обмен версиями (модуль version_officer: переключает канал для сообщения об актуальности)
 FILES.txt                                                  — этот файл (карта проекта)
 WORK.txt                                                 — карта текущей работы (что делаем, что сделано)
 updateConfigs.sh                                       — скрипт git-коммита + push на GitHub и GitLab
@@ -12,9 +12,9 @@ updateConfigs.sh                                       — скрипт git-ко
 
 --- Core/ (ядро) ---
 Core\Compat.lua                                       — эмуляция отсутствующих в 3.3.5a функций
-Core\Settings\Settings.lua                           — настройки модулей, MODULES, подтаблицы, disabled-логика
-Core\Settings\OptionsPanel.lua                    — панель настроек в меню «Интерфейс → Модификации → NSQC4»
-Core\ModuleRegistry.lua                             — единый реестр модулей (RegisterModule), один фрейм на весь аддон
+Core\Settings\Settings.lua                           — настройки модулей, подтаблицы, disabled-логика, GetModules() (список для UI строится из ModuleMeta)
+Core\Settings\OptionsPanel.lua                    — панель настроек в меню «Интерфейс → Модификации → NSQC4» (ленивая сборка чекбоксов)
+Core\ModuleRegistry.lua                             — единый реестр модулей (RegisterModule + SetModuleMeta), один boot-фрейм на весь аддон
 Core\ChatHandler.lua                                 — O(1)-диспетчер команд чата (префикс «-» для текста, «ns_» для ADDON)
 Core\ChatCatcher.lua                                 — слушатель гильд-чата для свободных фраз (не команд с «-»)
 Core\SlashPanel.lua                                   — панель кнопок слева от иконки аддона + API SlashPanel_RegisterButton
@@ -32,11 +32,14 @@ BS\Chat.lua                                              — команда «-�
 Guild\KickInactive.lua                                — команда «-кик [Ник]» (модуль kick)
 Guild\AutoPromote.lua                              — команда «-повысить [Ник]» (модуль promote)
 Guild\Demote.lua                                     — команда «-принизить Ник» (модуль demote)
-Guild\Ustav.lua                                        — вывод Устава в чат
+Guild\Ustav.lua                                        — вывод Устава в чат (модуль ustav)
+Guild\BlackList.lua                                  — команда «-чс <Ник>», кик при появлении в чате (модуль blacklist)
+Guild\r.lua                                             — (модуль m1: полускрытая логика рейда)
 Guild\Recruiter\Init.lua                     — класс GuildRecruiter, создание инстанса, хук WhoFrame (модуль guild_recruiter)
 Guild\Recruiter\Storage.lua                  — работа с nsDbc4.guild_recruiter (автосохранение, загрузка)
 Guild\Recruiter\Logic.lua                    — поиск, фильтры, инвайты, игнор-лист
 Guild\Recruiter\UI.lua                       — интерфейс: окно, чекбоксы, список игроков
+                                                  (все 4 файла Recruiter — один ключ guild_recruiter, одна галочка)
 
 --- Interface/ (интерфейсные модули) ---
 Interface\Mail.lua                                     — кнопка «ЗАБРАТЬ ВСЁ» в почте (модуль ui_mail)
@@ -52,7 +55,7 @@ Interface\Bugs\Bugs.lua                              — баг-репортёр
 Interface\PlayerInfo.lua                              — инфо об игроке: ПКМ по нику → вывод в офицерский чат (модуль ui_player_info)
 
 --- Interface/ui_frames/ (модули управления фреймами) ---
-Interface\ui_frames\Chat.lua                     — фильтрация чата по тексту и каналам (модуль ui_frames_chat)
+Interface\ui_frames\Chat.lua                     — фильтрация чата по тексту и каналам (модуль ui_frames_chat, НЕ путать с ui_chat!)
 Interface\ui_frames\Layers.lua                  — изменение слоёв (FrameStrata) фреймов (модуль ui_frames_layers)
 Interface\ui_frames\Alpha.lua                   — прозрачность фреймов (модуль ui_frames_alpha)
 Interface\ui_frames\Move.lua                    — перемещение фреймов (модуль ui_frames_move)
@@ -65,6 +68,10 @@ GP\RaidTracker.lua                                  — отслеживание
 GP\MinimapGP.lua                                    — кнопка ГП у миникарты (модуль gp)
 GP\LogReceiver.lua                                  — приём логов ГП из гильд-чата, префикс nsYourLog (модуль gp)
 GP\ExternalGP.lua                                   — обмен ГП не-гильдейских игроков: GetGPA/showGPA/hisGP/enAlToGi/ns_hisGP (модуль gp)
+GP\PveSeason.lua                                    — синхронизация флага «ПВЕ-сезон» с сервером (модуль gp)
+GP\Roll.lua                                           — ролл с окном, таймером, банами, кастомными звуками (модуль gp)
+GP\RollRelay.lua                                    — дублирование своих /roll в офицер-чат (модуль roll_relay)
+                                                  (все файлы GP\*, кроме RollRelay, — один ключ gp, одна галочка)
 
 --- Course/ (курс Lua) ---
 Course\Modules.lua                                 — данные курса: ns_llua['lua'][1..364] (модули, уроки, задания)
@@ -74,6 +81,7 @@ Course\Reminder.lua                               — класс NSReminder: н�
 Course\CodeShare.lua                             — приём ответов обмена кодом (nsModuleCode)
 Course\Triggers.lua                                 — регистрация чат-триггеров курса в NSQC4.chat
 Course\Init.lua                                       — сборка: инстансы ui/logic/reminder, слэш, кнопка панели
+                                                  (все 7 файлов Course — один ключ course, одна галочка)
 
 --- Events/ (эвенты) ---
 Events\Cats.lua                                       — модуль events_cats: репортер целей в гильд-чат (префикс itsCat)
@@ -93,6 +101,10 @@ Media\Sounds\*.ogg, *.mp3                     — пользовательски
 - Все модули обёрнуты в NSQC4.RegisterModule(key, function() ... end).
   При выключенном модуле init-функция НЕ вызывается — ни фреймов, ни событий,
   ни хуков, ни глобальных переменных.
+- Метаданные для UI задаются через NSQC4.SetModuleMeta(key, { label, tooltip, order, hidden })
+  в «главном» файле модуля (первый в .toc для этого ключа).
+  Остальные файлы того же ключа вызывают RegisterModule без meta — они просто
+  добавляют функции в NSQC4.Modules[key], а UI берёт описание из ModuleMeta.
 - Core-файлы без галочек (всегда загружены): Compat, Settings, ModuleRegistry,
   ChatHandler, ChatCatcher, SlashPanel, MinimapIcon, OptionsPanel, Charter.
 - Порядок загрузки в .toc не совпадает с группировкой по папкам:

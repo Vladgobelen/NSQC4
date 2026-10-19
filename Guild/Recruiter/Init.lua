@@ -133,4 +133,13 @@ NSQC4.RegisterModule("guild_recruiter", function()
 
     NSQC4.GuildRecruiter = GuildRecruiter.new()
 
+    -- ========================================================================
+    -- Метаданные модуля guild_recruiter
+    -- ========================================================================
+    NSQC4.SetModuleMeta("guild_recruiter", {
+        label   = "Рекрутер",
+        tooltip = "Поиск и приглашение игроков без гильдии. Открывается с вкладкой Who.",
+        order   = 10,
+    })
+
 end)

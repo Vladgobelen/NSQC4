@@ -1,12 +1,22 @@
+-- ============================================================================
+-- NSQC4 / VERSION
+-- Версия аддона + проверка актуальности через гильд-чат.
+-- Модуль: version_officer.
+-- ============================================================================
+
 NSQC4_VERSION = {
     major = 3,
-    minor = 4,
+    minor = 5,
     code  = "NSQC4",
 }
 
 NSQC4_LAST_VERSION = nil
-local versionChecked = false
 
+-- Фиктивная регистрация: нужна, чтобы ключ появился в NSQC4.Modules
+-- и попал в UI настроек. Тело пустое — реальная логика ниже, вне модуля.
+NSQC4.RegisterModule("version_officer", function() end)
+
+local versionChecked = false
 local myName = UnitName("player")
 
 local verFrame = CreateFrame("Frame")
@@ -25,6 +35,7 @@ verFrame:SetScript("OnEvent", function(self, event, prefix, msg, channel, sender
             or NSQC4_LAST_VERSION.minor ~= NSQC4_VERSION.minor then
                 SendChatMessage("Мой аддон устарел, нужно обновить", "OFFICER")
             else
+                -- Галочка решает только канал для этого сообщения
                 if NSQC4.Settings.IsModuleEnabled("version_officer") then
                     SendChatMessage("Версия аддона актуальна", "OFFICER")
                 else
@@ -44,3 +55,12 @@ initTimer:SetScript("OnUpdate", function(self, dt)
         SendAddonMessage("NSQC4GiveMeVers", "", "GUILD")
     end
 end)
+
+-- ============================================================================
+-- Метаданные модуля version_officer
+-- ============================================================================
+NSQC4.SetModuleMeta("version_officer", {
+    label   = "Версия в офицерский чат",
+    tooltip = "При включении сообщение «Версия аддона актуальна» уходит в офицер-чат. При выключении — в гильд-чат.",
+    order   = 45,
+})

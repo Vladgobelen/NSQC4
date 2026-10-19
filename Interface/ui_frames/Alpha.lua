@@ -667,4 +667,13 @@ NSQC4.RegisterModule("ui_frames_alpha", function()
         ApplyAllSaved()
     end)
 
+    -- ========================================================================
+    -- Метаданные модуля ui_frames_alpha
+    -- ========================================================================
+    NSQC4.SetModuleMeta("ui_frames_alpha", {
+        label   = "Прозрачность",
+        tooltip = "Изменение прозрачности любых фреймов. Команда /ns_fcalpha.",
+        order   = 290,
+    })
+
 end)

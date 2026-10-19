@@ -18,4 +18,13 @@ NSQC4.RegisterModule("course", function()
     NSQC4.SlashPanel_RegisterButton("К", "/ns_course", "Курс Lua", function()
         logic:ManageCourse()
     end)
+
+    -- ========================================================================
+    -- Метаданные модуля course (одна галочка на все файлы Course\*)
+    -- ========================================================================
+    NSQC4.SetModuleMeta("course", {
+        label   = "Курс Lua",
+        tooltip = "Интерактивный курс по Lua: модули, практика, проверка кода, напоминалка.",
+        order   = 50,
+    })
 end)
