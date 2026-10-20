@@ -612,7 +612,9 @@ function NSAuk.DestroyAuctionWindow()
             content.rows = {}
         end
         if content then
-            content:Hide(); content:SetParent(nil)
+            content:Hide()
+            content:SetParent(nil)
+            auctionFrame.content = nil
         end
 
         -- 2. Панель быстрых ставок
@@ -623,25 +625,43 @@ function NSAuk.DestroyAuctionWindow()
         end
 
         -- 3. Кнопки быстрых ставок
-        if auctionFrame.customButtonBar and auctionFrame.customButtonBar.buttons then
-            for _, b in ipairs(auctionFrame.customButtonBar.buttons) do
-                if b then b:Hide(); b:SetParent(nil) end
+        local bar = auctionFrame.customButtonBar
+        if bar then
+            if bar.buttons then
+                for _, b in ipairs(bar.buttons) do
+                    if b then b:Hide(); b:SetParent(nil) end
+                end
+                bar.buttons = {}
             end
-            auctionFrame.customButtonBar.buttons = {}
+            bar:Hide()
+            bar:SetParent(nil)
+            auctionFrame.customButtonBar = nil
         end
 
-        -- 4. Прочие дочерние фреймы
-        local children = { auctionFrame.content, auctionFrame.customButtonBar, auctionFrame.autoDeductCB }
-        for _, ch in ipairs(children) do
-            if ch then ch:SetParent(nil) end
+        -- 4. Чекбокс авто-списания
+        if auctionFrame.autoDeductCB then
+            auctionFrame.autoDeductCB:Hide()
+            auctionFrame.autoDeductCB:SetParent(nil)
+            auctionFrame.autoDeductCB = nil
         end
 
-        -- 5. Сам фрейм
+        -- 5. Именованные дочерние фреймы (кнопки, заголовок, тултип-ловушки)
+        for _, name in ipairs({
+            "NSAukAutoDeductCB", "NSAukCloseBtn", "NSAukHelpBtn", "NSAukMinBtn",
+            "NSAukPassBtn", "NSAukBidBtn", "NSAukTogglePanel", "NSAukTitleMouse",
+            "NSAukBidPanel", "NSAukCustomBar",
+        }) do
+            local f = _G[name]
+            if f then f:Hide(); f:SetParent(nil) end
+        end
+
+        -- 6. Сам фрейм
         auctionFrame:Hide()
         auctionFrame:SetParent(nil)
         auctionFrame = nil
     end
 
+    -- 7. Анимация ресайза
     if resizeAnimation then
         resizeAnimation:SetScript("OnUpdate", nil)
         resizeAnimation = nil
