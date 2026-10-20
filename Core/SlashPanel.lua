@@ -40,6 +40,32 @@ local function EnsurePanel()
 end
 
 -- ============================================================================
+-- Хелпер: рендер описания в тултип
+--   desc может быть:
+--     * строкой   — старый режим, разбивается по \n, каждый кусок белый
+--     * таблицей  — { {text=, r=, g=, b=}, ... }, каждый элемент своим цветом
+-- ============================================================================
+local function RenderTooltipDesc(desc)
+    if not desc then return end
+
+    if type(desc) == "table" then
+        for _, line in ipairs(desc) do
+            local r = line.r or 1
+            local g = line.g or 1
+            local b = line.b or 1
+            GameTooltip:AddLine(line.text or "", r, g, b, true)
+        end
+        return
+    end
+
+    -- строка: разбиваем по \n
+    local s = tostring(desc)
+    for line in (s .. "\n"):gmatch("(.-)\n") do
+        GameTooltip:AddLine(line, 1, 1, 1, true)
+    end
+end
+
+-- ============================================================================
 -- Создание кнопки
 -- ============================================================================
 local function CreateButton(parent, entry, index, rowY)
@@ -86,12 +112,30 @@ local function CreateButton(parent, entry, index, rowY)
     btn:SetScript("OnEnter", function(self)
         local e = self.entry
         if not e then return end
+
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(e.desc or e.label or "?", 1, 0.82, 0)
+        GameTooltip:SetFrameStrata("TOOLTIP")
+        GameTooltip:SetToplevel(true)
+        GameTooltip:ClearLines()
+
+        -- Непрозрачный фон
+        if GameTooltip.SetBackdropColor then
+            GameTooltip:SetBackdropColor(0, 0, 0, 1)
+        end
+        if GameTooltip.SetBackdropBorderColor then
+            GameTooltip:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+        end
+        GameTooltip:SetAlpha(1)
+
+        GameTooltip:SetText(e.label or "?", 1, 0.82, 0)
+
+        RenderTooltipDesc(e.desc)
+
         if e.cmd then
             GameTooltip:AddLine(" ")
             GameTooltip:AddLine("|cff808080" .. e.cmd .. "|r", 0.6, 0.6, 0.6)
         end
+
         GameTooltip:Show()
     end)
     btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -105,7 +149,6 @@ end
 RebuildButtons = function()
     if not panelReady or not panel then return end
 
-    -- Очистка старых кнопок и рядов
     for _, btn in ipairs(panel.buttons) do
         btn:Hide()
         btn:SetParent(nil)
@@ -127,7 +170,7 @@ RebuildButtons = function()
     local totalHeight = PADDING
 
     -- ========================================================================
-    -- 1. Первый ярус: общие кнопки (NSQC4.SlashPanel_Buttons)
+    -- 1. Первый ярус: общие кнопки
     -- ========================================================================
     local list = NSQC4.SlashPanel_Buttons
     if #list > 0 then
@@ -149,7 +192,7 @@ RebuildButtons = function()
     end
 
     -- ========================================================================
-    -- 2. Второй ярус: разделы (NSQC4.SlashPanel_Sections)
+    -- 2. Второй ярус: разделы
     -- ========================================================================
     for sectionName, section in pairs(NSQC4.SlashPanel_Sections) do
         local buttons = section.buttons
