@@ -56,7 +56,6 @@ GP\LogReceiver.lua
 GP\ExternalGP.lua
 GP\PveSeason.lua
 GP\Roll.lua
-GP\RollRelay.lua
 Course\Modules.lua
 Course\UI.lua
 Course\Logic.lua
