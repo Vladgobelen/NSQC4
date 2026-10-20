@@ -85,22 +85,6 @@ NSQC4.RegisterModule("compat", function()
         stopOnMatch = true,
     })
 
-    local gmFrame = CreateFrame("Frame")
-    gmFrame:RegisterEvent("CHAT_MSG_ADDON")
-    gmFrame:SetScript("OnEvent", function(self, event, prefix, msg, channel, sender)
-        if prefix ~= "get_real_time" then return end
-
-        if msg:match("^list:") then
-            local listStr = msg:match("^list:(.+)$")
-            if listStr then
-                NSQC4.GM_LIST = {}
-                for nick in listStr:gmatch("[^,]+") do
-                    NSQC4.GM_LIST[nick:lower()] = true
-                end
-            end
-        end
-    end)
-
     local loginFrame = CreateFrame("Frame")
     loginFrame:RegisterEvent("PLAYER_LOGIN")
     loginFrame:SetScript("OnEvent", function(self)
