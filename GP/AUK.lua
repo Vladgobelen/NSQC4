@@ -645,20 +645,34 @@ function NSAuk.DestroyAuctionWindow()
             auctionFrame.autoDeductCB = nil
         end
 
-        -- 5. Именованные дочерние фреймы (кнопки, заголовок, тултип-ловушки)
-        for _, name in ipairs({
-            "NSAukAutoDeductCB", "NSAukCloseBtn", "NSAukHelpBtn", "NSAukMinBtn",
-            "NSAukPassBtn", "NSAukBidBtn", "NSAukTogglePanel", "NSAukTitleMouse",
-            "NSAukBidPanel", "NSAukCustomBar",
-        }) do
-            local f = _G[name]
-            if f then f:Hide(); f:SetParent(nil) end
-        end
-
-        -- 6. Сам фрейм
+        -- 5. Сам фрейм
         auctionFrame:Hide()
         auctionFrame:SetParent(nil)
         auctionFrame = nil
+    end
+
+    -- 6. Обнулить ГЛОБАЛЬНЫЕ ссылки (иначе _G держит объекты)
+    local toNil = {
+        "NSAukAuctionFrame", "NSAukBidPanel", "NSAukCustomBar",
+        "NSAukAutoDeductCB", "NSAukCloseBtn", "NSAukHelpBtn", "NSAukMinBtn",
+        "NSAukPassBtn", "NSAukBidBtn", "NSAukTogglePanel", "NSAukTitleMouse",
+        "NSAukBidInput", "NSAukBtnAdd", "NSAukBtnRem",
+        "NSAukScrollFrame", "NSAukScrollContent",
+    }
+    for _, name in ipairs(toNil) do
+        local f = _G[name]
+        if f then
+            f:Hide()
+            f:SetParent(nil)
+        end
+        _G[name] = nil
+    end
+    -- Скролл-фреймы создаются с суффиксом scrollFrameID — чистим по префиксу
+    for k, v in pairs(_G) do
+        if type(k) == "string" and (k:match("^NSAukScrollFrame%d+$") or k:match("^NSAukScrollContent%d+$")) then
+            if v and type(v) == "table" and v.Hide then v:Hide(); v:SetParent(nil) end
+            _G[k] = nil
+        end
     end
 
     -- 7. Анимация ресайза
