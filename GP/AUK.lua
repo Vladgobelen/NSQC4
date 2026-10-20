@@ -603,13 +603,49 @@ end
 
 function NSAuk.DestroyAuctionWindow()
     if auctionFrame then
-        auctionFrame:Hide()
-        if auctionFrame.customPanel then
-            auctionFrame.customPanel:Hide(); auctionFrame.customPanel:SetParent(nil); auctionFrame.customPanel = nil
+        -- 1. Строки контента
+        local content = auctionFrame.content
+        if content and content.rows then
+            for _, r in ipairs(content.rows) do
+                if r then r:Hide(); r:SetParent(nil) end
+            end
+            content.rows = {}
         end
-        auctionFrame:SetParent(nil); auctionFrame = nil
+        if content then
+            content:Hide(); content:SetParent(nil)
+        end
+
+        -- 2. Панель быстрых ставок
+        if auctionFrame.customPanel then
+            auctionFrame.customPanel:Hide()
+            auctionFrame.customPanel:SetParent(nil)
+            auctionFrame.customPanel = nil
+        end
+
+        -- 3. Кнопки быстрых ставок
+        if auctionFrame.customButtonBar and auctionFrame.customButtonBar.buttons then
+            for _, b in ipairs(auctionFrame.customButtonBar.buttons) do
+                if b then b:Hide(); b:SetParent(nil) end
+            end
+            auctionFrame.customButtonBar.buttons = {}
+        end
+
+        -- 4. Прочие дочерние фреймы
+        local children = { auctionFrame.content, auctionFrame.customButtonBar, auctionFrame.autoDeductCB }
+        for _, ch in ipairs(children) do
+            if ch then ch:SetParent(nil) end
+        end
+
+        -- 5. Сам фрейм
+        auctionFrame:Hide()
+        auctionFrame:SetParent(nil)
+        auctionFrame = nil
     end
-    if resizeAnimation then resizeAnimation:SetScript("OnUpdate", nil); resizeAnimation = nil end
+
+    if resizeAnimation then
+        resizeAnimation:SetScript("OnUpdate", nil)
+        resizeAnimation = nil
+    end
 end
 
 function NSAuk.CreateMinimapIcon()
