@@ -48,12 +48,12 @@ Interface\ui_frames\Layers.lua
 Interface\ui_frames\Alpha.lua
 Interface\ui_frames\Move.lua
 GP\GP.lua
+GP\ExternalGP.lua
 GP\AUK.lua
 GP\BossLoot.lua
 GP\RaidTracker.lua
 GP\MinimapGP.lua
 GP\LogReceiver.lua
-GP\ExternalGP.lua
 GP\PveSeason.lua
 GP\Roll.lua
 GP\TargetGP.lua

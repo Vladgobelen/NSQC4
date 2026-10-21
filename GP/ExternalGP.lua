@@ -1,5 +1,16 @@
 -- ============================================================================
 -- NSQC4 / GP / ExternalGP
+-- Кеш ГП для ЧУЖИХ игроков (не из моей гильдии).
+--
+-- Своих читаем напрямую из GetGuildRosterInfo (этим занимается GpDb в GP.lua).
+-- Сюда попадают ТОЛЬКО чужие — через ретрансляцию nsGpGet.
+--
+-- Схема:
+--   клиент -> GUILD: nsGpGet <nick>                      (только если ник чужой)
+--   сервер -> GUILD: nsGpGetResp <reqID>|<gp>|<ok>|<err>|<nick>
+--   клиент ловит nsGpGetResp, кладёт gp в gpDb.external_gp_cache[nick]
+--
+-- Старый протокол (GetGPA / showGPA / hisGP / enAlToGi / ns_hisGP) удалён.
 -- ============================================================================
 
 NSQC4.RegisterModule("gp", function()
@@ -8,72 +19,99 @@ NSQC4.RegisterModule("gp", function()
         return
     end
 
+    -- ========================================================================
+    -- Локальные префиксы (модуль автономен)
+    -- ========================================================================
+    local P_GP_GET      = "nsGpGet"
+    local P_GP_GET_RESP = "nsGpGetResp"
+
     local myName  = UnitName("player") or ""
     local plainMe = myName:match("^(.-)-") or myName
 
-    local function ParseGpNick(text)
-        if not text then return nil, nil end
-        return text:match("^(%d+)[%s\160\194\129]+(.+)$")
+    -- ========================================================================
+    -- Свой ли ник (есть в моём ростере)?
+    -- ========================================================================
+    local function IsMyGuildMember(nick)
+        if not nick or nick == "" then return false end
+        local short = nick:match("^([^%-]+)") or nick
+        for i = 1, GetNumGuildMembers(true) do
+            local gName = GetGuildRosterInfo(i)
+            if gName then
+                local gShort = gName:match("^([^%-]+)") or gName
+                if gShort == short then return true end
+            end
+        end
+        return false
     end
 
-    local function SaveExternalGp(gpStr, nick)
-        if not gpStr or not nick or nick == "" then return end
-        local gp = tonumber(gpStr)
-        if not gp then gp = 0 end
-        local cleanNick = nick:match("^(.-)-") or nick
+    -- ========================================================================
+    -- Прочитать ГП своего гильдейца напрямую из ростера
+    -- ========================================================================
+    local function ReadMyGuildGp(nick)
+        if not nick or nick == "" then return nil end
+        local short = nick:match("^([^%-]+)") or nick
+        for i = 1, GetNumGuildMembers(true) do
+            local gName, _, _, _, _, _, _, officerNote = GetGuildRosterInfo(i)
+            if gName then
+                local gShort = gName:match("^([^%-]+)") or gName
+                if gShort == short then
+                    local parts = {}
+                    for w in (officerNote or ""):gmatch("%S+") do
+                        table.insert(parts, w)
+                    end
+                    return tonumber(parts[3]) or 0
+                end
+            end
+        end
+        return nil
+    end
 
+    -- ========================================================================
+    -- Публичный API: запросить ГП ника.
+    --   свой   -> читаем локально, в GUILD не шлём
+    --   чужой  -> шлём nsGpGet в GUILD
+    -- ========================================================================
+    function NSQC4.RequestGp(nick)
+        if not nick or nick == "" then return end
+        local short = nick:match("^([^%-]+)") or nick
+
+        if IsMyGuildMember(short) then
+            -- Свой: GpDb сам прочитает из ростера, дублировать в кеш не нужно.
+            ReadMyGuildGp(short)
+            return
+        end
+
+        SendAddonMessage(P_GP_GET, short, "GUILD")
+    end
+
+    -- ========================================================================
+    -- Сохранить чужой ГП в кеш GpDb
+    -- ========================================================================
+    local function SaveExternalGp(nick, gp)
+        if not nick or nick == "" then return end
+        local short = nick:match("^([^%-]+)") or nick
         if gpDb and gpDb.SetExternalGp then
-            gpDb:SetExternalGp(cleanNick, gp)
+            gpDb:SetExternalGp(short, tonumber(gp) or 0)
         end
     end
 
-    NSQC4.ChatHandler:Register("ADDON:showgpa", {
+    -- ========================================================================
+    -- Приём nsGpGetResp из GUILD
+    --   payload = <reqID>|<gp>|<ok>|<err>|<nick>
+    --   reqID не нужен: ник в payload, ответ адресный.
+    -- ========================================================================
+    NSQC4.ChatHandler:Register("ADDON:nsgpgetresp", {
         func = function(words, sender, text, channel, prefix)
-            if sender == myName then return end
+            if not text or text == "" then return end
 
-            local targetNick = text and text:match("^%s*(.-)%s*$")
-            if not targetNick or targetNick == "" then return end
-            local plainTarget = targetNick:match("^(.-)-") or targetNick
-            if plainTarget ~= plainMe then return end
+            local reqID, gpStr, okStr, err, nick =
+                text:match("^(%S+)|(%-?%d+)|([01])|([^|]*)|(.+)$")
+            if not reqID or not nick then return end
 
-            local myGP = 0
-            for i = 1, GetNumGuildMembers(true) do
-                local name, _, _, _, _, _, _, officerNote = GetGuildRosterInfo(i)
-                if name then
-                    local plainName = name:match("^(.-)-") or name
-                    if plainName == plainMe then
-                        if officerNote and officerNote ~= "" then
-                            local words2 = {}
-                            for word in officerNote:gmatch("%S+") do
-                                table.insert(words2, word)
-                            end
-                            if #words2 >= 3 then
-                                myGP = tonumber(words2[3]) or 0
-                            end
-                        end
-                        break
-                    end
-                end
-            end
-            SendAddonMessage("hisGP", tostring(myGP) .. " " .. myName, "RAID")
-        end,
-        stopOnMatch = true,
-    })
+            if okStr ~= "1" then return end
 
-    NSQC4.ChatHandler:Register("ADDON:enaltogi", {
-        func = function(words, sender, text, channel, prefix)
-            local gp, nick = ParseGpNick(text)
-            if not gp or not nick then return end
-            SaveExternalGp(gp, nick)
-        end,
-        stopOnMatch = true,
-    })
-
-    NSQC4.ChatHandler:Register("ADDON:ns_hisgp", {
-        func = function(words, sender, text, channel, prefix)
-            local gp, nick = ParseGpNick(text)
-            if not gp or not nick then return end
-            SaveExternalGp(gp, nick)
+            local gp = tonumber(gpStr) or 0
+            SaveExternalGp(nick, gp)
         end,
         stopOnMatch = true,
     })
