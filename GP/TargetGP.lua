@@ -667,6 +667,7 @@ hoverFrame:SetScript("OnUpdate", function()
 
     local show = UnitExists("target")
         and UnitIsPlayer("target")
+        and (UnitInRaid("target") or UnitInParty("target"))
         and (TargetFrame:IsMouseOver() or btn:IsMouseOver())
 
     if show then
