@@ -19,7 +19,7 @@
 -- Отладочный блок (одна точка выключения)
 -- ============================================================================
 NSQC4 = NSQC4 or {}
-NSQC4.GPDebug = NSQC4.GPDebug or { enabled = false }  -- ВКЛЮЧЕНО ПО УМОЛЧАНИЮ
+NSQC4.GPDebug = NSQC4.GPDebug or { enabled = false }
 
 local function dbg(tag, ...)
     if NSQC4.GPDebug and NSQC4.GPDebug.enabled then
@@ -64,6 +64,7 @@ NSQC4.RegisterModule("gp", function()
             rl_tooltip_nicks = {},
             _rl_tooltip_list = nil,
             external_gp_cache = {},
+            pending_gp = {},
         }
         setmetatable(new_object, self)
         new_object:_CreateWindow()
@@ -1312,6 +1313,11 @@ NSQC4.RegisterModule("gp", function()
             self.external_gp_cache = {}
         end
         self.external_gp_cache[cleanNick] = gpNumber
+
+        -- ответ пришёл — снимаем «ожидание»
+        if self.pending_gp then
+            self.pending_gp[cleanNick] = nil
+        end
 
         dbgGp("EXT-GP-SET",
             "nick=", cleanNick,

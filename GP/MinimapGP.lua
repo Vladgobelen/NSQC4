@@ -1,24 +1,23 @@
 -- ============================================================================
 -- NSQC4 / GP / MinimapGP
 -- Кнопка ГП у миникарты (позиция 973).
--- - OnEnter: показывает состав рейда и ГП в тултипе.
--- - OnClick (ЛКМ): рассылает ГП по рейду в OFFICER.
--- - OnClick (ПКМ): открывает форум-топик.
--- - OnClick (СКМ): /roll 1-100.
--- Модуль: gp (тот же ключ, что и остальные GP-файлы).
 -- ============================================================================
+
+-- [ДЕБАГ] Включить/выключить вывод отладки
+local DEBUG = false
+
+local function dbg_minimap(tag, ...)
+    if DEBUG then
+        print("|cffff00ff[MINIMAP " .. tag .. "]|r", ...)
+    end
+end
 
 NSQC4.RegisterModule("gp", function()
 
-    -- ========================================================================
-    -- nsGP() — сбор ГП всего рейда (для тултипа кнопки)
-    -- ========================================================================
     local function Split(inputstr)
         if not inputstr then return {} end
         local t = {}
-        for str in string.gmatch(inputstr, "([^%s]+)") do
-            table.insert(t, str)
-        end
+        for str in string.gmatch(inputstr, "([^%s]+)") do table.insert(t, str) end
         return t
     end
 
@@ -31,13 +30,10 @@ NSQC4.RegisterModule("gp", function()
 
             if name then
                 local plainName = name:match("^(.-)-") or name
-
                 local gp = 0
                 if officerNote then
                     local parts = Split(officerNote)
-                    if parts[3] then
-                        gp = tonumber(parts[3]) or 0
-                    end
+                    if parts[3] then gp = tonumber(parts[3]) or 0 end
                 end
 
                 index[plainName] = {
@@ -53,7 +49,6 @@ NSQC4.RegisterModule("gp", function()
 
     function nsGP()
         local guildIndex = BuildGuildRosterIndex()
-
         local result = {}
         local num = GetNumRaidMembers() or 0
 
@@ -105,9 +100,7 @@ NSQC4.RegisterModule("gp", function()
     -- Утилиты
     -- ========================================================================
     local function safePlaySound(path)
-        if PlaySoundFile then
-            PlaySoundFile(path)
-        end
+        if PlaySoundFile then PlaySoundFile(path) end
     end
 
     local function safeLength(tbl)
@@ -140,9 +133,7 @@ NSQC4.RegisterModule("gp", function()
 
                 if officerNote then
                     local parts = Split(officerNote)
-                    if parts and #parts >= 3 then
-                        rezultat = parts[3]
-                    end
+                    if parts and #parts >= 3 then rezultat = parts[3] end
                 end
             end
         end
@@ -156,6 +147,8 @@ NSQC4.RegisterModule("gp", function()
     local function OnEnter(button)
         if not GameTooltip then return end
 
+        dbg_minimap("ONENTER", "Кнопка наведена")
+
         GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
 
         local rez = safeGetGP()
@@ -163,6 +156,7 @@ NSQC4.RegisterModule("gp", function()
         local pbl, rezultat = GetMyGuildInfo()
 
         local raidMembers = GetNumRaidMembers and GetNumRaidMembers() or 0
+        dbg_minimap("SCAN", "raidMembers=", raidMembers, "entries=", num)
 
         if raidMembers ~= 0 and num ~= 0 then
             for i = 1, num do
@@ -170,21 +164,25 @@ NSQC4.RegisterModule("gp", function()
                 if entry and entry['nome'] then
                     local playerName = entry['nome']
                     local plainName = playerName:match("^(.-)-") or playerName
-
-                    if entry.public == "НЕ В ГИЛЬДИИ" and NSQC4.RequestGp then
-                        if not gpDb or gpDb:GetExternalGp(plainName) == nil then
-                            NSQC4.RequestGp(plainName)
-                        end
-                    end
-
                     local displayName = (playerName ~= myNome) and "|cFF6495ED" or "|cffff0000"
                     local publicNote = entry['public'] or ""
                     local znach = entry['znach'] or ""
 
+                    -- Кэш внешних ГП (для не-гильдейцев)
                     if gpDb and gpDb.GetExternalGp then
                         local cachedGp = gpDb:GetExternalGp(plainName)
                         if cachedGp ~= nil then
                             znach = cachedGp
+                            dbg_minimap("CACHE-HIT", plainName, "gp=", znach)
+                        end
+                    end
+
+                    if entry.public == "НЕ В ГИЛЬДИИ" and NSQC4.RequestGp then
+                        if not gpDb or gpDb:GetExternalGp(plainName) == nil then
+                            dbg_minimap("REQ-GP", "Запрос ГП для", plainName)
+                            NSQC4.RequestGp(plainName)
+                        else
+                            dbg_minimap("REQ-SKIP", "Уже в кеше", plainName, "gp=", tostring(gpDb:GetExternalGp(plainName)))
                         end
                     end
 
@@ -206,13 +204,21 @@ NSQC4.RegisterModule("gp", function()
     -- Уход мыши
     -- ========================================================================
     local function OnLeave()
+        dbg_minimap("ONLEAVE", "Кнопка отпущена")
         if GameTooltip then GameTooltip:Hide() end
+
+        -- Сброс «ожидания»: что пришло — в кеше, что нет — запросим
+        -- при следующем наведении (retry без таймера)
+        if gpDb and gpDb.pending_gp then
+            gpDb.pending_gp = {}
+        end
     end
 
     -- ========================================================================
     -- Клик
     -- ========================================================================
     local function OnClick(button, mouseButton)
+        dbg_minimap("ONCLICK", "mouse=", tostring(mouseButton))
         safePlaySound("Interface\\AddOns\\NSQC4\\Media\\Sounds\\clc.ogg")
 
         if mouseButton == "MiddleButton" then
@@ -291,8 +297,10 @@ NSQC4.RegisterModule("gp", function()
         gpDb._nsMinimapGpHooked = true
         local origSetExternalGp = gpDb.SetExternalGp
         gpDb.SetExternalGp = function(self, nick, gp)
+            dbg_minimap("EXTERNAL-GP-ARRIVED", nick, "gp=", gp)
             origSetExternalGp(self, nick, gp)
             if btn:IsMouseOver() then
+                dbg_minimap("REFRESH", "Обновляем тултип на лету")
                 GameTooltip:ClearLines()
                 OnEnter(btn)
             end
