@@ -544,8 +544,13 @@ CreatePanel = function()
 
     qBtn:SetScript("OnClick", function(self, mouseButton)
         dbg("CLICK-Q", "mouse=", tostring(mouseButton))
-        editMode = "custom"
-        editBox:SetText("")
+        if mouseButton == "RightButton" then
+            editMode = "custom_sub"
+            editBox:SetText("")
+        else
+            editMode = "custom_add"
+            editBox:SetText("")
+        end
         editBox:Show()
         editBox:SetFocus()
     end)
@@ -553,8 +558,8 @@ CreatePanel = function()
     qBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText("Разовое значение", 1, 0.82, 0)
-        GameTooltip:AddLine("ЛКМ — начислить", 0.6, 1, 0.6)
-        GameTooltip:AddLine("ПКМ — снять",     1, 0.6, 0.6)
+        GameTooltip:AddLine("ЛКМ — ввести и начислить", 0.6, 1, 0.6)
+        GameTooltip:AddLine("ПКМ — ввести и снять",     1, 0.6, 0.6)
         GameTooltip:Show()
     end)
 
@@ -586,16 +591,18 @@ CreatePanel = function()
         )
 
         if v then
-            if editMode == "custom" then
+            if editMode == "custom_add" or editMode == "custom_sub" then
                 local short = UnitExists("target")
                     and ShortName(UnitName("target"))
                     or nil
                 if short then
+                    local finalValue = (editMode == "custom_sub") and -v or v
                     dbg("EDIT-CUSTOM-APPLY",
                         "short=", short,
-                        "value=", tostring(v)
+                        "value=", tostring(finalValue),
+                        "mode=", tostring(editMode)
                     )
-                    ApplyGP(short, v)
+                    ApplyGP(short, finalValue)
                 end
             elseif type(editMode) == "number" then
                 dbg("EDIT-SAVE-BUTTON",
@@ -608,7 +615,7 @@ CreatePanel = function()
                 end
             end
         end
-
+        
         self:SetText("")
         self:ClearFocus()
         self:Hide()
