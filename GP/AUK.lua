@@ -1,9 +1,5 @@
 NSQC4.RegisterModule("gp", function()
 
--- ============================================================================
--- NS Auction System v5.9 - RELEASE (WORD-PARSER, NO TRACE)
--- ============================================================================
-
 local NSAuk = {}
 local auctionFrame = nil
 local minimapIcon = nil
@@ -17,28 +13,45 @@ checkFrame:SetScript("OnUpdate", nil)
 local scrollFrameID = 0
 local isMinimized = false
 
--- ============================================================================
--- Локальные префиксы (модуль автономен)
--- ============================================================================
-local P_AUC_START      = "AUC_START"
-local P_AUC_GP         = "AUC_GP"
-local P_AUC_BID        = "AUC_BID"
-local P_AUC_PASS       = "AUC_PASS"
-local P_AUC_BAN        = "AUC_BAN"
-local P_AUC_END        = "AUC_END"
-local P_AUC_CANCEL     = "AUC_CANCEL"
-local P_AUC_SYNC       = "AUC_SYNC"
+NSAuk.debug    = false
+NSAuk.debugBid = false
 
--- Клиент -> свой сервер (GUILD), фолбэк-проверка ставки без аддона
-local P_AUC_BID_CHECK  = "nsAucBidCheck"
--- Сервер -> клиент РЛа (GUILD), ответ на фолбэк
-local P_AUC_BID_ACCEPT = "nsAucBidAccept"
+local function dbg(tag, ...)
+    if NSAuk.debug then
+        print("|cff00ffff[AUK-CLI "..tag.."]|r", ...)
+    end
+end
+local function dbgBid(tag, ...)
+    if NSAuk.debug or NSAuk.debugBid then
+        print("|cff00ffff[AUC-BID "..tag.."]|r", ...)
+    end
+end
+NSAuk.dbg    = dbg
+NSAuk.dbgBid = dbgBid
+
+local function tr(step, ...)
+    if NSAuk.debug then
+        print("|cff00ffff[AUK]|r "..step, ...)
+    end
+end
+
+local P_AUC_START         = "AUC_START"
+local P_AUC_GP            = "AUC_GP"
+local P_AUC_BID           = "AUC_BID"
+local P_AUC_PASS          = "AUC_PASS"
+local P_AUC_BAN           = "AUC_BAN"
+local P_AUC_END           = "AUC_END"
+local P_AUC_CANCEL        = "AUC_CANCEL"
+local P_AUC_SYNC          = "AUC_SYNC"
+local P_AUC_BID_CHECK     = "nsAucBidCheck"
+local P_AUC_BID_RESULT    = "nsAucBidResult"
+local P_AUC_BID_ACCEPTED  = "AUC_BID_ACCEPTED"
 
 local CLASS_COLORS = {
     WARRIOR     = {r = 0.78, g = 0.61, b = 0.43, hex = "|cffC79C6E"},
     PALADIN     = {r = 0.96, g = 0.55, b = 0.73, hex = "|cffF58CBA"},
     HUNTER      = {r = 0.67, g = 0.83, b = 0.45, hex = "|cffABD473"},
-    ROGUE       = {r = 1.00, g = 0.96, b = 0.41, hex = "|cfffFF569"},
+    ROGUE       = {r = 1.00, g = 0.96, b = 0.41, hex = "|cffFFF569"},
     PRIEST      = {r = 1.00, g = 1.00, b = 1.00, hex = "|cffFFFFFF"},
     DEATHKNIGHT = {r = 0.77, g = 0.12, b = 0.23, hex = "|cffC41F3B"},
     SHAMAN      = {r = 0.00, g = 0.44, b = 0.87, hex = "|cff0070DE"},
@@ -46,10 +59,6 @@ local CLASS_COLORS = {
     WARLOCK     = {r = 0.58, g = 0.51, b = 0.79, hex = "|cff9482C9"},
     DRUID       = {r = 1.00, g = 0.49, b = 0.04, hex = "|cffFF7D0A"},
 }
-
--- ============================================================================
--- БАЗОВЫЕ УТИЛИТЫ
--- ============================================================================
 
 function NSAuk.EnsureDB()
     if not nsDbc4 then nsDbc4 = {} end
@@ -114,10 +123,6 @@ function NSAuk.SmoothResize(frame, targetW, targetH, duration)
         end
     end)
 end
-
--- ============================================================================
--- ПАРСИНГ ПО СЛОВАМ
--- ============================================================================
 
 local AUCTION_PREFIXES = { "АУК", "аук", "-АУК", "-аук", "AUK", "auk", "-AUK", "-auk" }
 
@@ -193,10 +198,6 @@ function NSAuk.ParseAuctionCommand(msg)
     return res
 end
 
--- ============================================================================
--- ГП
--- ============================================================================
-
 function NSAuk.GetRaidGPData()
     local gpData = {}
     local numRaid = GetNumRaidMembers()
@@ -204,7 +205,7 @@ function NSAuk.GetRaidGPData()
     for i = 1, numRaid do
         local name = UnitName("raid"..i)
         if name then
-            gpData[name] = { gp = 0, class = "WARRIOR", public = "", rank = "", inGuild = false }
+            gpData[name] = { gp = nil, class = "WARRIOR", public = "", rank = "", inGuild = false }
             local _, class = UnitClass("raid"..i)
             if class then gpData[name].class = class end
             for j = 1, GetNumGuildMembers(true) do
@@ -215,15 +216,15 @@ function NSAuk.GetRaidGPData()
                     gpData[name].public = publicNote or ""
                     if officerNote and officerNote ~= "" then
                         local z = NSAuk.mysplit(officerNote)
-                        gpData[name].gp = tonumber(z[3]) or 0
+                        gpData[name].gp = tonumber(z[3])
                     end
                     break
                 end
             end
             if not gpData[name].inGuild then
                 gpData[name].public = "НЕ В ГИЛЬДИИ"
-                if gpDb and gpDb.external_gp_cache and gpDb.external_gp_cache[name] then
-                    gpData[name].gp = tonumber(gpDb.external_gp_cache[name]) or 0
+                if gpDb and gpDb.external_gp_cache and gpDb.external_gp_cache[name] ~= nil then
+                    gpData[name].gp = tonumber(gpDb.external_gp_cache[name])
                 end
             end
         end
@@ -233,67 +234,77 @@ end
 
 function NSAuk.GetMyGP()
     local myName = UnitName("player")
-    if not myName then return 0, "no-name" end
+    if not myName then return nil, "no-name" end
     local db = NSAuk.EnsureDB()
     if db.active and db.active.bids[myName] then
         local gp = db.active.bids[myName].gp
-        if gp and gp > 0 then return gp, "active" end
+        if gp ~= nil then return gp, "active" end
     end
-    if gpDb and gpDb.external_gp_cache and gpDb.external_gp_cache[myName] then
+    if gpDb and gpDb.external_gp_cache and gpDb.external_gp_cache[myName] ~= nil then
         local gp = tonumber(gpDb.external_gp_cache[myName])
-        if gp and gp > 0 then return gp, "external" end
+        if gp ~= nil then return gp, "external" end
     end
     for j = 1, GetNumGuildMembers(true) do
         local gName, _, _, _, _, _, _, officerNote = GetGuildRosterInfo(j)
-        if gName == myName and officerNote and officerNote ~= "" then
-            local z = NSAuk.mysplit(officerNote)
-            local gp = tonumber(z[3])
-            if gp and gp > 0 then return gp, "officer" end
+        if gName == myName then
+            local parts = {}
+            for w in (officerNote or ""):gmatch("%S+") do table.insert(parts, w) end
+            local gp = tonumber(parts[3])
+            if gp ~= nil then return gp, "officer" end
         end
     end
-    return 0, "unknown"
+    return nil, "unknown"
 end
 
 function NSAuk.GetGPFor(name)
-    if not name then return 0, "no-name" end
+    if not name then return nil, "no-name" end
     local db = NSAuk.EnsureDB()
     if db.active and db.active.bids[name] then
         local gp = db.active.bids[name].gp
-        if gp and gp > 0 then return gp, "active" end
+        if gp ~= nil then return gp, "active" end
     end
-    if gpDb and gpDb.external_gp_cache and gpDb.external_gp_cache[name] then
+    if gpDb and gpDb.external_gp_cache and gpDb.external_gp_cache[name] ~= nil then
         local gp = tonumber(gpDb.external_gp_cache[name])
-        if gp and gp > 0 then return gp, "external" end
+        if gp ~= nil then return gp, "external" end
     end
     for j = 1, GetNumGuildMembers(true) do
         local gName, _, _, _, _, _, _, officerNote = GetGuildRosterInfo(j)
-        if gName == name and officerNote and officerNote ~= "" then
-            local z = NSAuk.mysplit(officerNote)
-            local gp = tonumber(z[3])
-            if gp and gp > 0 then return gp, "officer" end
+        if gName == name then
+            local parts = {}
+            for w in (officerNote or ""):gmatch("%S+") do table.insert(parts, w) end
+            local gp = tonumber(parts[3])
+            if gp ~= nil then return gp, "officer" end
         end
     end
-    return 0, "unknown"
+    return nil, "unknown"
 end
 
 function NSAuk.CanBid(amount)
-    if not amount or amount <= 0 then return false, "Ставка должна быть положительным числом." end
+    if not amount or amount <= 0 then
+        return false, "Ставка должна быть положительным числом."
+    end
     local gp, source = NSAuk.GetMyGP()
-    if source == "unknown" or gp == 0 then return false, "Не удалось определить ваш ГП." end
-    if amount > gp then return false, string.format("Недостаточно ГП: у вас %d, ставка %d.", gp, amount) end
+    if source == "unknown" or gp == nil then
+        return false, "Не удалось определить ваш ГП."
+    end
+    if amount > gp then
+        return false, string.format("Недостаточно ГП: у вас %d, ставка %d.", gp, amount)
+    end
     return true
 end
 
--- Запросить ГП у чужих (не в ростере) через ретрансляцию
 function NSAuk.RequestMissingGps()
     local db = NSAuk.EnsureDB()
     if not db.active then return end
     if not NSQC4.RequestGp then return end
+    local list = {}
     for nick, data in pairs(db.active.bids) do
-        if (not data.gp or data.gp == 0) and not data.inGuild then
+        if (data.gp == nil) and not data.inGuild then
+            table.insert(list, nick)
             NSQC4.RequestGp(nick)
         end
     end
+    tr("RequestMissingGps: count="..#list, "nicks="..table.concat(list, ","))
 end
 
 function NSAuk.BroadcastMyGP()
@@ -309,13 +320,16 @@ function NSAuk.BroadcastMyGP()
         local gName, _, _, _, _, _, pubNote = GetGuildRosterInfo(j)
         if gName == myName then publicNote = pubNote or ""; break end
     end
-    SendAddonMessage(P_AUC_GP, myName .. ":" .. myGP .. ":" .. (myClass or "WARRIOR") .. ":" .. publicNote, "RAID")
+    local gpStr = (myGP ~= nil) and tostring(myGP) or "?"
+    local msg = myName .. ":" .. gpStr .. ":" .. (myClass or "WARRIOR") .. ":" .. publicNote
+    tr("BroadcastMyGP: AUC_GP -> "..msg)
+    SendAddonMessage(P_AUC_GP, msg, "RAID")
     myBid.gp = myGP; myBid.class = myClass or "WARRIOR"; myBid.public = publicNote
 end
 
 function NSAuk.SyncMyGP()
     local myName = UnitName("player")
-    if not myName then return 0 end
+    if not myName then return nil end
     local gp = NSAuk.GetMyGP()
     local db = NSAuk.EnsureDB()
     if db.active and db.active.bids[myName] then db.active.bids[myName].gp = gp end
@@ -323,9 +337,6 @@ function NSAuk.SyncMyGP()
     return gp
 end
 
--- ============================================================================
--- Confirm
--- ============================================================================
 function NSQC4.ShowConfirm(title, text, onYes, onNo)
     if NSQC4.confirmFrame and NSQC4.confirmFrame:IsShown() then NSQC4.confirmFrame:Hide() end
     local f = CreateFrame("Frame", "NSQC4Confirm", UIParent)
@@ -355,10 +366,6 @@ function NSQC4.ShowConfirm(title, text, onYes, onNo)
 end
 NSAuk.ShowConfirm = NSQC4.ShowConfirm
 
--- ============================================================================
--- UI
--- ============================================================================
-
 function NSAuk.RenderCustomButtons()
     local frame = auctionFrame
     if not frame or not frame.customButtonBar then return end
@@ -377,16 +384,16 @@ function NSAuk.RenderCustomButtons()
             if not d.active then return end
             local myName = UnitName("player")
             local myBid = d.active.bids[myName]
-            if not myBid or myBid.banned then print("|cffff0000[NSAuk]|r Вы забанены."); return end
+            if not myBid or myBid.banned then return end
             local ok, reason = NSAuk.CanBid(val)
-            if not ok then print("|cffff0000[NSAuk]|r " .. reason); return end
+            if not ok then return end
             local mx = 0
             for _, v in pairs(d.active.bids) do if v.hasAction and not v.passed and v.amount > mx then mx = v.amount end end
-            if (myBid.amount or 0) == mx and mx > 0 then print("|cffff0000[NSAuk]|r Вы уже лидер."); return end
+            if (myBid.amount or 0) == mx and mx > 0 then return end
             NSAuk.SyncMyGP()
-            -- Ставка с аддоном: RAID addon, с myGP
             local gp, _ = NSAuk.GetMyGP()
-            SendAddonMessage(P_AUC_BID, tostring(val) .. ":" .. tostring(gp), "RAID")
+            local gpStr = (gp ~= nil) and tostring(gp) or "0"
+            SendAddonMessage(P_AUC_BID, tostring(val) .. ":" .. gpStr, "RAID")
         end)
         bar.buttons[i] = b
         totalW = totalW + btnW + gap
@@ -446,7 +453,7 @@ function NSAuk.CreateAuctionFrame()
             local db = NSAuk.EnsureDB()
             if #db.customButtons < 8 and not tContains(db.customButtons, val) then
                 table.insert(db.customButtons, val); table.sort(db.customButtons)
-                NSAuk.RenderCustomButtons(); print("|cff00ff00[NSAuk]|r Кнопка " .. val .. " ГП добавлена.")
+                NSAuk.RenderCustomButtons()
             end
             cpEdit:SetText("")
         end
@@ -455,16 +462,14 @@ function NSAuk.CreateAuctionFrame()
     cpRem:SetSize(20, 20); cpRem:SetPoint("LEFT", cpAdd, "RIGHT", 2, 0); cpRem:SetText("-")
     cpRem:SetScript("OnClick", function()
         local val = tonumber(cpEdit:GetText())
-        if not val or val <= 0 then print("|cffFF8080[NSAuk]|r Введите число."); return end
+        if not val or val <= 0 then return end
         local db = NSAuk.EnsureDB()
         for i, btnVal in ipairs(db.customButtons) do
             if btnVal == val then
                 table.remove(db.customButtons, i); NSAuk.RenderCustomButtons()
-                print("|cff00ff00[NSAuk]|r Кнопка " .. val .. " ГП удалена.")
                 cpEdit:SetText(""); return
             end
         end
-        print("|cffFF8080[NSAuk]|r Кнопка не найдена.")
     end)
 
     local panelTitle = customPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -488,7 +493,6 @@ function NSAuk.CreateAuctionFrame()
     autoDeductCB:SetScript("OnClick", function(self)
         local isChecked = (self:GetChecked() == 1)
         db.settings.autoDeductGP = isChecked
-        print("|cff00FF00[NSAuk]|r Авто-списание: " .. (isChecked and "ВКЛ" or "ВЫКЛ"))
     end)
     frame.autoDeductCB = autoDeductCB
 
@@ -504,7 +508,6 @@ function NSAuk.CreateAuctionFrame()
         NSAuk.DestroyAuctionWindow()
         if minimapIcon then minimapIcon:Hide() end
         checkFrame:SetScript("OnUpdate", nil)
-        print("|cff00ff00[NSAuk]|r Аукцион закрыт.")
     end)
     frame.closeBtn = closeBtn
 
@@ -519,9 +522,6 @@ function NSAuk.CreateAuctionFrame()
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("|cffffff00=== КОМАНДЫ ===|r", 1, 1, 1)
         GameTooltip:AddLine("|cff00ff00/nsauk|r - настройки", 0.8, 0.8, 0.8)
-        GameTooltip:AddLine("|cff00ff00/nsauk reset|r - сброс", 0.8, 0.8, 0.8)
-        GameTooltip:AddLine("|cff00ff00/nsauk find|r - подсветка окон", 0.8, 0.8, 0.8)
-        GameTooltip:AddLine("|cff00ff00/nsauk start <предмет>|r - запуск", 0.8, 0.8, 0.8)
         GameTooltip:AddLine("|cff00ff00АУК <предмет>|r / -аук в рейд-чат", 0.8, 0.8, 0.8)
         GameTooltip:Show()
     end)
@@ -597,9 +597,7 @@ function NSAuk.CreateAuctionFrame()
         if myBid and myBid.passed then return end
         local maxAmount = 0
         for _, b in pairs(d.active.bids) do if b.hasAction and not b.passed and b.amount > maxAmount then maxAmount = b.amount end end
-        if myBid and myBid.hasAction and not myBid.passed and myBid.amount >= maxAmount and myBid.amount > 0 then
-            print("Нельзя выйти из торгов, пока вы лидируете."); return
-        end
+        if myBid and myBid.hasAction and not myBid.passed and myBid.amount >= maxAmount and myBid.amount > 0 then return end
         NSAuk.BroadcastMyGP()
         SendAddonMessage(P_AUC_PASS, "", "RAID")
         if myBid then myBid.passed = true; myBid.amount = 0; myBid.hasAction = true end
@@ -612,17 +610,17 @@ function NSAuk.CreateAuctionFrame()
         local d = NSAuk.EnsureDB()
         if not d.active then return end
         local me = UnitName("player")
-        local myBid = d.active.bids[me] or { amount = 0, gp = 0 }
+        local myBid = d.active.bids[me] or { amount = 0, gp = nil }
         local mx = 0
         for _, v in pairs(d.active.bids) do if v.hasAction and not v.passed and v.amount > mx then mx = v.amount end end
         local nextBid = mx + d.active.step
         local ok, reason = NSAuk.CanBid(nextBid)
-        if not ok then print("|cffff0000[NSAuk]|r " .. reason); return end
-        if (myBid.amount or 0) == mx and mx > 0 then print("|cffff0000[NSAuk]|r Вы уже лидер."); return end
+        if not ok then return end
+        if (myBid.amount or 0) == mx and mx > 0 then return end
         NSAuk.SyncMyGP()
-        -- Ставка с аддоном: RAID addon, с myGP
         local gp, _ = NSAuk.GetMyGP()
-        SendAddonMessage(P_AUC_BID, tostring(nextBid) .. ":" .. tostring(gp), "RAID")
+        local gpStr = (gp ~= nil) and tostring(gp) or "0"
+        SendAddonMessage(P_AUC_BID, tostring(nextBid) .. ":" .. gpStr, "RAID")
     end)
 
     local cbar = CreateFrame("Frame", "NSAukCustomBar", frame)
@@ -645,11 +643,9 @@ function NSAuk.DestroyAuctionWindow()
         if content then
             content:Hide(); content:SetParent(nil); auctionFrame.content = nil
         end
-
         if auctionFrame.customPanel then
             auctionFrame.customPanel:Hide(); auctionFrame.customPanel:SetParent(nil); auctionFrame.customPanel = nil
         end
-
         local bar = auctionFrame.customButtonBar
         if bar then
             if bar.buttons then
@@ -660,11 +656,9 @@ function NSAuk.DestroyAuctionWindow()
             end
             bar:Hide(); bar:SetParent(nil); auctionFrame.customButtonBar = nil
         end
-
         if auctionFrame.autoDeductCB then
             auctionFrame.autoDeductCB:Hide(); auctionFrame.autoDeductCB:SetParent(nil); auctionFrame.autoDeductCB = nil
         end
-
         auctionFrame:Hide(); auctionFrame:SetParent(nil); auctionFrame = nil
     end
 
@@ -686,7 +680,6 @@ function NSAuk.DestroyAuctionWindow()
             _G[k] = nil
         end
     end
-
     if resizeAnimation then
         resizeAnimation:SetScript("OnUpdate", nil)
         resizeAnimation = nil
@@ -722,9 +715,9 @@ end
 function NSAuk.CreateHistoryWindow(historyIndex)
     local db = NSAuk.EnsureDB()
     if historyWindow then NSAuk.SaveWindowPosition(historyWindow, db.historyPosition); historyWindow:Hide(); historyWindow:SetParent(nil); historyWindow = nil end
-    if #db.history == 0 then print("История пуста"); return end
+    if #db.history == 0 then return end
     local entry = historyIndex and db.history[historyIndex] or db.history[#db.history]
-    if not entry then print("Запись не найдена"); return end
+    if not entry then return end
     historyWindow = CreateFrame("Frame", "NSAukHistoryWindow", UIParent)
     historyWindow:SetSize(350, 250)
     historyWindow:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", tile = true, tileSize = 32, edgeSize = 32, insets = { left = 11, right = 12, top = 12, bottom = 11 } })
@@ -804,7 +797,7 @@ function NSAuk.CreateSettingsWindow()
         local ns = tonumber(se:GetText()); local nt = tonumber(te:GetText())
         if ns and ns > 0 then db.settings.defaultStep = ns end
         if nt and nt > 0 then db.settings.defaultTime = nt end
-        print("Настройки сохранены"); settingsWindow:Hide()
+        settingsWindow:Hide()
     end)
     return settingsWindow
 end
@@ -816,33 +809,28 @@ end
 
 function NSAuk.DeductGPFromRoster(playerName, amount)
     if not playerName or not amount or amount <= 0 then return end
-    SendAddonMessage("nsGP1 -" .. amount, playerName, "GUILD")
-    SendAddonMessage("nsGP1A", "-" .. amount .. " " .. playerName, "GUILD")
-    SendAddonMessage("nsGPlog", "Аукцион -" .. amount .. " " .. (playerName or ""), "guild")
-    print(string.format("|cff00ff00[NSAuk]|r Списание %d ГП с %s.", amount, playerName))
+    local short = playerName:match("^([^%-]+)") or playerName
+    SendAddonMessage("nsGP1A", "-" .. amount .. " " .. short, "GUILD")
+    SendAddonMessage("nsGPlog", "Аукцион -" .. amount .. " " .. short, "GUILD")
 end
 
 function NSAuk.SetWinner(playerName, winAmount)
     local db = NSAuk.EnsureDB()
     if not db.active then return end
     if closeTimerFrame then closeTimerFrame:SetScript("OnUpdate", nil); closeTimerFrame = nil end
-
     NSAuk.GiveLootToWinnerDeferred(playerName, db.active.itemLink)
 
-    if db.active.startedBy == UnitName("player") then
-        if db.settings.autoDeductGP and winAmount > 0 then NSAuk.DeductGPFromRoster(playerName, winAmount)
-        else print(string.format("|cff00FF00[NSAuk]|r Победитель: %s, сумма: %d ГП.", playerName, winAmount)) end
+    if db.active.startedBy == UnitName("player") and winAmount > 0 then
+        NSAuk.DeductGPFromRoster(playerName, winAmount)
     end
 
     local bc = {}
     for n, d in pairs(db.active.bids) do bc[n] = { amount = d.amount, class = d.class, public = d.public, gp = d.gp, passed = d.passed, hasAction = d.hasAction } end
     table.insert(db.history, { item = db.active.item, itemLink = db.active.itemLink, endTime = GetTime(), startedBy = db.active.startedBy, winner = playerName, winAmount = winAmount or 0, bids = bc })
     if #db.history > 10 then table.remove(db.history, 1) end
-
     if db.active.startedBy == UnitName("player") then
         SendChatMessage(playerName .. " побеждает, поставив " .. (winAmount or 0) .. " ГП. Предмет: " .. db.active.item, "RAID_WARNING")
     end
-
     SendAddonMessage(P_AUC_END, "", "RAID")
     db.active = nil; isMinimized = false
     NSAuk.DestroyAuctionWindow()
@@ -854,7 +842,6 @@ function NSAuk.FinishAuction(initiator)
     local db = NSAuk.EnsureDB()
     if not db.active then return end
     if closeTimerFrame then closeTimerFrame:SetScript("OnUpdate", nil); closeTimerFrame = nil end
-
     local w, wa = nil, 0
     for n, d in pairs(db.active.bids) do if d.hasAction and not d.passed and not d.banned and d.amount > wa then w, wa = n, d.amount end end
     if w and wa > 0 then
@@ -863,7 +850,6 @@ function NSAuk.FinishAuction(initiator)
         table.insert(db.history, { item = db.active.item, itemLink = db.active.itemLink, endTime = GetTime(), startedBy = db.active.startedBy, winner = w, winAmount = wa, bids = bc })
         if #db.history > 10 then table.remove(db.history, 1) end
     end
-
     db.active = nil; isMinimized = false
     NSAuk.DestroyAuctionWindow()
     if minimapIcon then minimapIcon:Hide() end
@@ -949,7 +935,14 @@ function NSAuk.UpdateAuctionWindow()
         nt:SetText(nameColor .. dn .. banSuffix .. "|r")
         local gt = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         gt:SetPoint("LEFT", nt, "RIGHT", 20, 0)
-        local gpText = isBanned and "|cff808080[БАН]|r" or (bid.data.gp and bid.data.gp > 0 and ("|cff808080["..bid.data.gp.." GP]|r") or "|cffff0000[БЕЗ ГП]|r")
+        local gpText
+        if isBanned then
+            gpText = "|cff808080[БАН]|r"
+        elseif bid.data.gp ~= nil then
+            gpText = "|cff808080["..bid.data.gp.." GP]|r"
+        else
+            gpText = "|cffff0000[БЕЗ ГП]|r"
+        end
         if isPassed and not isBanned then gpText = "|cff808080[БЕЗ ГП]|r" end
         gt:SetText(gpText)
         local bt = row:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
@@ -1022,7 +1015,6 @@ function NSAuk.ResetAllSettings()
     db.active = nil
     if minimapIcon then minimapIcon:Hide() end
     NSAuk.DestroyAuctionWindow()
-    print("|cff00ff00[NSAuk]|r Настройки сброшены.")
 end
 
 function NSAuk.HighlightAllFrames()
@@ -1038,12 +1030,7 @@ function NSAuk.HighlightAllFrames()
             end
         end)
     end
-    print("|cff00ff00[NSAuk]|r Подсветка окон (2 сек).")
 end
-
--- ============================================================================
--- SLASH
--- ============================================================================
 
 SLASH_NSAUK1 = "/nsauk"
 SlashCmdList["NSAUK"] = function(msg)
@@ -1053,22 +1040,23 @@ SlashCmdList["NSAUK"] = function(msg)
     if cmd == "reset" then NSAuk.ResetAllSettings()
     elseif cmd == "find" then NSAuk.HighlightAllFrames()
     elseif cmd == "save" then
-        if auctionFrame then NSAuk.SaveWindowPosition(auctionFrame, db.windowPosition); print("|cff00ff00[NSAuk]|r Позиция сохранена")
-        else print("|cffff8080[NSAuk]|r Окно не открыто.") end
+        if auctionFrame then NSAuk.SaveWindowPosition(auctionFrame, db.windowPosition) end
+    elseif cmd == "debug" then
+        NSAuk.debug = not NSAuk.debug
+        NSAuk.debugBid = NSAuk.debug
+        print("|cff00ffff[NSAuk]|r debug=", tostring(NSAuk.debug))
+    elseif cmd == "debugbid" then
+        NSAuk.debugBid = not NSAuk.debugBid
+        print("|cff00ffff[NSAuk]|r debugBid=", tostring(NSAuk.debugBid))
     elseif full:match("^start%s+") then
-        if GetNumRaidMembers() == 0 then print("|cffff8080[NSAuk]|r Только в рейде."); return end
+        if GetNumRaidMembers() == 0 then return end
         local rest = full:gsub("^start%s+", "")
         local aucMsg = "АУК " .. rest
         SendChatMessage(aucMsg, "RAID_WARNING")
-        print("|cff00ff00[NSAuk]|r Отправлено: " .. aucMsg)
     else
         NSAuk.CreateSettingsWindow(); if settingsWindow then settingsWindow:Show() end
     end
 end
-
--- ============================================================================
--- EVENT FRAME
--- ============================================================================
 
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("CHAT_MSG_RAID")
@@ -1077,7 +1065,6 @@ eventFrame:RegisterEvent("CHAT_MSG_RAID_WARNING")
 eventFrame:RegisterEvent("CHAT_MSG_ADDON")
 eventFrame:RegisterEvent("PLAYER_LOGOUT")
 
--- Проверить, есть ли ник в моём ростере (свой)
 local function IsInMyGuild(nick)
     if not nick or nick == "" then return false end
     local short = nick:match("^([^%-]+)") or nick
@@ -1097,10 +1084,14 @@ local function ProcessRaidMessage(sender, msg, event)
     local cleanMsg = msg:match("^%s*(.-)%s*$") or ""
     local isLeaderChannel = (event == "CHAT_MSG_RAID_WARNING" or event == "CHAT_MSG_RAID_LEADER")
 
+    tr("1 RAID-msg", "event="..tostring(event), "sender="..tostring(sender), "isLeaderChannel="..tostring(isLeaderChannel), "msg="..tostring(cleanMsg))
+
     if NSAuk.IsAuctionCommand(cleanMsg) then
         local _, sub = stripAuctionPrefix(cleanMsg)
         local subWords = NSAuk.mysplit(string.lower(sub or ""), "%s")
         local subFirst = subWords[1] or ""
+
+        tr("2 IsAuction", "sub="..tostring(sub), "subFirst="..tostring(subFirst))
 
         if subFirst == "история" then
             if sender == myName then NSAuk.CreateHistoryWindow(tonumber(subWords[2])) end
@@ -1109,7 +1100,10 @@ local function ProcessRaidMessage(sender, msg, event)
         if subFirst == "показать" then
             if isLeaderChannel and db.active and db.active.startedBy == sender then
                 local gpStr = ""
-                for n, d in pairs(db.active.bids) do gpStr = gpStr .. n .. ":" .. (d.gp or 0) .. ":" .. (d.class or "WARRIOR") .. ":" .. (d.public or "") .. ";" end
+                for n, d in pairs(db.active.bids) do
+                    local gpOut = (d.gp ~= nil) and tostring(d.gp) or "?"
+                    gpStr = gpStr .. n .. ":" .. gpOut .. ":" .. (d.class or "WARRIOR") .. ":" .. (d.public or "") .. ";"
+                end
                 SendAddonMessage(P_AUC_SYNC, db.active.item .. "^^" .. db.active.step .. "^^" .. db.active.closeTime .. "^^" .. (db.active.itemLink or "") .. "^^" .. gpStr, "RAID")
             end
             return true
@@ -1127,6 +1121,7 @@ local function ProcessRaidMessage(sender, msg, event)
 
         if isLeaderChannel then
             if db.active then
+                tr("3 already-active -> END", "item="..tostring(db.active.item))
                 SendAddonMessage(P_AUC_END, "", "RAID")
                 return true
             else
@@ -1136,15 +1131,23 @@ local function ProcessRaidMessage(sender, msg, event)
                 local step = parsed.step or db.settings.defaultStep
                 local ct = parsed.closeTime or db.settings.defaultTime
 
+                tr("3 new-auction", "item="..tostring(item), "link="..tostring(itemLink ~= nil), "step="..tostring(step), "ct="..tostring(ct), "sender="..tostring(sender))
+
                 NSAuk.DestroyAuctionWindow()
 
                 db.active = { item = item, itemLink = itemLink, startTime = GetTime(), startedBy = sender, step = step, closeTime = ct, lastBidTime = GetTime(), bids = {} }
                 isMinimized = false
 
                 local gpData = NSAuk.GetRaidGPData()
+                local nTotal, nGuild, nNonGuild = 0, 0, 0
                 for name, data in pairs(gpData) do
+                    nTotal = nTotal + 1
+                    if data.inGuild then nGuild = nGuild + 1 else nNonGuild = nNonGuild + 1 end
                     db.active.bids[name] = { amount = 0, class = data.class, public = data.public, gp = data.gp, passed = false, hasAction = false, banned = false, inGuild = data.inGuild }
                 end
+
+                tr("4 GetRaidGPData", "total="..nTotal, "inGuild="..nGuild, "nonGuild="..nNonGuild)
+
                 if not db.active.bids[myName] then
                     local found = false
                     for fullName, data in pairs(db.active.bids) do
@@ -1152,20 +1155,28 @@ local function ProcessRaidMessage(sender, msg, event)
                     end
                     if not found then
                         local _, c = UnitClass("player")
-                        db.active.bids[myName] = { amount = 0, class = c, public = "", gp = 0, passed = false, hasAction = false, banned = false, inGuild = IsInMyGuild(myName) }
+                        db.active.bids[myName] = { amount = 0, class = c, public = "", gp = nil, passed = false, hasAction = false, banned = false, inGuild = IsInMyGuild(myName) }
                     end
                 end
 
+                tr("5 BroadcastMyGP")
                 NSAuk.BroadcastMyGP()
+
+                tr("6 RequestMissingGps (from ProcessRaidMessage)")
                 NSAuk.RequestMissingGps()
 
                 if sender == myName then
                     local gpStr = ""
-                    for name, data in pairs(gpData) do gpStr = gpStr .. name .. ":" .. data.gp .. ":" .. data.class .. ":" .. data.public .. ";" end
-                    SendAddonMessage(P_AUC_START, item .. "^^" .. step .. "^^" .. ct .. "^^" .. (itemLink or "") .. "^^" .. gpStr, "RAID")
+                    for name, data in pairs(gpData) do
+                        local gpOut = (data.gp ~= nil) and tostring(data.gp) or "?"
+                        gpStr = gpStr .. name .. ":" .. gpOut .. ":" .. (data.class or "WARRIOR") .. ":" .. (data.public or "") .. ";"
+                    end
+                    local payload = item .. "^^" .. step .. "^^" .. ct .. "^^" .. (itemLink or "") .. "^^" .. gpStr
+                    tr("7 AUC_START out", "payloadLen="..#payload, "item="..tostring(item))
+                    SendAddonMessage(P_AUC_START, payload, "RAID")
                 end
 
-                print("|cff00ff00[NSAuk]|r Аукцион запущен: " .. item .. " | шаг=" .. step .. " | время=" .. ct .. "с | RL=" .. tostring(sender))
+                tr("8 UpdateAuctionWindow / StartCloseTimer / EnableCheckFrame")
                 NSAuk.UpdateAuctionWindow()
                 NSAuk.StartCloseTimer()
                 NSAuk.EnableCheckFrame()
@@ -1179,17 +1190,16 @@ local function ProcessRaidMessage(sender, msg, event)
         local isPass = (cleanMsg == "пас" or cleanMsg == "Пас" or cleanMsg == "ПАС" or cleanMsg == "-")
         local amount = tonumber(cleanMsg:match("^%s*(%d+)%s*$"))
         if isPass or amount then
-            -- Фолбэк без аддона: РЛ ловит ставку в RAID-чате
             if sender ~= myName and db.active.startedBy == myName then
+                tr("BID raid-text", "sender="..tostring(sender), "amount="..tostring(amount), "isPass="..tostring(isPass))
                 local bidData = db.active.bids[sender]
                 if not bidData then
                     local _, c = UnitClass(sender)
-                    db.active.bids[sender] = { amount = 0, class = c or "WARRIOR", public = "", gp = 0, passed = false, hasAction = true, banned = false, inGuild = IsInMyGuild(sender) }
+                    db.active.bids[sender] = { amount = 0, class = c or "WARRIOR", public = "", gp = nil, passed = false, hasAction = true, banned = false, inGuild = IsInMyGuild(sender) }
                     bidData = db.active.bids[sender]
                 end
                 if not bidData.banned then
                     if isPass then
-                        -- фолбэк-пас: применяем локально
                         if not bidData.passed then
                             local maxAmount = 0
                             for _, b in pairs(db.active.bids) do if b.hasAction and not b.passed and b.amount > maxAmount then maxAmount = b.amount end end
@@ -1201,20 +1211,19 @@ local function ProcessRaidMessage(sender, msg, event)
                         end
                         return true
                     end
-                    -- фолбэк-ставка: проверяем ГП через ретрансляцию
                     local gp, src = NSAuk.GetGPFor(sender)
-                    if src == "unknown" or gp <= 0 then
-                        -- Не знаем ГП — спрашиваем через ретрансляцию
+                    dbgBid("RAID-BID", "sender=", sender, "amount=", amount, "gp=", gp, "src=", src, "inGuild=", tostring(IsInMyGuild(sender)))
+                    if src == "unknown" or gp == nil then
                         if NSQC4.RequestGp then NSQC4.RequestGp(sender) end
-                        -- Ставку отклоним, пока не узнаем (или примем с gp=0?)
-                        -- Принимаем «на веру», но помечаем как pending
                         bidData.pendingAmount = amount
-                        AnnounceRaid("Проверка ГП для " .. sender .. " (" .. amount .. ")...")
-                        SendAddonMessage(P_AUC_BID_CHECK, sender .. "^^" .. amount, "GUILD")
+                        bidData.pendingStarter = myName
+                        local payload = myName .. "^^" .. sender .. "^^" .. amount
+                        dbgBid("BID-CHECK-OUT", "prefix=", P_AUC_BID_CHECK, "payload=", payload)
+                        SendAddonMessage(P_AUC_BID_CHECK, payload, "GUILD")
                         return true
                     end
                     if amount > gp then
-                        AnnounceRaid("У " .. sender .. " недостаточно ГП (" .. gp .. " < " .. amount .. ")")
+                        AnnounceRaid("У " .. sender .. " недостаточно ГП: " .. gp .. " < " .. amount)
                         return true
                     end
                     bidData.gp = gp
@@ -1225,6 +1234,10 @@ local function ProcessRaidMessage(sender, msg, event)
                         bidData.amount = amount; bidData.passed = false; bidData.hasAction = true
                         db.active.lastBidTime = GetTime()
                         NSAuk.UpdateAuctionWindow()
+                        AnnounceRaid(sender .. " — ставка " .. amount .. " ГП принята (ГП: " .. gp .. ")")
+                        SendAddonMessage(P_AUC_BID_ACCEPTED,
+                            sender .. "^^" .. amount .. "^^" .. gp .. "^^" .. (db.active.item or ""),
+                            "RAID")
                     end
                 end
                 return true
@@ -1256,24 +1269,25 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             for pd in (parts[5] or ""):gmatch("([^;]+);") do
                 local n, g, c, p = pd:match("([^:]+):([^:]+):([^:]+):(.*)")
                 if n then
-                    local gpValue = tonumber(g) or 0
+                    local gpValue = (g ~= "?") and tonumber(g) or nil
                     db.active.bids[n] = { amount = 0, class = c or "WARRIOR", public = p or "", gp = gpValue, passed = false, hasAction = false, banned = false, inGuild = IsInMyGuild(n) }
                 end
             end
             if not db.active.bids[myName] then
                 local _, c = UnitClass("player")
-                db.active.bids[myName] = { amount = 0, class = c, public = "", gp = 0, passed = false, hasAction = false, banned = false, inGuild = IsInMyGuild(myName) }
+                db.active.bids[myName] = { amount = 0, class = c, public = "", gp = nil, passed = false, hasAction = false, banned = false, inGuild = IsInMyGuild(myName) }
             end
+            tr("9 AUC_START in", "sender="..tostring(addonSender), "isSelf="..tostring(addonSender == myName))
             NSAuk.BroadcastMyGP()
+            tr("10 RequestMissingGps (from AUC_START-handler)")
             NSAuk.RequestMissingGps()
-            print("|cff00ff00[NSAuk]|r Старт от " .. tostring(addonSender) .. ": " .. (db.active.item or "?"))
             NSAuk.UpdateAuctionWindow(); NSAuk.StartCloseTimer(); NSAuk.EnableCheckFrame()
         elseif prefix == P_AUC_GP and db.active then
             local n, g, c, p = addonMsg:match("([^:]+):([^:]+):([^:]+):(.*)")
             if n then
-                local gpValue = tonumber(g) or 0
+                local gpValue = (g ~= "?") and tonumber(g) or nil
                 if db.active.bids[n] then
-                    if gpValue > 0 then db.active.bids[n].gp = gpValue end
+                    if gpValue ~= nil then db.active.bids[n].gp = gpValue end
                     db.active.bids[n].class = c or db.active.bids[n].class
                     db.active.bids[n].public = p or db.active.bids[n].public
                 else
@@ -1282,10 +1296,9 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
                 NSAuk.UpdateAuctionWindow()
             end
         elseif prefix == P_AUC_BID and db.active then
-            -- Ставка с аддоном: <amount>:<myGP>
             local amountStr, gpStr = (addonMsg or ""):match("^(%d+):(%d+)$")
             local a = tonumber(amountStr)
-            local senderGp = tonumber(gpStr) or 0
+            local senderGp = tonumber(gpStr)
             if a and a > 0 then
                 local bidData = db.active.bids[addonSender]
                 if not bidData then
@@ -1294,12 +1307,8 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
                     bidData = db.active.bids[addonSender]
                 end
                 if bidData.banned or bidData.passed then return end
-                if senderGp > 0 then bidData.gp = senderGp end
-                -- Проверка: хватает ли ГП (по присланному значению)
-                if a > (bidData.gp or 0) then
-                    if db.active.startedBy == myName then
-                        AnnounceRaid("У " .. addonSender .. " недостаточно ГП (" .. (bidData.gp or 0) .. " < " .. a .. ")")
-                    end
+                if senderGp ~= nil then bidData.gp = senderGp end
+                if senderGp ~= nil and a > senderGp then
                     return
                 end
                 local mx = 0
@@ -1309,36 +1318,102 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
                 bidData.amount = a; bidData.passed = false; bidData.hasAction = true
                 db.active.lastBidTime = GetTime()
                 NSAuk.UpdateAuctionWindow()
+                AnnounceRaid(addonSender .. " — ставка " .. a .. " ГП принята (ГП: " .. (senderGp or 0) .. ")")
+                SendAddonMessage(P_AUC_BID_ACCEPTED,
+                    addonSender .. "^^" .. a .. "^^" .. (senderGp or 0) .. "^^" .. (db.active.item or ""),
+                    "RAID")
             end
-        elseif prefix == P_AUC_BID_ACCEPT and db.active then
-            -- Ответ сервера на фолбэк-проверку: <nick>^^<amount>^^<ok>^^<gp>
-            local nick, amountStr, okStr, gpStr =
-                (addonMsg or ""):match("^(.+)%^%^([^%^]+)%^%^([01])%^%^([^%^]+)$")
+        elseif prefix == P_AUC_BID_RESULT then
+            dbgBid("BID-RESULT-IN", "msg=", tostring(addonMsg))
+            local starter, nick, amountStr, okStr, gpStr, err =
+                (addonMsg or ""):match("^([^%^]+)%^%^([^%^]+)%^%^([^%^]+)%^%^([01])%^%^([^%^]+)%^%^([^%^]*)$")
+            if not starter or starter ~= myName then
+                dbgBid("BID-RESULT-SKIP", "не мне: starter=", tostring(starter))
+                return
+            end
             local amount = tonumber(amountStr)
-            local gp = tonumber(gpStr) or 0
-            if nick and amount and db.active.startedBy == myName then
-                local bidData = db.active.bids[nick]
-                if bidData and bidData.pendingAmount == amount then
-                    bidData.pendingAmount = nil
-                    if okStr == "1" then
-                        bidData.gp = gp
-                        local mx = 0
-                        for n, d in pairs(db.active.bids) do if n ~= nick and d.hasAction and not d.passed and not d.banned and d.amount > mx then mx = d.amount end end
-                        local mn = mx + db.active.step
-                        if amount >= mn then
-                            bidData.amount = amount; bidData.passed = false; bidData.hasAction = true
-                            db.active.lastBidTime = GetTime()
-                            NSAuk.UpdateAuctionWindow()
-                        end
-                    else
-                        AnnounceRaid("У " .. nick .. " недостаточно ГП (" .. gp .. " < " .. amount .. ")")
+            local gp = tonumber(gpStr)
+            if not nick or not amount then
+                dbgBid("BID-RESULT-PARSE-FAIL", "msg=", tostring(addonMsg))
+                return
+            end
+            dbgBid("BID-RESULT-PARSED",
+                "nick=", nick, "amount=", tostring(amount),
+                "ok=", tostring(okStr), "gp=", tostring(gp), "err=", tostring(err))
+            if not db.active then
+                dbgBid("BID-RESULT-NO-ACTIVE", "аукцион не активен")
+                return
+            end
+            if okStr == "1" then
+                local mx = 0
+                for n, d in pairs(db.active.bids) do
+                    if n ~= nick and d.hasAction and not d.passed and not d.banned and d.amount > mx then
+                        mx = d.amount
                     end
                 end
+                local mn = mx + db.active.step
+                if amount >= mn then
+                    local bidData = db.active.bids[nick]
+                    if not bidData then
+                        local _, c = UnitClass(nick)
+                        db.active.bids[nick] = { amount = 0, class = c or "WARRIOR", public = "", gp = gp, passed = false, hasAction = true, banned = false, inGuild = IsInMyGuild(nick) }
+                        bidData = db.active.bids[nick]
+                    end
+                    bidData.gp = gp
+                    bidData.amount = amount
+                    bidData.passed = false
+                    bidData.hasAction = true
+                    bidData.pendingAmount = nil
+                    bidData.pendingStarter = nil
+                    db.active.lastBidTime = GetTime()
+                    NSAuk.UpdateAuctionWindow()
+                    AnnounceRaid(nick .. " — ставка " .. amount .. " ГП принята (ГП: " .. (gp or 0) .. ")")
+                    SendAddonMessage(P_AUC_BID_ACCEPTED,
+                        nick .. "^^" .. amount .. "^^" .. (gp or 0) .. "^^" .. (db.active.item or ""),
+                        "RAID")
+                    dbgBid("BID-RESULT-APPLIED", nick, amount, gp)
+                else
+                    local bidData = db.active.bids[nick]
+                    if bidData then
+                        bidData.pendingAmount = nil
+                        bidData.pendingStarter = nil
+                    end
+                    AnnounceRaid(nick .. " — ставка " .. amount .. " ГП отклонена: ниже минимальной (" .. mn .. ")")
+                    dbgBid("BID-RESULT-TOO-LOW", "amount=", amount, "min=", mn)
+                end
+            else
+                local bidData = db.active.bids[nick]
+                if bidData then
+                    bidData.pendingAmount = nil
+                    bidData.pendingStarter = nil
+                end
+                AnnounceRaid(nick .. " — ставка " .. amount .. " ГП отклонена: " .. (err ~= "" and err or "неизвестная причина"))
+                dbgBid("BID-RESULT-FAIL", "nick=", nick, "err=", err)
+            end
+        elseif prefix == P_AUC_BID_ACCEPTED and db.active then
+            dbgBid("BID-ACCEPTED-IN", "msg=", tostring(addonMsg))
+            local n, a, g = (addonMsg or ""):match("^([^%^]+)%^%^([^%^]+)%^%^([^%^]+)")
+            if n and a then
+                local amt = tonumber(a)
+                local gpv = tonumber(g) or 0
+                local bidData = db.active.bids[n]
+                if not bidData then
+                    local _, c = UnitClass(n)
+                    db.active.bids[n] = { amount = 0, class = c or "WARRIOR", public = "", gp = gpv, passed = false, hasAction = true, banned = false, inGuild = IsInMyGuild(n) }
+                    bidData = db.active.bids[n]
+                end
+                bidData.gp = gpv
+                bidData.amount = amt
+                bidData.passed = false
+                bidData.hasAction = true
+                db.active.lastBidTime = GetTime()
+                NSAuk.UpdateAuctionWindow()
+                dbgBid("BID-ACCEPTED-APPLIED", n, amt, gpv)
             end
         elseif prefix == P_AUC_PASS and db.active then
             if not db.active.bids[addonSender] then
                 local _, c = UnitClass(addonSender)
-                db.active.bids[addonSender] = { amount = 0, class = c or "WARRIOR", public = "", gp = 0, passed = true, hasAction = true, banned = false, inGuild = IsInMyGuild(addonSender) }
+                db.active.bids[addonSender] = { amount = 0, class = c or "WARRIOR", public = "", gp = nil, passed = true, hasAction = true, banned = false, inGuild = IsInMyGuild(addonSender) }
             else
                 db.active.bids[addonSender].passed = true; db.active.bids[addonSender].amount = 0; db.active.bids[addonSender].hasAction = true
             end
@@ -1346,7 +1421,6 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         elseif prefix == P_AUC_BAN and db.active then
             if db.active.bids[addonMsg] then
                 db.active.bids[addonMsg].banned = true; db.active.bids[addonMsg].passed = true
-                print("|cffff0000[NSAuk]|r Забанен: " .. addonMsg)
                 NSAuk.UpdateAuctionWindow()
             end
         elseif prefix == P_AUC_END and db.active then
@@ -1365,13 +1439,13 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             for pd in (parts[5] or ""):gmatch("([^;]+);") do
                 local n, g, c, p = pd:match("([^:]+):([^:]+):([^:]+):(.*)")
                 if n then
-                    local gpValue = tonumber(g) or 0
+                    local gpValue = (g ~= "?") and tonumber(g) or nil
                     db.active.bids[n] = { amount = 0, class = c or "WARRIOR", public = p or "", gp = gpValue, passed = false, hasAction = false, banned = false, inGuild = IsInMyGuild(n) }
                 end
             end
             if not db.active.bids[myName] then
                 local _, c = UnitClass("player")
-                db.active.bids[myName] = { amount = 0, class = c, public = "", gp = 0, passed = false, hasAction = false, banned = false, inGuild = IsInMyGuild(myName) }
+                db.active.bids[myName] = { amount = 0, class = c, public = "", gp = nil, passed = false, hasAction = false, banned = false, inGuild = IsInMyGuild(myName) }
             end
             NSAuk.BroadcastMyGP(); NSAuk.RequestMissingGps()
             NSAuk.UpdateAuctionWindow(); NSAuk.StartCloseTimer(); NSAuk.EnableCheckFrame()
@@ -1384,10 +1458,6 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         checkFrame:SetScript("OnUpdate", nil)
     end
 end)
-
--- ============================================================================
--- LOOT
--- ============================================================================
 
 function NSAuk._FindLootSlotByLink(itemLink)
     if not itemLink then return nil end
@@ -1404,12 +1474,12 @@ end
 
 function NSAuk.GiveLootToWinner(playerName, itemLink)
     if not playerName then return false end
-    if GetLootMethod() ~= "master" then print("|cffff8080[NSAuk]|r Не master looter"); return false end
-    if not LootFrame or not LootFrame:IsShown() then print("|cffff8080[NSAuk]|r Нет окна добычи"); return false end
+    if GetLootMethod() ~= "master" then return false end
+    if not LootFrame or not LootFrame:IsShown() then return false end
     if not itemLink then local db = NSAuk.EnsureDB(); itemLink = db.active and db.active.itemLink or nil end
-    if not itemLink then print("|cffff8080[NSAuk]|r Нет ссылки"); return false end
+    if not itemLink then return false end
     local slot = NSAuk._FindLootSlotByLink(itemLink)
-    if not slot then print("|cffff8080[NSAuk]|r Предмет не найден в окне добычи"); return false end
+    if not slot then return false end
     local lowerPlayer = string.lower(playerName); local found = false
     if GetNumRaidMembers() > 0 then
         for i = 1, GetNumRaidMembers() do
@@ -1422,8 +1492,6 @@ function NSAuk.GiveLootToWinner(playerName, itemLink)
             if cand and string.lower(cand) == lowerPlayer then GiveMasterLoot(slot, i); found = true; break end
         end
     end
-    if found then print("|cff00ff00[NSAuk]|r Лут выдан: " .. playerName)
-    else print("|cffff8080[NSAuk]|r Кандидат не найден: " .. playerName) end
     return found
 end
 
@@ -1435,10 +1503,10 @@ function NSAuk.GiveLootToWinnerDeferred(playerName, itemLink)
     waiter:SetScript("OnUpdate", function(self, dt)
         elapsed = elapsed + dt
         if LootFrame and LootFrame:IsShown() then self:SetScript("OnUpdate", nil); NSAuk.GiveLootToWinner(playerName, itemLink)
-        elseif elapsed > 3 then self:SetScript("OnUpdate", nil); print("|cffff8080[NSAuk]|r Окно добычи не открылось") end
+        elseif elapsed > 3 then self:SetScript("OnUpdate", nil) end
     end)
 end
 
-print("|cff00ff00[NS Auction System v5.9]|r Загружен. Команды: /nsauk, /nsauk reset, /nsauk find, /nsauk start")
+print("|cff00ff00[NS Auction System v5.9]|r Загружен. Команды: /nsauk, /nsauk reset, /nsauk find, /nsauk start, /nsauk debug, /nsauk debugbid")
 
 end)

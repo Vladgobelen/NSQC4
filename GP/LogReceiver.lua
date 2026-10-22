@@ -6,9 +6,6 @@
 
 NSQC4.RegisterModule("gp", function()
 
-    -- ========================================================================
-    -- Обработчик логов
-    -- ========================================================================
     local function OnGuildLogMessage(words, sender, text, channel, prefix)
         -- prefix = "nsYourLog Шеф"
         local targetNick = prefix and prefix:match("^%S+%s+(%S+)")
@@ -46,9 +43,6 @@ NSQC4.RegisterModule("gp", function()
         end
     end
 
-    -- ========================================================================
-    -- Регистрация триггера в ChatHandler
-    -- ========================================================================
     if NSQC4.ChatHandler and NSQC4.ChatHandler.Register then
         NSQC4.ChatHandler:Register("ADDON:nsyourlog", {
             func = function(words, sender, text, channel, prefix)

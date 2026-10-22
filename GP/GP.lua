@@ -1,2247 +1,2983 @@
-NSQC4.RegisterModule("gp", function()   
+-- ============================================================================
+-- NSQC4 / GP / GP
+-- Окно ГП, начисление/списание, лог, выбор рейда, заметки РЛ.
+--
+-- ВАЖНО (3.3.5a):
+--   SendAddonMessage(prefix, message, channel)
+--     prefix  — БЕЗ пробелов: "nsGP1" / "nsGP1A" / "nsGPlog" / ...
+--     message — "<delta> <nick>" (delta первым словом)
+--   Старый формат "nsGP1 5" как prefix в 3.3.5 уходит как обычный чат —
+--   именно из-за этого начисления не доходили.
+--
+-- Отладка:
+--   NSQC4.GPDebug.enabled = true   -- включить
+--   NSQC4.GPDebug.enabled = false  -- выключить (одна строка)
+--   /gpd                           -- переключить
+-- ============================================================================
 
-GpDb = {}
-GpDb.__index = GpDb
+-- ============================================================================
+-- Отладочный блок (одна точка выключения)
+-- ============================================================================
+NSQC4 = NSQC4 or {}
+NSQC4.GPDebug = NSQC4.GPDebug or { enabled = false }  -- ВКЛЮЧЕНО ПО УМОЛЧАНИЮ
 
-function GpDb:new(input_table)
-    local new_object = {
-        gp_data = {},
-        sort_column = "nick",
-        sort_ascending = true,
-        visible_rows = 20,
-        selected_indices = {},
-        last_selected_index = nil,
-        logData = {},
-        filterText = "",
-        showOnlyNotes = false,
-        updateTimer = nil,
-        lastCheckedPlayer = nil,
-        confirmed_rl_nicks = {},
-        rl_tooltip_nicks = {},
-        _rl_tooltip_list = nil,
-        external_gp_cache = {},
-    }
-    setmetatable(new_object, self)
-    new_object:_CreateWindow()
-    new_object:_CreateRaidSelectionWindow()
-    new_object:_CreateLogWindow()
-    return new_object
+local function dbg(tag, ...)
+    if NSQC4.GPDebug and NSQC4.GPDebug.enabled then
+        print("|cff00ffff[GP " .. tag .. "]|r", ...)
+    end
 end
 
-function GpDb:BeginRlTooltipList(text)
-    if not text or type(text) ~= "string" or text == "" then return end
-    self._rl_tooltip_list = { text }
+local function dbgGp(tag, ...)
+    if NSQC4.GPDebug and NSQC4.GPDebug.enabled then
+        print("|cff00ff88[GP-GP " .. tag .. "]|r", ...)
+    end
 end
 
-function GpDb:EndRlTooltipList(text)
-    if not text or type(text) ~= "string" or text == "" then
-        if not self._rl_tooltip_list then return end
-    else
-        if self._rl_tooltip_list then
-            table.insert(self._rl_tooltip_list, text)
+SLASH_NSQC4GPD1 = "/gpd"
+SlashCmdList["NSQC4GPD"] = function()
+    NSQC4.GPDebug.enabled = not NSQC4.GPDebug.enabled
+    print("|cff00ffff[NSQC4 GP]|r debug=", tostring(NSQC4.GPDebug.enabled))
+end
+
+NSQC4.RegisterModule("gp", function()
+    nsDbc4.settings = nsDbc4.settings or {}
+    nsDbc4.settings.gp = nsDbc4.settings.gp or {}
+    nsDbc4.settings.gp.pveSeason = nsDbc4.settings.gp.pveSeason or false
+
+    GpDb = {}
+    GpDb.__index = GpDb
+
+    function GpDb:new(input_table)
+        local new_object = {
+            gp_data = {},
+            sort_column = "nick",
+            sort_ascending = true,
+            visible_rows = 20,
+            selected_indices = {},
+            last_selected_index = nil,
+            logData = {},
+            filterText = "",
+            showOnlyNotes = false,
+            updateTimer = nil,
+            lastCheckedPlayer = nil,
+            confirmed_rl_nicks = {},
+            rl_tooltip_nicks = {},
+            _rl_tooltip_list = nil,
+            external_gp_cache = {},
+        }
+        setmetatable(new_object, self)
+        new_object:_CreateWindow()
+        new_object:_CreateRaidSelectionWindow()
+        new_object:_CreateLogWindow()
+        return new_object
+    end
+
+    function GpDb:BeginRlTooltipList(text)
+        if not text or type(text) ~= "string" or text == "" then return end
+        self._rl_tooltip_list = { text }
+    end
+
+    function GpDb:EndRlTooltipList(text)
+        if not text or type(text) ~= "string" or text == "" then
+            if not self._rl_tooltip_list then return end
         else
-            self._rl_tooltip_list = { text }
-        end
-    end
-
-    if self.raidWindow and self.raidWindow.playerInfoCheckbox then
-        GameTooltip:Hide()
-    end
-
-    self._rl_tooltip_list = nil
-end
-
-function GpDb:AddRawLogEntry(rawLogString)
-    if not self.logWindow then
-        self:_CreateLogWindow()
-    end
-
-    local words = {}
-    for word in rawLogString:gmatch("%S+") do
-        table.insert(words, word)
-    end
-
-    if #words < 4 then return end
-
-    local unixTime = tonumber(words[1])
-    local rl = words[2]
-    local raid = words[3]
-    local gpValue = tonumber(words[4]) or 0
-
-    local targets = {}
-    for i = 5, #words do
-        table.insert(targets, words[i])
-    end
-    local targetsStr = table.concat(targets, " ")
-
-    local formattedTime = "|cFFA0A0A0" .. date("%d %H:%M:%S", unixTime) .. "|r"
-
-    local function GetClassColor(name)
-        if not name or type(name) ~= "string" or name == "" then 
-            return "|cFFFFFFFF" 
-        end
-        for i = 1, GetNumGuildMembers(true) do
-            local guildName, _, _, _, _, _, _, _, _, _, classFileName = GetGuildRosterInfo(i)
-            if guildName and guildName == name then
-                local color = RAID_CLASS_COLORS[classFileName]
-                if color then
-                    return string.format("|cFF%02x%02x%02x", color.r*255, color.g*255, color.b*255)
-                end
-                break
+            if self._rl_tooltip_list then
+                table.insert(self._rl_tooltip_list, text)
+            else
+                self._rl_tooltip_list = { text }
             end
         end
-        return "|cFFFFFFFF"
+        if self.raidWindow and self.raidWindow.playerInfoCheckbox then
+            GameTooltip:Hide()
+        end
+        self._rl_tooltip_list = nil
     end
 
-    local formattedRl = GetClassColor(rl) .. (rl or "Неизвестно") .. "|r"
-    local gpColor = gpValue >= 0 and "|cFF00FF00" or "|cFFFF0000"
-    local formattedGp = gpColor .. tostring(gpValue) .. "|r"
-    local formattedRaid = "|cFFFFFF00" .. (raid or "Неизвестно") .. "|r"
+    function GpDb:AddRawLogEntry(rawLogString)
+        if not self.logWindow then self:_CreateLogWindow() end
+        local words = {}
+        for word in rawLogString:gmatch("%S+") do
+            table.insert(words, word)
+        end
+        if #words < 4 then return end
 
-    local formattedTargets = {}
-    for _, code in ipairs(targets) do
-        local playerName = code
-        if NSQS_dict then
-            for name, info in pairs(NSQS_dict) do
-                if info[2] == code then
-                    playerName = name
+        local unixTime = tonumber(words[1])
+        local rl = words[2]
+        local raid = words[3]
+        local gpValue = tonumber(words[4]) or 0
+        local targets = {}
+        for i = 5, #words do
+            table.insert(targets, words[i])
+        end
+        local targetsStr = table.concat(targets, " ")
+
+        local formattedTime = "|cFFA0A0A0" .. date("%d %H:%M:%S", unixTime) .. "|r"
+
+        local function GetClassColor(name)
+            if not name or type(name) ~= "string" or name == "" then
+                return "|cFFFFFFFF"
+            end
+            for i = 1, GetNumGuildMembers(true) do
+                local guildName, _, _, _, _, _, _, _, _, _, classFileName =
+                    GetGuildRosterInfo(i)
+                if guildName and guildName == name then
+                    local color = RAID_CLASS_COLORS[classFileName]
+                    if color then
+                        return string.format(
+                            "|cFF%02x%02x%02x",
+                            color.r * 255,
+                            color.g * 255,
+                            color.b * 255
+                        )
+                    end
                     break
                 end
             end
-        end
-        table.insert(formattedTargets, GetClassColor(playerName) .. playerName .. "|r")
-    end
-    local formattedTargetsText = table.concat(formattedTargets, " ")
-
-    local logText = string.format("%s | %s | %s | %s | %s",
-        formattedTime,
-        formattedRl,
-        formattedGp,
-        formattedRaid,
-        formattedTargetsText)
-
-    table.insert(self.logData, {
-        text = logText,
-        raw = {
-            time = unixTime,
-            rl = rl,
-            gp = gpValue,
-            raid = raid,
-            targets = targetsStr
-        }
-    })
-
-    if #self.logData > 2000 then
-        table.remove(self.logData, 1)
-    end
-
-    if self.logWindow and self.logWindow:IsShown() then
-        self:UpdateLogDisplay()
-        self.logWindow.scrollFrame:SetVerticalScroll(self.logWindow.scrollFrame:GetVerticalScrollRange())
-    end
-end
-
-function GpDb:_CreateLogWindow()
-    self.logWindow = CreateFrame("Frame", "GpDbLogWindow", self.window)
-    self.logWindow:SetFrameStrata("DIALOG")
-    self.logWindow:SetSize(600, self.window:GetHeight())
-    self.logWindow:SetPoint("TOPLEFT", self.window, "TOPRIGHT", 5, 0)
-    self.logWindow:SetMovable(false)
-    self.logWindow:Hide()
-    self.logWindow.background = self.logWindow:CreateTexture(nil, "BACKGROUND")
-    self.logWindow.background:SetTexture("Interface\\Buttons\\WHITE8X8")
-    self.logWindow.background:SetVertexColor(0.1, 0.1, 0.1)
-    self.logWindow.background:SetAlpha(0.9)
-    self.logWindow.background:SetAllPoints(true)
-    self.logWindow.borderFrame = CreateFrame("Frame", nil, self.logWindow)
-    self.logWindow.borderFrame:SetPoint("TOPLEFT", -3, 3)
-    self.logWindow.borderFrame:SetPoint("BOTTOMRIGHT", 3, -3)
-    self.logWindow.borderFrame:SetBackdrop({
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        edgeSize = 16,
-        insets = {left = 4, right = 4, top = 4, bottom = 4}
-    })
-    self.logWindow.closeButton = CreateFrame("Button", nil, self.logWindow, "UIPanelCloseButton")
-    self.logWindow.closeButton:SetPoint("TOPRIGHT", -5, -5)
-    self.logWindow.closeButton:SetScript("OnClick", function() 
-        self.logWindow:Hide() 
-    end)
-    self.logWindow.filters = CreateFrame("Frame", nil, self.logWindow)
-    self.logWindow.filters:SetPoint("TOPLEFT", 10, -5)
-    self.logWindow.filters:SetPoint("RIGHT", -10, 0)
-    self.logWindow.filters:SetHeight(30)
-    self.logWindow.countFilter = CreateFrame("EditBox", "EditKolvo", self.logWindow.filters, "InputBoxTemplate")
-    self.logWindow.countFilter:SetSize(60, 20)
-    self.logWindow.countFilter:SetPoint("LEFT", self.logWindow.filters, "LEFT")
-    self.logWindow.countFilter:SetAutoFocus(false)
-    self.logWindow.countFilter:SetText("Кол-во")
-    self.logWindow.countFilter:SetScript("OnEscapePressed", function() self.logWindow.countFilter:ClearFocus() end)
-    self.logWindow.countFilter:SetScript("OnEnterPressed", function() 
-        self.logWindow.countFilter:ClearFocus() 
-        self:UpdateLogDisplay()
-    end)
-    self.logWindow.timeFilter = CreateFrame("EditBox", "EditDay", self.logWindow.filters, "InputBoxTemplate")
-    self.logWindow.timeFilter:SetSize(70, 20)
-    self.logWindow.timeFilter:SetPoint("LEFT", self.logWindow.countFilter, "RIGHT", 5, 0)
-    self.logWindow.timeFilter:SetAutoFocus(false)
-    self.logWindow.timeFilter:SetText("День")
-    self.logWindow.timeFilter:SetScript("OnEscapePressed", function() self.logWindow.timeFilter:ClearFocus() end)
-    self.logWindow.timeFilter:SetScript("OnEnterPressed", function() 
-        self.logWindow.timeFilter:ClearFocus() 
-        self:UpdateLogDisplay()
-    end)
-    self.logWindow.rlFilter = CreateFrame("EditBox", "EditRL", self.logWindow.filters, "InputBoxTemplate")
-    self.logWindow.rlFilter:SetSize(70, 20)
-    self.logWindow.rlFilter:SetPoint("LEFT", self.logWindow.timeFilter, "RIGHT", 5, 0)
-    self.logWindow.rlFilter:SetAutoFocus(false)
-    self.logWindow.rlFilter:SetText("РЛ")
-    self.logWindow.rlFilter:SetScript("OnEscapePressed", function() self.logWindow.rlFilter:ClearFocus() end)
-    self.logWindow.rlFilter:SetScript("OnEnterPressed", function() 
-        self.logWindow.rlFilter:ClearFocus() 
-        self:UpdateLogDisplay()
-    end)
-    self.logWindow.raidFilter = CreateFrame("EditBox", "EditRaid", self.logWindow.filters, "InputBoxTemplate")
-    self.logWindow.raidFilter:SetSize(100, 20)
-    self.logWindow.raidFilter:SetPoint("LEFT", self.logWindow.rlFilter, "RIGHT", 5, 0)
-    self.logWindow.raidFilter:SetAutoFocus(false)
-    self.logWindow.raidFilter:SetText("Рейд")
-    self.logWindow.raidFilter:SetScript("OnEscapePressed", function() self.logWindow.raidFilter:ClearFocus() end)
-    self.logWindow.raidFilter:SetScript("OnEnterPressed", function() 
-        self.logWindow.raidFilter:ClearFocus() 
-        self:UpdateLogDisplay()
-    end)
-    self.logWindow.nameFilter = CreateFrame("EditBox", "EditNik", self.logWindow.filters, "InputBoxTemplate")
-    self.logWindow.nameFilter:SetSize(100, 20)
-    self.logWindow.nameFilter:SetPoint("LEFT", self.logWindow.raidFilter, "RIGHT", 5, 0)
-    self.logWindow.nameFilter:SetAutoFocus(false)
-    self.logWindow.nameFilter:SetText("Ник")
-    self.logWindow.nameFilter:SetScript("OnEscapePressed", function() self.logWindow.nameFilter:ClearFocus() end)
-    self.logWindow.nameFilter:SetScript("OnEnterPressed", function() 
-        self.logWindow.nameFilter:ClearFocus() 
-        self:UpdateLogDisplay()
-    end)
-    self.logWindow.showButton = CreateFrame("Button", nil, self.logWindow.filters, "UIPanelButtonTemplate")
-    self.logWindow.showButton:SetSize(80, 22)
-    self.logWindow.showButton:SetPoint("LEFT", self.logWindow.nameFilter, "RIGHT", 5, 0)
-    self.logWindow.showButton:SetText("Показать")
-    self.logWindow.showButton:SetScript("OnClick", function()
-        local function processFilterText(text, placeholder)
-            if text == placeholder or text == "" then
-                return "_"
-            end
-            if text:find("%s") then
-                text = text:gsub("%s+", "_")
-            end
-            return text
+            return "|cFFFFFFFF"
         end
 
-        local count = processFilterText(self.logWindow.countFilter:GetText(), "Кол-во")
-        local time = processFilterText(self.logWindow.timeFilter:GetText(), "День")
-        local rl = processFilterText(self.logWindow.rlFilter:GetText(), "РЛ")
-        local raid = processFilterText(self.logWindow.raidFilter:GetText(), "Рейд")
-        
-        local nameInput = self.logWindow.nameFilter:GetText()
-        local name = "_"
-        if nameInput ~= "" and nameInput ~= "Ник" then
-            local foundCode = nil
-            for i = 1, GetNumGuildMembers(true) do
-                local guildName, _, _, _, _, _, _, officerNote = GetGuildRosterInfo(i)
-                if guildName and officerNote then
-                    local plainName = guildName:match("^(.-)-") or guildName
-                    if plainName == nameInput then
-                        local words = {}
-                        for w in officerNote:gmatch("%S+") do
-                            table.insert(words, w)
-                        end
-                        if #words >= 2 then
-                            foundCode = words[2]
-                            break
-                        end
-                    end
-                end
-            end
-            name = foundCode or nameInput
+        local formattedRl = GetClassColor(rl) .. (rl or "Неизвестно") .. "|r"
+        local gpColor = gpValue >= 0 and "|cFF00FF00" or "|cFFFF0000"
+        local formattedGp = gpColor .. tostring(gpValue) .. "|r"
+        local formattedRaid = "|cFFFFFF00" .. (raid or "Неизвестно") .. "|r"
+
+        local formattedTargets = {}
+        for _, name in ipairs(targets) do
+            table.insert(formattedTargets, GetClassColor(name) .. name .. "|r")
         end
+        local formattedTargetsText = table.concat(formattedTargets, " ")
 
-        local request = count .. " " .. time .. " " .. rl .. " " .. raid .. " " .. name
-        print("|cFF00FF00[Клиент] Запрос логов:|r", request)
-        self:ClearLog()
-        SendAddonMessage("NSShowMeLogs", request, "GUILD")
-    end)
-    self.logWindow.scrollFrame = CreateFrame("ScrollFrame", "GpDbLogScrollFrame", self.logWindow, "UIPanelScrollFrameTemplate")
-    self.logWindow.scrollFrame:SetPoint("TOPLEFT", 0, -35)
-    self.logWindow.scrollFrame:SetPoint("BOTTOMRIGHT", 0, 10)
-    self.logWindow.scrollChild = CreateFrame("Frame")
-    self.logWindow.scrollChild:SetSize(580, 1000)
-    self.logWindow.scrollFrame:SetScrollChild(self.logWindow.scrollChild)
-    self.logRows = {}
-    for i = 1, 2000 do
-        local row = CreateFrame("Frame", "GpDbLogRow"..i, self.logWindow.scrollChild)
-        row:SetSize(580, 40)
-        row:SetPoint("TOPLEFT", 0, -((i-1)*40))
-        row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        row.text:SetAllPoints(true)
-        row.text:SetJustifyH("LEFT")
-        row.text:SetJustifyV("TOP")
-        row.text:SetWordWrap(true)
-        row.text:SetText("")
-        self.logRows[i] = row
-    end
-end
+        local logText = string.format(
+            "%s | %s | %s | %s | %s",
+            formattedTime, formattedRl, formattedGp,
+            formattedRaid, formattedTargetsText
+        )
 
-function GpDb:ClearLog()
-    self.logData = {}
-    self.logWindow.countFilter:SetText("Кол-во")
-    self.logWindow.timeFilter:SetText("День")
-    self.logWindow.rlFilter:SetText("РЛ")
-    self.logWindow.raidFilter:SetText("Рейд")
-    self.logWindow.nameFilter:SetText("Ник")
-    self:UpdateLogDisplay()
-    print("|cFFFF0000ГП:|r Лог успешно очищен")
-end
-
-function GpDb:_CreateWindow()
-    self.window = CreateFrame("Frame", "GpTrackerWindow", UIParent)
-    self.window:SetFrameStrata("DIALOG")
-    self.window:SetSize(400, 600)
-    self.window:SetPoint("LEFT", 5, 100)
-    self.window:SetMovable(true)
-    self.window:EnableMouse(true)
-    self.window:RegisterForDrag("LeftButton")
-    self.window:SetScript("OnDragStart", self.window.StartMoving)
-    self.window:SetScript("OnDragStop", self.window.StopMovingOrSizing)
-    self.window:Hide()
-
-    self.window.background = self.window:CreateTexture(nil, "BACKGROUND")
-    self.window.background:SetTexture("Interface\\Buttons\\WHITE8X8")
-    self.window.background:SetVertexColor(0, 0, 0)
-    self.window.background:SetAlpha(1)
-    self.window.background:SetAllPoints(true)
-
-    self.window.borderFrame = CreateFrame("Frame", nil, self.window)
-    self.window.borderFrame:SetPoint("TOPLEFT", -3, 3)
-    self.window.borderFrame:SetPoint("BOTTOMRIGHT", 3, -3)
-    self.window.borderFrame:SetBackdrop({
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        edgeSize = 16,
-        insets = {left = 4, right = 4, top = 4, bottom = 4}
-    })
-
-    self.window.title = self.window:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    self.window.title:SetPoint("TOP", 0, -15)
-    self.window.title:SetText("")
-
-    self.window.closeButton = CreateFrame("Button", nil, self.window, "UIPanelCloseButton")
-    self.window.closeButton:SetPoint("TOPRIGHT", -5, -5)
-    self.window.closeButton:SetScript("OnClick", function() self.window:Hide() end)
-
-    self.window.logButton = CreateFrame("Button", nil, self.window, "UIPanelButtonTemplate")
-    self.window.logButton:SetSize(24, 24)
-    self.window.logButton:SetPoint("RIGHT", self.window.closeButton, "LEFT", -5, 0)
-    self.window.logButton:SetText("L")
-    self.window.logButton:SetScript("OnClick", function()
-        self:ToggleLogWindow()
-    end)
-
-    self.window.raidOnlyCheckbox = CreateFrame("CheckButton", nil, self.window, "UICheckButtonTemplate")
-    self.window.raidOnlyCheckbox:SetPoint("TOPLEFT", 10, -15)
-    self.window.raidOnlyCheckbox:SetSize(24, 24)
-    self.window.raidOnlyCheckbox.text = self.window.raidOnlyCheckbox:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    self.window.raidOnlyCheckbox.text:SetPoint("LEFT", self.window.raidOnlyCheckbox, "RIGHT", 5, 0)
-    self.window.raidOnlyCheckbox.text:SetText("Только рейд")
-    self.window.raidOnlyCheckbox:SetScript("OnClick", function()
-        self:_UpdateFromGuild()
-        self:UpdateWindow()
-    end)
-
-    self.window.guildCheckbox = CreateFrame("CheckButton", nil, self.window, "UICheckButtonTemplate")
-    self.window.guildCheckbox:SetPoint("LEFT", self.window.raidOnlyCheckbox.text, "RIGHT", 10, 0)
-    self.window.guildCheckbox:SetSize(24, 24)
-    self.window.guildCheckbox.text = self.window.guildCheckbox:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    self.window.guildCheckbox.text:SetPoint("LEFT", self.window.guildCheckbox, "RIGHT", 5, 0)
-    self.window.guildCheckbox.text:SetText("Гильдия")
-    self.window.guildCheckbox:SetScript("OnClick", function()
-        self:_UpdateFromGuild()
-        self:UpdateWindow()
-    end)
-
-    self.window.offCheckbox = CreateFrame("CheckButton", nil, self.window, "UICheckButtonTemplate")
-    self.window.offCheckbox:SetPoint("LEFT", self.window.guildCheckbox.text, "RIGHT", 10, 0)
-    self.window.offCheckbox:SetSize(24, 24)
-    self.window.offCheckbox.text = self.window.offCheckbox:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    self.window.offCheckbox.text:SetPoint("LEFT", self.window.offCheckbox, "RIGHT", 5, 0)
-    self.window.offCheckbox.text:SetText("Off")
-    self.window.offCheckbox:SetScript("OnClick", function()
-        self:_UpdateFromGuild()
-        self:UpdateWindow()
-    end)
-
-    self.window.notesCheckbox = CreateFrame("CheckButton", nil, self.window, "UICheckButtonTemplate")
-    self.window.notesCheckbox:SetPoint("TOPLEFT", self.window.raidOnlyCheckbox, "BOTTOMLEFT", 0, -10)
-    self.window.notesCheckbox:SetSize(24, 24)
-    self.window.notesCheckbox.text = self.window.notesCheckbox:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    self.window.notesCheckbox.text:SetPoint("LEFT", self.window.notesCheckbox, "RIGHT", 5, 0)
-    self.window.notesCheckbox.text:SetText("Заметки")
-    self.window.notesCheckbox:SetScript("OnClick", function()
-        self.showOnlyNotes = self.window.notesCheckbox:GetChecked()
-    end)
-
-    self.window.pveSeasonCheckbox = CreateFrame("CheckButton", nil, self.window, "UICheckButtonTemplate")
-    self.window.pveSeasonCheckbox:SetPoint("LEFT", self.window.notesCheckbox.text, "RIGHT", 10, 0)
-    self.window.pveSeasonCheckbox:SetSize(24, 24)
-    self.window.pveSeasonCheckbox.text = self.window.pveSeasonCheckbox:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    self.window.pveSeasonCheckbox.text:SetPoint("LEFT", self.window.pveSeasonCheckbox, "RIGHT", 5, 0)
-    self.window.pveSeasonCheckbox.text:SetText("ПВЕ-сезон")
-    self.window.pveSeasonCheckbox:SetScript("OnClick", function(self2)
-        NSQC4.SetPveSeason(self2:GetChecked() and true or false)
-    end)
-    self.window.pveSeasonCheckbox:SetChecked(nsDbc4.settings.gp.pveSeason == true)
-
-    self.window.filterEditBox = CreateFrame("EditBox", "fdsfdsa3333", self.window, "InputBoxTemplate")
-    self.window.filterEditBox:SetPoint("TOPLEFT", self.window.notesCheckbox.text, "BOTTOMLEFT", 0, -5)
-    self.window.filterEditBox:SetPoint("RIGHT", self.window.closeButton, "LEFT", -40, 0)
-    self.window.filterEditBox:SetHeight(20)
-    self.window.filterEditBox:SetAutoFocus(false)
-    self.window.filterEditBox:SetText("")
-    self.window.filterEditBox:SetScript("OnTextChanged", function(editBox)
-        self.filterText = editBox:GetText():lower()
-        self:_UpdateFromGuild()
-    end)
-    self.window.filterEditBox:SetScript("OnEscapePressed", function()
-        self.window.filterEditBox:SetText("")
-        self.window.filterEditBox:ClearFocus()
-    end)
-    self.window.filterEditBox:SetScript("OnEnterPressed", function()
-        self.window.filterEditBox:ClearFocus()
-    end)
-
-    self.window.filterClearButton = CreateFrame("Button", nil, self.window, "UIPanelButtonTemplate")
-    self.window.filterClearButton:SetSize(80, 22)
-    self.window.filterClearButton:SetPoint("TOPRIGHT", self.window.filterEditBox, "BOTTOMRIGHT", 60, 20)
-    self.window.filterClearButton:SetText("Очистить")
-    self.window.filterClearButton:SetScript("OnClick", function()
-        self.window.filterEditBox:SetText("")
-        self.filterText = ""
-        self:_UpdateFromGuild()
-    end)
-
-    self.window.scrollFrame = CreateFrame("ScrollFrame", "ScrollFrame", self.window, "UIPanelScrollFrameTemplate")
-    self.window.scrollFrame:SetPoint("TOPLEFT", 0, -85)
-    self.window.scrollFrame:SetPoint("BOTTOMRIGHT", 0, 60)
-    self.window.scrollChild = CreateFrame("Frame")
-    self.window.scrollChild:SetSize(380, 500)
-    self.window.scrollFrame:SetScrollChild(self.window.scrollChild)
-
-    self.window.scrollBar = _G[self.window.scrollFrame:GetName().."ScrollBar"]
-    self.window.scrollBar:SetPoint("TOPLEFT", self.window.scrollFrame, "TOPRIGHT", -20, -16)
-    self.window.scrollBar:SetPoint("BOTTOMLEFT", self.window.scrollFrame, "BOTTOMRIGHT", -20, 16)
-
-    self.window.countText = self.window:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    self.window.countText:SetPoint("BOTTOMLEFT", 10, 40)
-    self.window.countText:SetPoint("BOTTOMRIGHT", -10, 40)
-    self.window.countText:SetJustifyH("LEFT")
-    self.window.countText:SetText("")
-
-    self.window.totalText = self.window:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    self.window.totalText:SetPoint("BOTTOMLEFT", 10, 20)
-    self.window.totalText:SetPoint("BOTTOMRIGHT", -10, 20)
-    self.window.totalText:SetJustifyH("LEFT")
-    self.window.totalText:SetText("")
-
-    self:_SetupTable()
-end
-
-function GpDb:_SetupTable()
-    local headers = {
-        {text = "Ник", column = "nick"},
-        {text = "ГП", column = "gp"}
-    }
-    
-    for i, header in ipairs(headers) do
-        local btn = CreateFrame("Button", nil, self.window.scrollChild)
-        btn:SetSize(i == 1 and 290 or 50, 20)
-        btn:SetPoint("TOPLEFT", (i-1)*290 + (i == 2 and 10 or 0), -5)
-        btn:SetNormalFontObject("GameFontNormal")
-        btn:SetHighlightFontObject("GameFontHighlight")
-        local text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        text:SetAllPoints(true)
-        text:SetText(header.text)
-        btn:SetScript("OnClick", function()
-            self:SortData(header.column)
-            self:UpdateWindow()
-        end)
-    end
-
-    self.rows = {}
-    for i = 1, 999 do
-        local row = CreateFrame("Button", "GpDbRow"..i, self.window.scrollChild)
-        row:SetSize(350, 20)
-        row:SetPoint("TOPLEFT", 0, -25 - (i-1)*25)
-        
-        row:EnableMouse(true)
-        row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-        
-        row:SetHighlightTexture("Interface\\Buttons\\WHITE8X8")
-        row:GetHighlightTexture():SetVertexColor(0.4, 0.4, 0.8, 0.4)
-        
-        row.selection = row:CreateTexture(nil, "BACKGROUND")
-        row.selection:SetAllPoints(true)
-        row.selection:SetTexture("Interface\\Buttons\\WHITE8X8")
-        row.selection:SetVertexColor(0.3, 0.3, 0.7, 0.7)
-        row.selection:Hide()
-        
-        row.nick = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        row.nick:SetPoint("LEFT", 10, 0)
-        row.nick:SetWidth(290)
-        row.nick:SetJustifyH("LEFT")
-
-        row.gp = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        row.gp:SetPoint("RIGHT", 5, 0)
-        row.gp:SetWidth(50)
-        row.gp:SetJustifyH("RIGHT")
-
-        row.lastClickTime = 0
-        
-        row:SetScript("OnClick", function(_, button, down)
-            local offset = FauxScrollFrame_GetOffset(self.window.scrollFrame)
-            local dataIndex = i + offset
-            if not self.gp_data or not self.gp_data[dataIndex] then return end
-            local currentTime = GetTime()
-
-            SendAddonMessage("NSShowMeZametki", self.gp_data[dataIndex].original_nick, "GUILD")
-
-            if button == "LeftButton" and IsInRaid() and (currentTime - row.lastClickTime) < 0.5 then
-                self:ClearSelection()
-                for idx = 1, #self.gp_data do
-                    self.selected_indices[idx] = true
-                end
-                self.last_selected_index = dataIndex
-                self:_UpdateSelectionCount()
-                self:RefreshRowHighlights()
-                self:UpdateRaidWindowVisibility()
-                if self.raidWindow and self.raidWindow:IsShown() then
-                    self:_UpdateSelectedPlayersText()
-                end
-                row.lastClickTime = 0
-                return
-            end
-            row.lastClickTime = currentTime
-            if button == "LeftButton" then
-                local wasSelected = self.selected_indices[dataIndex]
-                if IsShiftKeyDown() then
-                    if not self.last_selected_index then
-                        self:ClearSelection()
-                        self.selected_indices[dataIndex] = true
-                        self.last_selected_index = dataIndex
-                    else
-                        local startIdx = math.min(self.last_selected_index, dataIndex)
-                        local endIdx = math.max(self.last_selected_index, dataIndex)
-                        if not IsControlKeyDown() then
-                            self:ClearSelection()
-                        end
-                        for idx = startIdx, endIdx do
-                            if self.gp_data[idx] then
-                                self.selected_indices[idx] = true
-                            end
-                        end
-                    end
-                elseif IsControlKeyDown() then
-                    self.selected_indices[dataIndex] = not wasSelected
-                    for idx in pairs(self.selected_indices) do
-                        if not self.gp_data[idx] then
-                            self.selected_indices[idx] = nil
-                        end
-                    end
-                    if self.selected_indices[dataIndex] then
-                        self.last_selected_index = dataIndex
-                    else
-                        self.last_selected_index = nil
-                        for idx in pairs(self.selected_indices) do
-                            if self.selected_indices[idx] then
-                                self.last_selected_index = idx
-                                break
-                            end
-                        end
-                    end
-                else
-                    if wasSelected then
-                        self:ClearSelection()
-                    else
-                        self:ClearSelection()
-                        self.selected_indices[dataIndex] = true
-                        self.last_selected_index = dataIndex
-                    end
-                end
-                self:_UpdateSelectionCount()
-                self:RefreshRowHighlights()
-                self:UpdateRaidWindowVisibility()
-                if self.raidWindow and self.raidWindow:IsShown() then
-                    self:_UpdateSelectedPlayersText()
-                end
-            end
-        end)
-
-        self.rows[i] = row
-    end
-
-    self.window:SetScript("OnHide", function()
-        self:ClearSelection()
-        if self.raidWindow and self.raidWindow:IsShown() then
-            self.raidWindow:Hide()
+        table.insert(self.logData, {
+            text = logText,
+            raw = {
+                time = unixTime,
+                rl = rl,
+                gp = gpValue,
+                raid = raid,
+                targets = targetsStr,
+            },
+        })
+        if #self.logData > 2000 then
+            table.remove(self.logData, 1)
         end
         if self.logWindow and self.logWindow:IsShown() then
-            self.logWindow:Hide()
+            self:UpdateLogDisplay()
+            self.logWindow.scrollFrame:SetVerticalScroll(
+                self.logWindow.scrollFrame:GetVerticalScrollRange()
+            )
         end
-    end)
-end
-
-function GpDb:ToggleLogWindow()
-    if not self.logWindow then
-        self:_CreateLogWindow()
     end
-    if self.logWindow:IsShown() then
+
+    function GpDb:_CreateLogWindow()
+        self.logWindow = CreateFrame("Frame", "GpDbLogWindow", self.window)
+        self.logWindow:SetFrameStrata("DIALOG")
+        self.logWindow:SetSize(600, self.window:GetHeight())
+        self.logWindow:SetPoint("TOPLEFT", self.window, "TOPRIGHT", 5, 0)
+        self.logWindow:SetMovable(false)
         self.logWindow:Hide()
-    else
-        self.logWindow:Show()
-        local selectedCodes = {}
-        for index in pairs(self.selected_indices) do
-            if self.gp_data[index] and self.gp_data[index].playerID then
-                table.insert(selectedCodes, self.gp_data[index].playerID)
-            end
-        end
-        if #selectedCodes > 0 then
-            local codeFilter = table.concat(selectedCodes, "_")
-            print("|cFF00FF00[Клиент] Запрос логов по кодам игроков:|r", codeFilter)
-            self:ClearLog()
+
+        self.logWindow.background = self.logWindow:CreateTexture(nil, "BACKGROUND")
+        self.logWindow.background:SetTexture("Interface\\Buttons\\WHITE8X8")
+        self.logWindow.background:SetVertexColor(0.1, 0.1, 0.1)
+        self.logWindow.background:SetAlpha(0.9)
+        self.logWindow.background:SetAllPoints(true)
+
+        self.logWindow.borderFrame = CreateFrame("Frame", nil, self.logWindow)
+        self.logWindow.borderFrame:SetPoint("TOPLEFT", -3, 3)
+        self.logWindow.borderFrame:SetPoint("BOTTOMRIGHT", 3, -3)
+        self.logWindow.borderFrame:SetBackdrop({
+            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+            edgeSize = 16,
+            insets = { left = 4, right = 4, top = 4, bottom = 4 },
+        })
+
+        self.logWindow.closeButton = CreateFrame(
+            "Button", nil, self.logWindow, "UIPanelCloseButton"
+        )
+        self.logWindow.closeButton:SetPoint("TOPRIGHT", -5, -5)
+        self.logWindow.closeButton:SetScript(
+            "OnClick", function() self.logWindow:Hide() end
+        )
+
+        self.logWindow.filters = CreateFrame("Frame", nil, self.logWindow)
+        self.logWindow.filters:SetPoint("TOPLEFT", 10, -5)
+        self.logWindow.filters:SetPoint("RIGHT", -10, 0)
+        self.logWindow.filters:SetHeight(30)
+
+        self.logWindow.countFilter = CreateFrame(
+            "EditBox", "EditKolvo", self.logWindow.filters, "InputBoxTemplate"
+        )
+        self.logWindow.countFilter:SetSize(60, 20)
+        self.logWindow.countFilter:SetPoint("LEFT", self.logWindow.filters, "LEFT")
+        self.logWindow.countFilter:SetAutoFocus(false)
+        self.logWindow.countFilter:SetText("Кол-во")
+        self.logWindow.countFilter:SetScript(
+            "OnEscapePressed",
+            function() self.logWindow.countFilter:ClearFocus() end
+        )
+        self.logWindow.countFilter:SetScript("OnEnterPressed", function()
+            self.logWindow.countFilter:ClearFocus()
+            self:UpdateLogDisplay()
+        end)
+
+        self.logWindow.timeFilter = CreateFrame(
+            "EditBox", "EditDay", self.logWindow.filters, "InputBoxTemplate"
+        )
+        self.logWindow.timeFilter:SetSize(70, 20)
+        self.logWindow.timeFilter:SetPoint(
+            "LEFT", self.logWindow.countFilter, "RIGHT", 5, 0
+        )
+        self.logWindow.timeFilter:SetAutoFocus(false)
+        self.logWindow.timeFilter:SetText("День")
+        self.logWindow.timeFilter:SetScript(
+            "OnEscapePressed",
+            function() self.logWindow.timeFilter:ClearFocus() end
+        )
+        self.logWindow.timeFilter:SetScript("OnEnterPressed", function()
+            self.logWindow.timeFilter:ClearFocus()
+            self:UpdateLogDisplay()
+        end)
+
+        self.logWindow.rlFilter = CreateFrame(
+            "EditBox", "EditRL", self.logWindow.filters, "InputBoxTemplate"
+        )
+        self.logWindow.rlFilter:SetSize(70, 20)
+        self.logWindow.rlFilter:SetPoint(
+            "LEFT", self.logWindow.timeFilter, "RIGHT", 5, 0
+        )
+        self.logWindow.rlFilter:SetAutoFocus(false)
+        self.logWindow.rlFilter:SetText("РЛ")
+        self.logWindow.rlFilter:SetScript(
+            "OnEscapePressed",
+            function() self.logWindow.rlFilter:ClearFocus() end
+        )
+        self.logWindow.rlFilter:SetScript("OnEnterPressed", function()
+            self.logWindow.rlFilter:ClearFocus()
+            self:UpdateLogDisplay()
+        end)
+
+        self.logWindow.raidFilter = CreateFrame(
+            "EditBox", "EditRaid", self.logWindow.filters, "InputBoxTemplate"
+        )
+        self.logWindow.raidFilter:SetSize(100, 20)
+        self.logWindow.raidFilter:SetPoint(
+            "LEFT", self.logWindow.rlFilter, "RIGHT", 5, 0
+        )
+        self.logWindow.raidFilter:SetAutoFocus(false)
+        self.logWindow.raidFilter:SetText("Рейд")
+        self.logWindow.raidFilter:SetScript(
+            "OnEscapePressed",
+            function() self.logWindow.raidFilter:ClearFocus() end
+        )
+        self.logWindow.raidFilter:SetScript("OnEnterPressed", function()
+            self.logWindow.raidFilter:ClearFocus()
+            self:UpdateLogDisplay()
+        end)
+
+        self.logWindow.nameFilter = CreateFrame(
+            "EditBox", "EditNik", self.logWindow.filters, "InputBoxTemplate"
+        )
+        self.logWindow.nameFilter:SetSize(100, 20)
+        self.logWindow.nameFilter:SetPoint(
+            "LEFT", self.logWindow.raidFilter, "RIGHT", 5, 0
+        )
+        self.logWindow.nameFilter:SetAutoFocus(false)
+        self.logWindow.nameFilter:SetText("Ник")
+        self.logWindow.nameFilter:SetScript(
+            "OnEscapePressed",
+            function() self.logWindow.nameFilter:ClearFocus() end
+        )
+        self.logWindow.nameFilter:SetScript("OnEnterPressed", function()
+            self.logWindow.nameFilter:ClearFocus()
+            self:UpdateLogDisplay()
+        end)
+
+        self.logWindow.showButton = CreateFrame(
+            "Button", nil, self.logWindow.filters, "UIPanelButtonTemplate"
+        )
+        self.logWindow.showButton:SetSize(80, 22)
+        self.logWindow.showButton:SetPoint(
+            "LEFT", self.logWindow.nameFilter, "RIGHT", 5, 0
+        )
+        self.logWindow.showButton:SetText("Показать")
+        self.logWindow.showButton:SetScript("OnClick", function()
             local function processFilterText(text, placeholder)
-                if text == placeholder or text == "" then
-                    return "_"
-                end
+                if text == placeholder or text == "" then return "_" end
                 if text:find("%s") then
                     text = text:gsub("%s+", "_")
                 end
                 return text
             end
-            local request = processFilterText("", "Кол-во") .. " " ..
-                            processFilterText("", "День") .. " " ..
-                            processFilterText("", "РЛ") .. " " ..
-                            processFilterText("", "Рейд") .. " " ..
-                            codeFilter
+
+            local count = processFilterText(
+                self.logWindow.countFilter:GetText(), "Кол-во"
+            )
+            local time = processFilterText(
+                self.logWindow.timeFilter:GetText(), "День"
+            )
+            local rl = processFilterText(
+                self.logWindow.rlFilter:GetText(), "РЛ"
+            )
+            local raid = processFilterText(
+                self.logWindow.raidFilter:GetText(), "Рейд"
+            )
+            local nameInput = self.logWindow.nameFilter:GetText()
+            local name = "_"
+            if nameInput ~= "" and nameInput ~= "Ник" then
+                name = nameInput
+            end
+
+            local request = count .. " " .. time .. " " .. rl
+                .. " " .. raid .. " " .. name
+            dbg("LOG-REQ", "request=", request)
+            self:ClearLog()
             SendAddonMessage("NSShowMeLogs", request, "GUILD")
-        else
-            if self.window.notesCheckbox and self.window.notesCheckbox:GetChecked() then
-                local filteredLogData = {}
-                for _, entry in ipairs(self.logData) do
-                    if entry.raw and entry.raw.raid and entry.raw.raid:find(">>", 1, true) then
-                        table.insert(filteredLogData, entry)
-                    end
-                end
-                local originalLogData = self.logData
-                self.logData = filteredLogData
-                self:UpdateLogDisplay()
-                self.logData = originalLogData
-            else
-                self:UpdateLogDisplay()
-            end
-        end
-        if self.raidWindow and self.raidWindow:IsShown() then
-            self.logWindow:SetHeight(self.window:GetHeight() / 2)
-        else
-            self.logWindow:SetHeight(self.window:GetHeight())
-        end
-    end
-end
+        end)
 
-function GpDb:UpdateLogDisplay()
-    if not self.logWindow or not self.logWindow:IsShown() then return end
-    
-    local totalHeight = 0
-    local rowHeights = {}
-    
-    for i, entry in ipairs(self.logData) do
-        local tempText = self.logWindow.scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        tempText:SetWidth(580)
-        tempText:SetText(entry.text)
-        tempText:SetWordWrap(true)
-        local textHeight = tempText:GetStringHeight() + 5
-        rowHeights[i] = textHeight
-        totalHeight = totalHeight + textHeight
-        tempText:Hide()
-    end
+        self.logWindow.scrollFrame = CreateFrame(
+            "ScrollFrame", "GpDbLogScrollFrame",
+            self.logWindow, "UIPanelScrollFrameTemplate"
+        )
+        self.logWindow.scrollFrame:SetPoint("TOPLEFT", 0, -35)
+        self.logWindow.scrollFrame:SetPoint("BOTTOMRIGHT", 0, 10)
 
-    local currentY = 0
-    for i = 1, #self.logRows do
-        local dataIndex = i
-        if dataIndex <= #self.logData then
-            local entry = self.logData[dataIndex]
-            local textHeight = rowHeights[dataIndex]
-            
-            self.logRows[i]:SetHeight(textHeight)
-            self.logRows[i]:SetPoint("TOPLEFT", 0, -currentY)
-            self.logRows[i].text:SetText(entry.text)
-            self.logRows[i]:Show()
-            
-            currentY = currentY + textHeight
-        else
-            self.logRows[i]:Hide()
+        self.logWindow.scrollChild = CreateFrame("Frame")
+        self.logWindow.scrollChild:SetSize(580, 1000)
+        self.logWindow.scrollFrame:SetScrollChild(self.logWindow.scrollChild)
+
+        self.logRows = {}
+        for i = 1, 2000 do
+            local row = CreateFrame(
+                "Frame", "GpDbLogRow" .. i, self.logWindow.scrollChild
+            )
+            row:SetSize(580, 40)
+            row:SetPoint("TOPLEFT", 0, -((i - 1) * 40))
+            row.text = row:CreateFontString(
+                nil, "OVERLAY", "GameFontNormalSmall"
+            )
+            row.text:SetAllPoints(true)
+            row.text:SetJustifyH("LEFT")
+            row.text:SetJustifyV("TOP")
+            row.text:SetWordWrap(true)
+            row.text:SetText("")
+            self.logRows[i] = row
         end
     end
 
-    self.logWindow.scrollChild:SetHeight(totalHeight)
-    self.logWindow.scrollFrame:UpdateScrollChildRect()
-end
-
-function GpDb:_UpdateSelectionCount()
-    local count = 0
-    for idx, selected in pairs(self.selected_indices) do
-        if selected and self.gp_data[idx] then
-            count = count + 1
-        else
-            self.selected_indices[idx] = nil
-        end
-    end
-    
-    self.window.countText:SetText(string.format("Выделено: %d", count))
-    
-    if count == 0 then
-        self.last_selected_index = nil
-    end
-    
-    return count
-end
-
-function GpDb:IsValidIndex(index)
-    return index and type(index) == "number" and self.gp_data and self.gp_data[index]
-end
-
-function GpDb:RefreshRowHighlights()
-    local offset = FauxScrollFrame_GetOffset(self.window.scrollFrame)
-    
-    for i, row in ipairs(self.rows) do
-        local dataIndex = i + offset
-        if dataIndex <= #self.gp_data then
-            if self.selected_indices[dataIndex] then
-                row.selection:Show()
-                row:GetHighlightTexture():SetAlpha(0.2)
-            else
-                row.selection:Hide()
-                row:GetHighlightTexture():SetAlpha(0.4)
-            end
-        end
-    end
-    
-    local selectedCount = 0
-    for _ in pairs(self.selected_indices) do selectedCount = selectedCount + 1 end
-    self.window.countText:SetText(string.format("Выделено: %d", selectedCount))
-end
-
-function GpDb:ClearSelection()
-    self.selected_indices = {}
-    self.last_selected_index = nil
-    self:_UpdateSelectionCount()
-    self:RefreshRowHighlights()
-    self:UpdateRaidWindowVisibility()
-end
-
-function GpDb:GetSelectedEntries()
-    local selected = {}
-    for index, _ in pairs(self.selected_indices) do
-        if index <= #self.gp_data then
-            table.insert(selected, self.gp_data[index])
-        end
-    end
-    return selected
-end
-
-function GpDb:AddLogEntry(timeStr, gpValue, rl, raid, targets, isDecoded)
-    if not self.logWindow then
-        self:_CreateLogWindow()
-    end
-
-    local function GetClassColor(name)
-        if not name or type(name) ~= "string" or name == "" then 
-            return "|cFFFFFFFF" 
-        end
-        for i = 1, GetNumGuildMembers() do
-            local guildName, _, _, _, _, _, _, _, _, _, classFileName = GetGuildRosterInfo(i)
-            if guildName and guildName == name then
-                local color = RAID_CLASS_COLORS[classFileName]
-                if color then
-                    return string.format("|cFF%02x%02x%02x", color.r*255, color.g*255, color.b*255)
-                end
-                break
-            end
-        end
-        return "|cFFFFFFFF"
-    end
-
-    local gpNumValue = tonumber(gpValue) or 0
-    local formattedTime = "|cFFA0A0A0" .. (timeStr or "??:??") .. "|r"
-    local formattedRl = GetClassColor(rl) .. (rl or "Неизвестно") .. "|r"
-    local gpColor = gpNumValue >= 0 and "|cFF00FF00" or "|cFFFF0000"
-    local formattedGp = gpColor .. tostring(gpNumValue) .. "|r"
-    local formattedRaid = "|cFFFFFF00" .. (raid or "Неизвестно") .. "|r"
-
-    local formattedTargets = {}
-    if type(targets) == "string" then
-        for word in targets:gmatch("%S+") do
-            local playerName = word
-            if not isDecoded then
-                for i = 1, GetNumGuildMembers() do
-                    local name, _, _, _, _, _, _, officerNote = GetGuildRosterInfo(i)
-                    if name and officerNote then
-                        local words = {}
-                        for w in officerNote:gmatch("%S+") do
-                            table.insert(words, w)
-                        end
-                        if #words >= 2 and words[2] == word then
-                            playerName = name
-                            break
-                        end
-                    end
-                end
-            end
-            table.insert(formattedTargets, GetClassColor(playerName) .. playerName .. "|r")
-        end
-    end
-    local formattedTargetsText = table.concat(formattedTargets, " ")
-
-    local logText = string.format("%s | %s | %s | %s | %s", 
-        formattedTime, 
-        formattedRl,
-        formattedGp,
-        formattedRaid, 
-        formattedTargetsText)
-
-    table.insert(self.logData, {
-        text = logText,
-        raw = {
-            time = timeStr,
-            rl = rl,
-            gp = gpNumValue,
-            raid = raid,
-            targets = targets
-        }
-    })
-
-    if #self.logData > 2000 then
-        table.remove(self.logData, 1)
-    end
-
-    if self.logWindow and self.logWindow:IsShown() then
+    function GpDb:ClearLog()
+        self.logData = {}
+        self.logWindow.countFilter:SetText("Кол-во")
+        self.logWindow.timeFilter:SetText("День")
+        self.logWindow.rlFilter:SetText("РЛ")
+        self.logWindow.raidFilter:SetText("Рейд")
+        self.logWindow.nameFilter:SetText("Ник")
         self:UpdateLogDisplay()
-        self.logWindow.scrollFrame:SetVerticalScroll(self.logWindow.scrollFrame:GetVerticalScrollRange())
+        dbg("LOG-CLEAR")
     end
-end
 
-function GpDb:UpdateRaidWindowVisibility()
-    if not self.raidWindow then return end
-    local hasSelection = next(self.selected_indices) ~= nil
+    function GpDb:_CreateWindow()
+        self.window = CreateFrame("Frame", "GpTrackerWindow", UIParent)
+        self.window:SetFrameStrata("DIALOG")
+        self.window:SetSize(400, 600)
+        self.window:SetPoint("LEFT", 5, 100)
+        self.window:SetMovable(true)
+        self.window:EnableMouse(true)
+        self.window:RegisterForDrag("LeftButton")
+        self.window:SetScript("OnDragStart", self.window.StartMoving)
+        self.window:SetScript("OnDragStop", self.window.StopMovingOrSizing)
+        self.window:Hide()
 
-    if hasSelection then
-        if not self.raidWindow:IsShown() then
-            if InCombatLockdown() then
-                self.raidWindow:SetAlpha(1)
-            else
-                self.raidWindow:Show()
-                self:RestoreRaidWindowState()
-                self:_UpdateSelectedPlayersText()
-                if self.logWindow and self.logWindow:IsShown() then
-                    self.logWindow:SetHeight(self.window:GetHeight() / 2)
-                end
-            end
+        self.window.background = self.window:CreateTexture(nil, "BACKGROUND")
+        self.window.background:SetTexture("Interface\\Buttons\\WHITE8X8")
+        self.window.background:SetVertexColor(0, 0, 0)
+        self.window.background:SetAlpha(1)
+        self.window.background:SetAllPoints(true)
+
+        self.window.borderFrame = CreateFrame("Frame", nil, self.window)
+        self.window.borderFrame:SetPoint("TOPLEFT", -3, 3)
+        self.window.borderFrame:SetPoint("BOTTOMRIGHT", 3, -3)
+        self.window.borderFrame:SetBackdrop({
+            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+            edgeSize = 16,
+            insets = { left = 4, right = 4, top = 4, bottom = 4 },
+        })
+
+        self.window.title = self.window:CreateFontString(
+            nil, "OVERLAY", "GameFontNormal"
+        )
+        self.window.title:SetPoint("TOP", 0, -15)
+        self.window.title:SetText("")
+
+        self.window.closeButton = CreateFrame(
+            "Button", nil, self.window, "UIPanelCloseButton"
+        )
+        self.window.closeButton:SetPoint("TOPRIGHT", -5, -5)
+        self.window.closeButton:SetScript(
+            "OnClick", function() self.window:Hide() end
+        )
+
+        self.window.logButton = CreateFrame(
+            "Button", nil, self.window, "UIPanelButtonTemplate"
+        )
+        self.window.logButton:SetSize(24, 24)
+        self.window.logButton:SetPoint(
+            "RIGHT", self.window.closeButton, "LEFT", -5, 0
+        )
+        self.window.logButton:SetText("L")
+        self.window.logButton:SetScript(
+            "OnClick", function() self:ToggleLogWindow() end
+        )
+
+        self.window.raidOnlyCheckbox = CreateFrame(
+            "CheckButton", nil, self.window, "UICheckButtonTemplate"
+        )
+        self.window.raidOnlyCheckbox:SetPoint("TOPLEFT", 10, -15)
+        self.window.raidOnlyCheckbox:SetSize(24, 24)
+        self.window.raidOnlyCheckbox.text =
+            self.window.raidOnlyCheckbox:CreateFontString(
+                nil, "OVERLAY", "GameFontNormal"
+            )
+        self.window.raidOnlyCheckbox.text:SetPoint(
+            "LEFT", self.window.raidOnlyCheckbox, "RIGHT", 5, 0
+        )
+        self.window.raidOnlyCheckbox.text:SetText("Только рейд")
+        self.window.raidOnlyCheckbox:SetScript("OnClick", function()
+            self:_UpdateFromGuild()
+            self:UpdateWindow()
+        end)
+
+        self.window.guildCheckbox = CreateFrame(
+            "CheckButton", nil, self.window, "UICheckButtonTemplate"
+        )
+        self.window.guildCheckbox:SetPoint(
+            "LEFT", self.window.raidOnlyCheckbox.text, "RIGHT", 10, 0
+        )
+        self.window.guildCheckbox:SetSize(24, 24)
+        self.window.guildCheckbox.text =
+            self.window.guildCheckbox:CreateFontString(
+                nil, "OVERLAY", "GameFontNormal"
+            )
+        self.window.guildCheckbox.text:SetPoint(
+            "LEFT", self.window.guildCheckbox, "RIGHT", 5, 0
+        )
+        self.window.guildCheckbox.text:SetText("Гильдия")
+        self.window.guildCheckbox:SetScript("OnClick", function()
+            self:_UpdateFromGuild()
+            self:UpdateWindow()
+        end)
+
+        self.window.offCheckbox = CreateFrame(
+            "CheckButton", nil, self.window, "UICheckButtonTemplate"
+        )
+        self.window.offCheckbox:SetPoint(
+            "LEFT", self.window.guildCheckbox.text, "RIGHT", 10, 0
+        )
+        self.window.offCheckbox:SetSize(24, 24)
+        self.window.offCheckbox.text =
+            self.window.offCheckbox:CreateFontString(
+                nil, "OVERLAY", "GameFontNormal"
+            )
+        self.window.offCheckbox.text:SetPoint(
+            "LEFT", self.window.offCheckbox, "RIGHT", 5, 0
+        )
+        self.window.offCheckbox.text:SetText("Off")
+        self.window.offCheckbox:SetScript("OnClick", function()
+            self:_UpdateFromGuild()
+            self:UpdateWindow()
+        end)
+
+        self.window.notesCheckbox = CreateFrame(
+            "CheckButton", nil, self.window, "UICheckButtonTemplate"
+        )
+        self.window.notesCheckbox:SetPoint(
+            "TOPLEFT", self.window.raidOnlyCheckbox, "BOTTOMLEFT", 0, -10
+        )
+        self.window.notesCheckbox:SetSize(24, 24)
+        self.window.notesCheckbox.text =
+            self.window.notesCheckbox:CreateFontString(
+                nil, "OVERLAY", "GameFontNormal"
+            )
+        self.window.notesCheckbox.text:SetPoint(
+            "LEFT", self.window.notesCheckbox, "RIGHT", 5, 0
+        )
+        self.window.notesCheckbox.text:SetText("Заметки")
+        self.window.notesCheckbox:SetScript("OnClick", function()
+            self.showOnlyNotes = self.window.notesCheckbox:GetChecked()
+        end)
+
+        self.window.pveSeasonCheckbox = CreateFrame(
+            "CheckButton", nil, self.window, "UICheckButtonTemplate"
+        )
+        self.window.pveSeasonCheckbox:SetPoint(
+            "LEFT", self.window.notesCheckbox.text, "RIGHT", 10, 0
+        )
+        self.window.pveSeasonCheckbox:SetSize(24, 24)
+        self.window.pveSeasonCheckbox.text =
+            self.window.pveSeasonCheckbox:CreateFontString(
+                nil, "OVERLAY", "GameFontNormal"
+            )
+        self.window.pveSeasonCheckbox.text:SetPoint(
+            "LEFT", self.window.pveSeasonCheckbox, "RIGHT", 5, 0
+        )
+        self.window.pveSeasonCheckbox.text:SetText("ПВЕ-сезон")
+        self.window.pveSeasonCheckbox:SetScript("OnClick", function(self2)
+            NSQC4.SetPveSeason(self2:GetChecked() and true or false)
+        end)
+        self.window.pveSeasonCheckbox:SetChecked(
+            nsDbc4.settings.gp.pveSeason == true
+        )
+
+        self.window.filterEditBox = CreateFrame(
+            "EditBox", "fdsfdsa3333", self.window, "InputBoxTemplate"
+        )
+        self.window.filterEditBox:SetPoint(
+            "TOPLEFT", self.window.notesCheckbox.text, "BOTTOMLEFT", 0, -5
+        )
+        self.window.filterEditBox:SetPoint(
+            "RIGHT", self.window.closeButton, "LEFT", -40, 0
+        )
+        self.window.filterEditBox:SetHeight(20)
+        self.window.filterEditBox:SetAutoFocus(false)
+        self.window.filterEditBox:SetText("")
+        self.window.filterEditBox:SetScript("OnTextChanged", function(editBox)
+            self.filterText = editBox:GetText():lower()
+            self:_UpdateFromGuild()
+        end)
+        self.window.filterEditBox:SetScript("OnEscapePressed", function()
+            self.window.filterEditBox:SetText("")
+            self.window.filterEditBox:ClearFocus()
+        end)
+        self.window.filterEditBox:SetScript("OnEnterPressed", function()
+            self.window.filterEditBox:ClearFocus()
+        end)
+
+        self.window.filterClearButton = CreateFrame(
+            "Button", nil, self.window, "UIPanelButtonTemplate"
+        )
+        self.window.filterClearButton:SetSize(80, 22)
+        self.window.filterClearButton:SetPoint(
+            "TOPRIGHT", self.window.filterEditBox, "BOTTOMRIGHT", 60, 20
+        )
+        self.window.filterClearButton:SetText("Очистить")
+        self.window.filterClearButton:SetScript("OnClick", function()
+            self.window.filterEditBox:SetText("")
+            self.filterText = ""
+            self:_UpdateFromGuild()
+        end)
+
+        self.window.scrollFrame = CreateFrame(
+            "ScrollFrame", "ScrollFrame",
+            self.window, "UIPanelScrollFrameTemplate"
+        )
+        self.window.scrollFrame:SetPoint("TOPLEFT", 0, -85)
+        self.window.scrollFrame:SetPoint("BOTTOMRIGHT", 0, 60)
+
+        self.window.scrollChild = CreateFrame("Frame")
+        self.window.scrollChild:SetSize(380, 500)
+        self.window.scrollFrame:SetScrollChild(self.window.scrollChild)
+
+        self.window.scrollBar =
+            _G[self.window.scrollFrame:GetName() .. "ScrollBar"]
+        self.window.scrollBar:SetPoint(
+            "TOPLEFT", self.window.scrollFrame, "TOPRIGHT", -20, -16
+        )
+        self.window.scrollBar:SetPoint(
+            "BOTTOMLEFT", self.window.scrollFrame, "BOTTOMRIGHT", -20, 16
+        )
+
+        self.window.countText = self.window:CreateFontString(
+            nil, "OVERLAY", "GameFontNormal"
+        )
+        self.window.countText:SetPoint("BOTTOMLEFT", 10, 40)
+        self.window.countText:SetPoint("BOTTOMRIGHT", -10, 40)
+        self.window.countText:SetJustifyH("LEFT")
+        self.window.countText:SetText("")
+
+        self.window.totalText = self.window:CreateFontString(
+            nil, "OVERLAY", "GameFontNormal"
+        )
+        self.window.totalText:SetPoint("BOTTOMLEFT", 10, 20)
+        self.window.totalText:SetPoint("BOTTOMRIGHT", -10, 20)
+        self.window.totalText:SetJustifyH("LEFT")
+        self.window.totalText:SetText("")
+
+        self:_SetupTable()
+    end
+
+    function GpDb:_SetupTable()
+        local headers = {
+            { text = "Ник", column = "nick" },
+            { text = "ГП",  column = "gp"  },
+        }
+
+        for i, header in ipairs(headers) do
+            local btn = CreateFrame("Button", nil, self.window.scrollChild)
+            btn:SetSize(i == 1 and 290 or 50, 20)
+            btn:SetPoint(
+                "TOPLEFT",
+                (i - 1) * 290 + (i == 2 and 10 or 0),
+                -5
+            )
+            btn:SetNormalFontObject("GameFontNormal")
+            btn:SetHighlightFontObject("GameFontHighlight")
+
+            local text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            text:SetAllPoints(true)
+            text:SetText(header.text)
+
+            btn:SetScript("OnClick", function()
+                self:SortData(header.column)
+                self:UpdateWindow()
+            end)
         end
-        self:_UpdatePlayerInfo()
-    else
-        if self.raidWindow:IsShown() then
-            if InCombatLockdown() then
-                self.raidWindow:SetAlpha(0)
-            else
+
+        self.rows = {}
+        for i = 1, 999 do
+            local row = CreateFrame(
+                "Button", "GpDbRow" .. i, self.window.scrollChild
+            )
+            row:SetSize(350, 20)
+            row:SetPoint("TOPLEFT", 0, -25 - (i - 1) * 25)
+            row:EnableMouse(true)
+            row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+
+            row:SetHighlightTexture("Interface\\Buttons\\WHITE8X8")
+            row:GetHighlightTexture():SetVertexColor(0.4, 0.4, 0.8, 0.4)
+
+            row.selection = row:CreateTexture(nil, "BACKGROUND")
+            row.selection:SetAllPoints(true)
+            row.selection:SetTexture("Interface\\Buttons\\WHITE8X8")
+            row.selection:SetVertexColor(0.3, 0.3, 0.7, 0.7)
+            row.selection:Hide()
+
+            row.nick = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            row.nick:SetPoint("LEFT", 10, 0)
+            row.nick:SetWidth(290)
+            row.nick:SetJustifyH("LEFT")
+
+            row.gp = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            row.gp:SetPoint("RIGHT", 5, 0)
+            row.gp:SetWidth(50)
+            row.gp:SetJustifyH("RIGHT")
+
+            row.lastClickTime = 0
+
+            row:SetScript("OnClick", function(_, button, down)
+                local offset = FauxScrollFrame_GetOffset(self.window.scrollFrame)
+                local dataIndex = i + offset
+                if not self.gp_data or not self.gp_data[dataIndex] then
+                    return
+                end
+
+                local currentTime = GetTime()
+                SendAddonMessage(
+                    "NSShowMeZametki",
+                    self.gp_data[dataIndex].original_nick,
+                    "GUILD"
+                )
+
+                if button == "LeftButton"
+                and IsInRaid()
+                and (currentTime - row.lastClickTime) < 0.5 then
+                    self:ClearSelection()
+                    for idx = 1, #self.gp_data do
+                        self.selected_indices[idx] = true
+                    end
+                    self.last_selected_index = dataIndex
+                    self:_UpdateSelectionCount()
+                    self:RefreshRowHighlights()
+                    self:UpdateRaidWindowVisibility()
+                    if self.raidWindow and self.raidWindow:IsShown() then
+                        self:_UpdateSelectedPlayersText()
+                    end
+                    row.lastClickTime = 0
+                    return
+                end
+
+                row.lastClickTime = currentTime
+
+                if button == "LeftButton" then
+                    local wasSelected = self.selected_indices[dataIndex]
+
+                    if IsShiftKeyDown() then
+                        if not self.last_selected_index then
+                            self:ClearSelection()
+                            self.selected_indices[dataIndex] = true
+                            self.last_selected_index = dataIndex
+                        else
+                            local startIdx = math.min(
+                                self.last_selected_index, dataIndex
+                            )
+                            local endIdx = math.max(
+                                self.last_selected_index, dataIndex
+                            )
+                            if not IsControlKeyDown() then
+                                self:ClearSelection()
+                            end
+                            for idx = startIdx, endIdx do
+                                if self.gp_data[idx] then
+                                    self.selected_indices[idx] = true
+                                end
+                            end
+                        end
+                    elseif IsControlKeyDown() then
+                        self.selected_indices[dataIndex] = not wasSelected
+                        for idx in pairs(self.selected_indices) do
+                            if not self.gp_data[idx] then
+                                self.selected_indices[idx] = nil
+                            end
+                        end
+                        if self.selected_indices[dataIndex] then
+                            self.last_selected_index = dataIndex
+                        else
+                            self.last_selected_index = nil
+                            for idx in pairs(self.selected_indices) do
+                                if self.selected_indices[idx] then
+                                    self.last_selected_index = idx
+                                    break
+                                end
+                            end
+                        end
+                    else
+                        if wasSelected then
+                            self:ClearSelection()
+                        else
+                            self:ClearSelection()
+                            self.selected_indices[dataIndex] = true
+                            self.last_selected_index = dataIndex
+                        end
+                    end
+
+                    self:_UpdateSelectionCount()
+                    self:RefreshRowHighlights()
+                    self:UpdateRaidWindowVisibility()
+                    if self.raidWindow and self.raidWindow:IsShown() then
+                        self:_UpdateSelectedPlayersText()
+                    end
+                end
+            end)
+            self.rows[i] = row
+        end
+
+        self.window:SetScript("OnHide", function()
+            self:ClearSelection()
+            if self.raidWindow and self.raidWindow:IsShown() then
                 self.raidWindow:Hide()
             end
+            if self.logWindow and self.logWindow:IsShown() then
+                self.logWindow:Hide()
+            end
+        end)
+    end
+
+    function GpDb:ToggleLogWindow()
+        if not self.logWindow then self:_CreateLogWindow() end
+
+        if self.logWindow:IsShown() then
+            self.logWindow:Hide()
+        else
+            self.logWindow:Show()
+
+            local selectedCodes = {}
+            for index in pairs(self.selected_indices) do
+                if self.gp_data[index] then
+                    table.insert(
+                        selectedCodes,
+                        self.gp_data[index].original_nick
+                    )
+                end
+            end
+
+            if #selectedCodes > 0 then
+                local codeFilter = table.concat(selectedCodes, "_")
+                dbg("LOG-REQ-NICKS", "filter=", codeFilter)
+                self:ClearLog()
+
+                local function processFilterText(text, placeholder)
+                    if text == placeholder or text == "" then return "_" end
+                    if text:find("%s") then
+                        text = text:gsub("%s+", "_")
+                    end
+                    return text
+                end
+
+                local request = processFilterText("", "Кол-во") .. " "
+                    .. processFilterText("", "День") .. " "
+                    .. processFilterText("", "РЛ") .. " "
+                    .. processFilterText("", "Рейд") .. " "
+                    .. codeFilter
+
+                SendAddonMessage("NSShowMeLogs", request, "GUILD")
+            else
+                if self.window.notesCheckbox
+                and self.window.notesCheckbox:GetChecked() then
+                    local filteredLogData = {}
+                    for _, entry in ipairs(self.logData) do
+                        if entry.raw
+                        and entry.raw.raid
+                        and entry.raw.raid:find(">>", 1, true) then
+                            table.insert(filteredLogData, entry)
+                        end
+                    end
+                    local originalLogData = self.logData
+                    self.logData = filteredLogData
+                    self:UpdateLogDisplay()
+                    self.logData = originalLogData
+                else
+                    self:UpdateLogDisplay()
+                end
+            end
+
+            if self.raidWindow and self.raidWindow:IsShown() then
+                self.logWindow:SetHeight(self.window:GetHeight() / 2)
+            else
+                self.logWindow:SetHeight(self.window:GetHeight())
+            end
+        end
+    end
+
+    function GpDb:UpdateLogDisplay()
+        if not self.logWindow or not self.logWindow:IsShown() then return end
+
+        local totalHeight = 0
+        local rowHeights = {}
+
+        for i, entry in ipairs(self.logData) do
+            local tempText = self.logWindow.scrollChild:CreateFontString(
+                nil, "OVERLAY", "GameFontNormalSmall"
+            )
+            tempText:SetWidth(580)
+            tempText:SetText(entry.text)
+            tempText:SetWordWrap(true)
+            local textHeight = tempText:GetStringHeight() + 5
+            rowHeights[i] = textHeight
+            totalHeight = totalHeight + textHeight
+            tempText:Hide()
+        end
+
+        local currentY = 0
+        for i = 1, #self.logRows do
+            local dataIndex = i
+            if dataIndex <= #self.logData then
+                local entry = self.logData[dataIndex]
+                local textHeight = rowHeights[dataIndex]
+                self.logRows[i]:SetHeight(textHeight)
+                self.logRows[i]:SetPoint("TOPLEFT", 0, -currentY)
+                self.logRows[i].text:SetText(entry.text)
+                self.logRows[i]:Show()
+                currentY = currentY + textHeight
+            else
+                self.logRows[i]:Hide()
+            end
+        end
+
+        self.logWindow.scrollChild:SetHeight(totalHeight)
+        self.logWindow.scrollFrame:UpdateScrollChildRect()
+    end
+
+    function GpDb:_UpdateSelectionCount()
+        local count = 0
+        for idx, selected in pairs(self.selected_indices) do
+            if selected and self.gp_data[idx] then
+                count = count + 1
+            else
+                self.selected_indices[idx] = nil
+            end
+        end
+        self.window.countText:SetText(
+            string.format("Выделено: %d", count)
+        )
+        if count == 0 then
+            self.last_selected_index = nil
+        end
+        return count
+    end
+
+    function GpDb:IsValidIndex(index)
+        return index
+            and type(index) == "number"
+            and self.gp_data
+            and self.gp_data[index]
+    end
+
+    function GpDb:RefreshRowHighlights()
+        local offset = FauxScrollFrame_GetOffset(self.window.scrollFrame)
+        for i, row in ipairs(self.rows) do
+            local dataIndex = i + offset
+            if dataIndex <= #self.gp_data then
+                if self.selected_indices[dataIndex] then
+                    row.selection:Show()
+                    row:GetHighlightTexture():SetAlpha(0.2)
+                else
+                    row.selection:Hide()
+                    row:GetHighlightTexture():SetAlpha(0.4)
+                end
+            end
+        end
+        local selectedCount = 0
+        for _ in pairs(self.selected_indices) do
+            selectedCount = selectedCount + 1
+        end
+        self.window.countText:SetText(
+            string.format("Выделено: %d", selectedCount)
+        )
+    end
+
+    function GpDb:ClearSelection()
+        self.selected_indices = {}
+        self.last_selected_index = nil
+        self:_UpdateSelectionCount()
+        self:RefreshRowHighlights()
+        self:UpdateRaidWindowVisibility()
+    end
+
+    function GpDb:GetSelectedEntries()
+        local selected = {}
+        for index, _ in pairs(self.selected_indices) do
+            if index <= #self.gp_data then
+                table.insert(selected, self.gp_data[index])
+            end
+        end
+        return selected
+    end
+
+    function GpDb:AddLogEntry(timeStr, gpValue, rl, raid, targets, isDecoded)
+        if not self.logWindow then self:_CreateLogWindow() end
+
+        local function GetClassColor(name)
+            if not name or type(name) ~= "string" or name == "" then
+                return "|cFFFFFFFF"
+            end
+            for i = 1, GetNumGuildMembers() do
+                local guildName, _, _, _, _, _, _, _, _, _, classFileName =
+                    GetGuildRosterInfo(i)
+                if guildName and guildName == name then
+                    local color = RAID_CLASS_COLORS[classFileName]
+                    if color then
+                        return string.format(
+                            "|cFF%02x%02x%02x",
+                            color.r * 255,
+                            color.g * 255,
+                            color.b * 255
+                        )
+                    end
+                    break
+                end
+            end
+            return "|cFFFFFFFF"
+        end
+
+        local gpNumValue = tonumber(gpValue) or 0
+        local formattedTime = "|cFFA0A0A0" .. (timeStr or "??:??") .. "|r"
+        local formattedRl = GetClassColor(rl) .. (rl or "Неизвестно") .. "|r"
+        local gpColor = gpNumValue >= 0 and "|cFF00FF00" or "|cFFFF0000"
+        local formattedGp = gpColor .. tostring(gpNumValue) .. "|r"
+        local formattedRaid = "|cFFFFFF00" .. (raid or "Неизвестно") .. "|r"
+
+        local formattedTargets = {}
+        if type(targets) == "string" then
+            for word in targets:gmatch("%S+") do
+                table.insert(
+                    formattedTargets,
+                    GetClassColor(word) .. word .. "|r"
+                )
+            end
+        end
+        local formattedTargetsText = table.concat(formattedTargets, " ")
+
+        local logText = string.format(
+            "%s | %s | %s | %s | %s",
+            formattedTime, formattedRl, formattedGp,
+            formattedRaid, formattedTargetsText
+        )
+
+        table.insert(self.logData, {
+            text = logText,
+            raw = {
+                time = timeStr,
+                rl = rl,
+                gp = gpNumValue,
+                raid = raid,
+                targets = targets,
+            },
+        })
+        if #self.logData > 2000 then
+            table.remove(self.logData, 1)
         end
         if self.logWindow and self.logWindow:IsShown() then
-            self.logWindow:SetHeight(self.window:GetHeight())
-        end
-    end
-end
-
-function GpDb:UpdateWindow()
-    if not self.window or not self.rows then return end
-
-    local offset = FauxScrollFrame_GetOffset(self.window.scrollFrame)
-    
-    local visibleRows = math.floor((self.window.scrollFrame:GetHeight() - 30) / 25)
-    self.visible_rows = visibleRows
-    
-    for i = 1, self.visible_rows do
-        local row = self.rows[i]
-        local dataIndex = i + offset
-        
-        if dataIndex <= #self.gp_data then
-            local entry = self.gp_data[dataIndex]
-            
-            row.nick:SetText(entry.nick)
-            row.gp:SetText(tostring(entry.gp))
-            
-            if entry.classColor then
-                row.nick:SetTextColor(entry.classColor.r, entry.classColor.g, entry.classColor.b)
-            else
-                row.nick:SetTextColor(1, 1, 1)
-            end
-            
-            row:Show()
-        else
-            row:Hide()
+            self:UpdateLogDisplay()
+            self.logWindow.scrollFrame:SetVerticalScroll(
+                self.logWindow.scrollFrame:GetVerticalScrollRange()
+            )
         end
     end
 
-    self:RefreshRowHighlights()
-    
-    FauxScrollFrame_Update(self.window.scrollFrame, #self.gp_data, self.visible_rows, 25)
-    self:UpdateRaidWindowVisibility()
-end
+    function GpDb:UpdateRaidWindowVisibility()
+        if not self.raidWindow then return end
+        local hasSelection = next(self.selected_indices) ~= nil
 
-function GpDb:GetNumSelected()
-    local count = 0
-    for idx in pairs(self.selected_indices) do
-        if self.gp_data[idx] then
-            count = count + 1
-        else
-            self.selected_indices[idx] = nil
-        end
-    end
-    print(string.format("GetNumSelected: найдено %d элементов", count))
-    return count
-end
-
-function GpDb:Hide()
-    self.window:Hide()
-end
-
-function GpDb:_UpdateFromGuild()
-    self.gp_data = {}
-    local totalWithGP = 0
-
-    local raidOnlyMode    = self.window.raidOnlyCheckbox:GetChecked()
-    local showAllGuild    = self.window.guildCheckbox:GetChecked()
-    local showOfflineOnly = showAllGuild and self.window.offCheckbox:GetChecked()
-
-    if not IsInGuild() then
-        print("|cFFFF0000ГП:|r Вы не состоите в гильдии")
-        self:UpdateWindow()
-        return
-    end
-
-    local db = self
-    if not db.external_gp_cache then db.external_gp_cache = {} end
-
-    local guildRosterInfo = {}
-    for j = 1, GetNumGuildMembers(true) do
-        local name, _, _, _, class5, _, publicNote, officerNote, online, _, class11 = GetGuildRosterInfo(j)
-        if name then
-            local plainName = name:match("^(.-)-") or name
-            local classFileName = class11 or class5
-            local words = {}
-            if officerNote then
-                for word in officerNote:gmatch("%S+") do table.insert(words, word) end
-            end
-            guildRosterInfo[plainName] = {
-                fullName = name,
-                publicNote = publicNote,
-                officerNote = officerNote,
-                classFileName = classFileName,
-                playerID = words[2],
-                gp = tonumber(words[3]) or 0,
-                online = online
-            }
-        end
-    end
-
-    if raidOnlyMode then
-        for i = 1, GetNumGroupMembers() do
-            local raidName, _, _, _, _, classFileName = GetRaidRosterInfo(i)
-            if raidName then
-                local plainName = raidName:match("^(.-)-") or raidName
-                local guildInfo = guildRosterInfo[plainName]
-                if guildInfo then
-                    local gp = guildInfo.gp or 0
-                    local publicNote = guildInfo.publicNote or ""
-                    if gp > 0 then totalWithGP = totalWithGP + 1 end
-                    local displayName = raidName
-                    if publicNote ~= "" then
-                        displayName = raidName .. " |cFFFFFF00(" .. publicNote .. ")|r"
-                    end
-                    table.insert(db.gp_data, {
-                        nick = displayName,
-                        original_nick = plainName,
-                        gp = gp,
-                        classColor = RAID_CLASS_COLORS[classFileName]
-                            or RAID_CLASS_COLORS[guildInfo.classFileName]
-                            or { r = 1, g = 1, b = 1 },
-                        classFileName = classFileName or guildInfo.classFileName,
-                        playerID = guildInfo.playerID,
-                        isGuildMember = true
-                    })
+        if hasSelection then
+            if not self.raidWindow:IsShown() then
+                if InCombatLockdown() then
+                    self.raidWindow:SetAlpha(1)
                 else
-                    local cachedGp = db.external_gp_cache[plainName] or 0
-                    if cachedGp > 0 then totalWithGP = totalWithGP + 1 end
-                    table.insert(db.gp_data, {
-                        nick = raidName,
-                        original_nick = plainName,
-                        gp = cachedGp,
-                        classColor = RAID_CLASS_COLORS[classFileName] or { r = 1, g = 1, b = 1 },
-                        classFileName = classFileName,
-                        playerID = nil,
-                        isGuildMember = false
-                    })
+                    self.raidWindow:Show()
+                    self:RestoreRaidWindowState()
+                    self:_UpdateSelectedPlayersText()
+                    if self.logWindow and self.logWindow:IsShown() then
+                        self.logWindow:SetHeight(self.window:GetHeight() / 2)
+                    end
                 end
             end
-        end
-    elseif showAllGuild then
-        for plainName, guildInfo in pairs(guildRosterInfo) do
-            if showOfflineOnly or guildInfo.online then
-                local gp = guildInfo.gp or 0
-                if gp > 0 then totalWithGP = totalWithGP + 1 end
-                local displayName = guildInfo.fullName
-                if guildInfo.publicNote ~= "" then
-                    displayName = guildInfo.fullName .. " |cFFFFFF00(" .. guildInfo.publicNote .. ")|r"
+            self:_UpdatePlayerInfo()
+        else
+            if self.raidWindow:IsShown() then
+                if InCombatLockdown() then
+                    self.raidWindow:SetAlpha(0)
+                else
+                    self.raidWindow:Hide()
                 end
-                table.insert(db.gp_data, {
-                    nick = displayName,
-                    original_nick = plainName,
-                    gp = gp,
-                    classColor = RAID_CLASS_COLORS[guildInfo.classFileName] or { r = 1, g = 1, b = 1 },
-                    classFileName = guildInfo.classFileName,
-                    playerID = guildInfo.playerID,
-                    isGuildMember = true
-                })
+            end
+            if self.logWindow and self.logWindow:IsShown() then
+                self.logWindow:SetHeight(self.window:GetHeight())
             end
         end
-    else
-        for plainName, guildInfo in pairs(guildRosterInfo) do
-            if guildInfo.officerNote and guildInfo.officerNote ~= "" then
-                local gp = guildInfo.gp or 0
-                if gp ~= 0 then
-                    totalWithGP = totalWithGP + 1
+    end
+
+    function GpDb:GetNumSelected()
+        local count = 0
+        for idx in pairs(self.selected_indices) do
+            if self.gp_data[idx] then
+                count = count + 1
+            else
+                self.selected_indices[idx] = nil
+            end
+        end
+        dbg("GETNUM-SELECTED", "count=", count)
+        return count
+    end
+
+    function GpDb:Hide()
+        self.window:Hide()
+    end
+
+    -- ========================================================================
+    -- _UpdateFromGuild — обновление списка из ростера гильдии/рейда
+    -- ========================================================================
+    function GpDb:_UpdateFromGuild()
+        dbgGp("UPDATE-FROM-GUILD", "начало обновления списка")
+        self.gp_data = {}
+        local totalWithGP = 0
+
+        local raidOnlyMode    = self.window.raidOnlyCheckbox:GetChecked()
+        local showAllGuild    = self.window.guildCheckbox:GetChecked()
+        local showOfflineOnly = showAllGuild
+            and self.window.offCheckbox:GetChecked()
+
+        if not IsInGuild() then
+            dbgGp("ROSTER-SKIP", "not in guild — пропускаем обновление")
+            self:UpdateWindow()
+            return
+        end
+
+        local db = self
+        if not db.external_gp_cache then
+            db.external_gp_cache = {}
+        end
+
+        local guildRosterInfo = {}
+        for j = 1, GetNumGuildMembers(true) do
+            local name, _, _, _, class5, _,
+                  publicNote, officerNote, online, _, class11 =
+                GetGuildRosterInfo(j)
+            if name then
+                local plainName = name:match("^(.-)-") or name
+                local classFileName = class11 or class5
+                local words = {}
+                if officerNote then
+                    for word in officerNote:gmatch("%S+") do
+                        table.insert(words, word)
+                    end
+                end
+                guildRosterInfo[plainName] = {
+                    fullName      = name,
+                    publicNote    = publicNote,
+                    officerNote   = officerNote,
+                    classFileName = classFileName,
+                    gp            = tonumber(words[3]) or 0,
+                    online        = online,
+                }
+            end
+        end
+
+        dbgGp("ROSTER-SIZE",
+            "guildMembers=", tostring(GetNumGuildMembers(true)),
+            "raidOnlyMode=", tostring(raidOnlyMode),
+            "showAllGuild=", tostring(showAllGuild),
+            "showOfflineOnly=", tostring(showOfflineOnly)
+        )
+
+        if raidOnlyMode then
+            local numGroup = GetNumGroupMembers()
+            dbgGp("RAID-MODE", "numGroupMembers=", tostring(numGroup))
+
+            for i = 1, numGroup do
+                local raidName, _, _, _, _, classFileName =
+                    GetRaidRosterInfo(i)
+                if raidName then
+                    local plainName = raidName:match("^(.-)-") or raidName
+                    local guildInfo = guildRosterInfo[plainName]
+
+                    if guildInfo then
+                        -- ====================================================
+                        -- Игрок В ГИЛЬДИИ — берём ГП из ростера
+                        -- ====================================================
+                        local gp = guildInfo.gp or 0
+                        local publicNote = guildInfo.publicNote or ""
+
+                        if gp > 0 then
+                            totalWithGP = totalWithGP + 1
+                        end
+
+                        local displayName = raidName
+                        if publicNote ~= "" then
+                            displayName = raidName
+                                .. " |cFFFFFF00(" .. publicNote .. ")|r"
+                        end
+
+                        table.insert(db.gp_data, {
+                            nick          = displayName,
+                            original_nick = plainName,
+                            gp            = gp,
+                            classColor    = RAID_CLASS_COLORS[classFileName]
+                                or RAID_CLASS_COLORS[guildInfo.classFileName]
+                                or { r = 1, g = 1, b = 1 },
+                            classFileName = classFileName
+                                or guildInfo.classFileName,
+                            isGuildMember = true,
+                        })
+
+                        dbgGp("RAID-PLAYER",
+                            "nick=", plainName,
+                            "gp=", tostring(gp),
+                            "isGuildMember=", "true"
+                        )
+                    else
+                        -- ====================================================
+                        -- Игрок НЕ В ГИЛЬДИИ — берём из кеша + запрос
+                        -- ====================================================
+                        local cachedGp =
+                            db.external_gp_cache[plainName] or 0
+
+                        if cachedGp > 0 then
+                            totalWithGP = totalWithGP + 1
+                        end
+
+                        table.insert(db.gp_data, {
+                            nick          = raidName,
+                            original_nick = plainName,
+                            gp            = cachedGp,
+                            classColor    = RAID_CLASS_COLORS[classFileName]
+                                or { r = 1, g = 1, b = 1 },
+                            classFileName = classFileName,
+                            isGuildMember = false,
+                        })
+
+                        dbgGp("RAID-PLAYER-NON-GUILD",
+                            "nick=", plainName,
+                            "cachedGp=", tostring(cachedGp),
+                            "isGuildMember=", "false",
+                            "будет запрошен ГП"
+                        )
+
+                        if NSQC4.RequestGp then
+                            dbgGp("RAID-REQUEST-GP",
+                                "запрашиваем ГП для не-гильдейца:",
+                                plainName
+                            )
+                            NSQC4.RequestGp(plainName)
+                        end
+                    end
+                end
+            end
+
+        elseif showAllGuild then
+            for plainName, guildInfo in pairs(guildRosterInfo) do
+                if showOfflineOnly or guildInfo.online then
+                    local gp = guildInfo.gp or 0
+                    if gp > 0 then
+                        totalWithGP = totalWithGP + 1
+                    end
+
                     local displayName = guildInfo.fullName
                     if guildInfo.publicNote ~= "" then
-                        displayName = guildInfo.fullName .. " |cFFFFFF00(" .. guildInfo.publicNote .. ")|r"
+                        displayName = guildInfo.fullName
+                            .. " |cFFFFFF00("
+                            .. guildInfo.publicNote .. ")|r"
                     end
+
                     table.insert(db.gp_data, {
-                        nick = displayName,
+                        nick          = displayName,
                         original_nick = plainName,
-                        gp = gp,
-                        classColor = RAID_CLASS_COLORS[guildInfo.classFileName] or { r = 1, g = 1, b = 1 },
+                        gp            = gp,
+                        classColor    =
+                            RAID_CLASS_COLORS[guildInfo.classFileName]
+                            or { r = 1, g = 1, b = 1 },
                         classFileName = guildInfo.classFileName,
-                        playerID = guildInfo.playerID,
-                        isGuildMember = true
+                        isGuildMember = true,
                     })
                 end
             end
-        end
-    end
 
-    if db.filterText and db.filterText ~= "" then
-        local filteredData = {}
-        for _, entry in ipairs(db.gp_data) do
-            if string.find(entry.original_nick:lower(), db.filterText, 1, true)
-               or string.find(entry.nick:lower(), db.filterText, 1, true) then
-                table.insert(filteredData, entry)
+        else
+            for plainName, guildInfo in pairs(guildRosterInfo) do
+                if guildInfo.officerNote
+                and guildInfo.officerNote ~= "" then
+                    local gp = guildInfo.gp or 0
+                    if gp ~= 0 then
+                        totalWithGP = totalWithGP + 1
+
+                        local displayName = guildInfo.fullName
+                        if guildInfo.publicNote ~= "" then
+                            displayName = guildInfo.fullName
+                                .. " |cFFFFFF00("
+                                .. guildInfo.publicNote .. ")|r"
+                        end
+
+                        table.insert(db.gp_data, {
+                            nick          = displayName,
+                            original_nick = plainName,
+                            gp            = gp,
+                            classColor    =
+                                RAID_CLASS_COLORS[guildInfo.classFileName]
+                                or { r = 1, g = 1, b = 1 },
+                            classFileName = guildInfo.classFileName,
+                            isGuildMember = true,
+                        })
+                    end
+                end
             end
         end
-        db.gp_data = filteredData
+
+        if db.filterText and db.filterText ~= "" then
+            local filteredData = {}
+            for _, entry in ipairs(db.gp_data) do
+                if string.find(
+                    entry.original_nick:lower(),
+                    db.filterText, 1, true
+                )
+                or string.find(
+                    entry.nick:lower(),
+                    db.filterText, 1, true
+                ) then
+                    table.insert(filteredData, entry)
+                end
+            end
+            db.gp_data = filteredData
+        end
+
+        db.window.countText:SetText(
+            string.format("Отображается игроков: %d", #db.gp_data)
+        )
+        db.window.totalText:SetText(string.format(
+            "Всего игроков с ГП: %d (из %d в гильдии)",
+            totalWithGP, GetNumGuildMembers(true)
+        ))
+
+        db:ClearSelection()
+        db:SortData()
+        db:UpdateWindow()
     end
 
-    db.window.countText:SetText(string.format("Отображается игроков: %d", #db.gp_data))
-    db.window.totalText:SetText(string.format(
-        "Всего игроков с ГП: %d (из %d в гильдии)",
-        totalWithGP, GetNumGuildMembers(true)
-    ))
+    function GpDb:SetExternalGp(nick, gp)
+        if not nick or type(nick) ~= "string" or nick == "" then return end
+        local cleanNick = nick:match("^(.-)-") or nick
+        local gpNumber = tonumber(gp) or 0
 
-    db:ClearSelection()
-    db:SortData()
-    db:UpdateWindow()
-end
+        if not self.external_gp_cache then
+            self.external_gp_cache = {}
+        end
+        self.external_gp_cache[cleanNick] = gpNumber
 
-function GpDb:SetExternalGp(nick, gp)
-    if not nick or type(nick) ~= "string" or nick == "" then return end
-    local cleanNick = nick:match("^(.-)-") or nick
-    local gpNumber = tonumber(gp) or 0
+        dbgGp("EXT-GP-SET",
+            "nick=", cleanNick,
+            "gp=", tostring(gpNumber),
+            "получен внешний ГП (ответ от сервера)"
+        )
 
-    if not self.external_gp_cache then
-        self.external_gp_cache = {}
+        if self.window and self.window:IsShown() then
+            self:_UpdateFromGuild()
+        end
     end
 
-    self.external_gp_cache[cleanNick] = gpNumber
-
-    if self.window and self.window:IsShown() then
-        self:_UpdateFromGuild()
+    function GpDb:GetExternalGp(nick)
+        if not nick or type(nick) ~= "string" or nick == "" then
+            return nil
+        end
+        local cleanNick = nick:match("^(.-)-") or nick
+        if not self.external_gp_cache then return nil end
+        return self.external_gp_cache[cleanNick]
     end
-end
 
-function GpDb:GetExternalGp(nick)
-    if not nick or type(nick) ~= "string" or nick == "" then return nil end
-    local cleanNick = nick:match("^(.-)-") or nick
-    
-    if not self.external_gp_cache then return nil end
-    
-    return self.external_gp_cache[cleanNick]
-end
-
-function GpDb:GetAllExternalGp()
-    if not self.external_gp_cache then
-        self.external_gp_cache = {}
+    function GpDb:GetAllExternalGp()
+        if not self.external_gp_cache then
+            self.external_gp_cache = {}
+        end
+        return self.external_gp_cache
     end
-    return self.external_gp_cache
-end
 
-function GpDb:Show()
-    self.window:Show()
-    self.gp_data = {}
-    self:UpdateWindow()
+    function GpDb:Show()
+        self.window:Show()
+        self.gp_data = {}
+        self:UpdateWindow()
+        self.window.raidOnlyCheckbox:SetChecked(
+            IsInRaid() and true or false
+        )
+        GuildRoster()
 
-    self.window.raidOnlyCheckbox:SetChecked(IsInRaid() and true or false)
+        if not self._rosterListener then
+            self._rosterListener = CreateFrame("Frame")
+            self._rosterListener:SetScript("OnEvent", function(f, event)
+                f:UnregisterEvent("GUILD_ROSTER_UPDATE")
+                self:RequestNonGuildGP()
+                self:_UpdateFromGuild()
+                self:UpdateWindow()
+            end)
+        end
+        self._rosterListener:RegisterEvent("GUILD_ROSTER_UPDATE")
 
-    GuildRoster()
+        if self._showFallback then
+            self._showFallback:SetScript("OnUpdate", nil)
+            self._showFallback:Hide()
+            self._showFallback = nil
+        end
 
-    if not self._rosterListener then
-        self._rosterListener = CreateFrame("Frame")
-        self._rosterListener:SetScript("OnEvent", function(f, event)
-            f:UnregisterEvent("GUILD_ROSTER_UPDATE")
+        local fallback = CreateFrame("Frame")
+        self._showFallback = fallback
+        fallback:Show()
+        local elapsed = 0
+        local delay = 2.0
+        local fired = false
+
+        fallback:SetScript("OnUpdate", function(f, dt)
+            elapsed = elapsed + dt
+            if elapsed < delay then return end
+            f:SetScript("OnUpdate", nil)
+            f:Hide()
+            self._showFallback = nil
+            if fired then return end
+            fired = true
             self:RequestNonGuildGP()
             self:_UpdateFromGuild()
             self:UpdateWindow()
         end)
     end
-    self._rosterListener:RegisterEvent("GUILD_ROSTER_UPDATE")
 
-    if self._showFallback then
-        self._showFallback:SetScript("OnUpdate", nil)
-        self._showFallback:Hide()
-        self._showFallback = nil
-    end
-
-    local fallback = CreateFrame("Frame")
-    self._showFallback = fallback
-    fallback:Show()
-
-    local elapsed = 0
-    local delay = 2.0
-    local fired = false
-
-    fallback:SetScript("OnUpdate", function(f, dt)
-        elapsed = elapsed + dt
-        if elapsed < delay then return end
-
-        f:SetScript("OnUpdate", nil)
-        f:Hide()
-        self._showFallback = nil
-
-        if fired then return end
-        fired = true
-
-        self:RequestNonGuildGP()
-        self:_UpdateFromGuild()
-        self:UpdateWindow()
-    end)
-end
-
-function GpDb:ReportNonGuild()
-    if not IsInRaid() then
-        SendChatMessage("[GP] Не в рейде — не-гильдейских нет", "OFFICER")
-        return
-    end
-
-    local guildNames = {}
-    for i = 1, GetNumGuildMembers(true) do
-        local name = GetGuildRosterInfo(i)
-        if name then
-            guildNames[name:match("^(.-)-") or name] = true
+    function GpDb:ReportNonGuild()
+        if not IsInRaid() then
+            SendChatMessage(
+                "[GP] Не в рейде — не-гильдейских нет",
+                "OFFICER"
+            )
+            return
         end
-    end
 
-    local list = {}
-    for i = 1, GetNumGroupMembers() do
-        local raidName = GetRaidRosterInfo(i)
-        if raidName then
-            local plain = raidName:match("^(.-)-") or raidName
-            if not guildNames[plain] then
-                local cache = self.external_gp_cache or {}
-                list[#list+1] = plain .. " => " .. tostring(cache[plain] or "nil")
+        local guildNames = {}
+        for i = 1, GetNumGuildMembers(true) do
+            local name = GetGuildRosterInfo(i)
+            if name then
+                guildNames[name:match("^(.-)-") or name] = true
             end
         end
-    end
 
-    SendChatMessage("[GP] Не-гильдейских в рейде: " .. #list, "OFFICER")
-    for _, line in ipairs(list) do
-        SendChatMessage("[GP] " .. line, "OFFICER")
-    end
-end
-
-function GpDb:AddGpEntry(nick, gp, playerID)
-    table.insert(self.gp_data, {
-        nick = nick,
-        original_nick = nick,
-        gp = tonumber(gp) or 0,
-        playerID = playerID
-    })
-    self:SortData()
-    self:UpdateWindow()
-end
-
-function GpDb:UpdateGpEntry(nick, new_gp)
-    for _, entry in ipairs(self.gp_data) do
-        if entry.original_nick == nick then
-            entry.gp = tonumber(new_gp) or 0
-            break
+        local list = {}
+        for i = 1, GetNumGroupMembers() do
+            local raidName = GetRaidRosterInfo(i)
+            if raidName then
+                local plain = raidName:match("^(.-)-") or raidName
+                if not guildNames[plain] then
+                    local cache = self.external_gp_cache or {}
+                    list[#list + 1] = plain
+                        .. " => " .. tostring(cache[plain] or "nil")
+                end
+            end
         end
-    end
-    self:SortData()
-    self:UpdateWindow()
-end
 
-function GpDb:RemoveGpEntry(nick)
-    for i, entry in ipairs(self.gp_data) do
-        if entry.original_nick == nick then
-            table.remove(self.gp_data, i)
-            break
-        end
-    end
-    self:UpdateWindow()
-end
-
-function GpDb:FindGpEntry(nick)
-    for _, entry in ipairs(self.gp_data) do
-        if entry.original_nick == nick then
-            return entry.gp
-        end
-    end
-    return nil
-end
-
-function GpDb:ClearAll()
-    self.gp_data = {}
-    self:UpdateWindow()
-end
-
-function GpDb:SortData(column)
-    if column then
-        if self.sort_column == column then
-            self.sort_ascending = not self.sort_ascending
-        else
-            self.sort_column = column
-            self.sort_ascending = true
+        SendChatMessage(
+            "[GP] Не-гильдейских в рейде: " .. #list,
+            "OFFICER"
+        )
+        for _, line in ipairs(list) do
+            SendChatMessage("[GP] " .. line, "OFFICER")
         end
     end
 
-    table.sort(self.gp_data, function(a, b)
-        local valA, valB
-        
-        if self.sort_column == "nick" then
-            valA = string.lower(a.original_nick or "")
-            valB = string.lower(b.original_nick or "")
-        else
-            valA = a.gp or 0
-            valB = b.gp or 0
+    function GpDb:AddGpEntry(nick, gp, playerID)
+        table.insert(self.gp_data, {
+            nick = nick,
+            original_nick = nick,
+            gp = tonumber(gp) or 0,
+            playerID = playerID,
+        })
+        self:SortData()
+        self:UpdateWindow()
+    end
+
+    function GpDb:UpdateGpEntry(nick, new_gp)
+        for _, entry in ipairs(self.gp_data) do
+            if entry.original_nick == nick then
+                entry.gp = tonumber(new_gp) or 0
+                break
+            end
+        end
+        self:SortData()
+        self:UpdateWindow()
+    end
+
+    function GpDb:RemoveGpEntry(nick)
+        for i, entry in ipairs(self.gp_data) do
+            if entry.original_nick == nick then
+                table.remove(self.gp_data, i)
+                break
+            end
+        end
+        self:UpdateWindow()
+    end
+
+    function GpDb:FindGpEntry(nick)
+        for _, entry in ipairs(self.gp_data) do
+            if entry.original_nick == nick then
+                return entry.gp
+            end
+        end
+        return nil
+    end
+
+    function GpDb:ClearAll()
+        self.gp_data = {}
+        self:UpdateWindow()
+    end
+
+    function GpDb:SortData(column)
+        if column then
+            if self.sort_column == column then
+                self.sort_ascending = not self.sort_ascending
+            else
+                self.sort_column = column
+                self.sort_ascending = true
+            end
         end
 
-        if self.sort_ascending then
-            return valA < valB
-        else
-            return valA > valB
-        end
-    end)
-    self:ClearSelection()
-    self:UpdateWindow()
-end
+        table.sort(self.gp_data, function(a, b)
+            local valA, valB
+            if self.sort_column == "nick" then
+                valA = string.lower(a.original_nick or "")
+                valB = string.lower(b.original_nick or "")
+            else
+                valA = a.gp or 0
+                valB = b.gp or 0
+            end
+            if self.sort_ascending then
+                return valA < valB
+            else
+                return valA > valB
+            end
+        end)
 
-function GpDb:UpdateWindow()
-    if not self.window or not self.rows then return end
-    
-    for i, row in ipairs(self.rows) do
-        local entry = self.gp_data[i]
-        if entry then
-            row.nick:SetText(entry.nick)
-            if entry.classColor then
-                local plainName = entry.nick:match("^[^|]+") or entry.nick
-                row.nick:SetText(plainName)
-                row.nick:SetTextColor(entry.classColor.r, entry.classColor.g, entry.classColor.b)
-                
-                local notePart = entry.nick:match("|c.+$")
-                if notePart then
-                    local fullText = row.nick:GetText() .. " " .. notePart
-                    row.nick:SetText(fullText)
+        self:ClearSelection()
+        self:UpdateWindow()
+    end
+
+    function GpDb:UpdateWindow()
+        if not self.window or not self.rows then return end
+
+        local offset = FauxScrollFrame_GetOffset(self.window.scrollFrame)
+        local visibleRows = math.floor(
+            (self.window.scrollFrame:GetHeight() - 30) / 25
+        )
+        self.visible_rows = visibleRows
+
+        for i = 1, self.visible_rows do
+            local row = self.rows[i]
+            local dataIndex = i + offset
+            if dataIndex <= #self.gp_data then
+                local entry = self.gp_data[dataIndex]
+                row.nick:SetText(entry.nick)
+                row.gp:SetText(tostring(entry.gp))
+                if entry.classColor then
+                    row.nick:SetTextColor(
+                        entry.classColor.r,
+                        entry.classColor.g,
+                        entry.classColor.b
+                    )
+                else
+                    row.nick:SetTextColor(1, 1, 1)
+                end
+                row:Show()
+            else
+                row:Hide()
+            end
+        end
+
+        self:RefreshRowHighlights()
+        FauxScrollFrame_Update(
+            self.window.scrollFrame,
+            #self.gp_data,
+            self.visible_rows,
+            25
+        )
+        self:UpdateRaidWindowVisibility()
+    end
+
+    function GpDb:SaveToNsDb()
+        for _, entry in ipairs(self.gp_data) do
+            self.ns_db:addStaticStr(
+                "GP_DATA",
+                entry.original_nick,
+                nil,
+                tostring(entry.gp)
+            )
+        end
+    end
+
+    function GpDb:LoadFromNsDb()
+        self.gp_data = {}
+        local data = self.ns_db.input_table["GP_DATA"]
+        if data then
+            for nick, gp in pairs(data) do
+                table.insert(self.gp_data, {
+                    nick = nick,
+                    original_nick = nick,
+                    gp = tonumber(gp) or 0,
+                })
+            end
+        end
+        self:SortData()
+        self:UpdateWindow()
+    end
+
+    -- ========================================================================
+    -- Окно выбора рейда / начисления (кнопка «Начислить»)
+    -- ВАЖНО: правильный формат SendAddonMessage(prefix, message, channel)
+    --        prefix = "nsGP1" / "nsGP1A"
+    --        message = "<delta> <nick>"
+    -- ========================================================================
+    function GpDb:_CreateRaidSelectionWindow()
+        self.raidWindow = CreateFrame(
+            "Frame", "GpDbRaidWindow", self.window
+        )
+        self.raidWindow:SetFrameStrata("DIALOG")
+        self.raidWindow:SetSize(500, self.window:GetHeight() * 0.5)
+        self.raidWindow:SetPoint(
+            "BOTTOMLEFT", self.window, "BOTTOMRIGHT", 5, 0
+        )
+        self.raidWindow:SetMovable(false)
+
+        self.raidWindow.background =
+            self.raidWindow:CreateTexture(nil, "BACKGROUND")
+        self.raidWindow.background:SetTexture("Interface\\Buttons\\WHITE8X8")
+        self.raidWindow.background:SetVertexColor(0, 0, 0)
+        self.raidWindow.background:SetAlpha(1)
+        self.raidWindow.background:SetAllPoints(true)
+
+        self.raidWindow.borderFrame = CreateFrame(
+            "Frame", nil, self.raidWindow
+        )
+        self.raidWindow.borderFrame:SetPoint("TOPLEFT", -3, 3)
+        self.raidWindow.borderFrame:SetPoint("BOTTOMRIGHT", 3, -3)
+        self.raidWindow.borderFrame:SetBackdrop({
+            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+            edgeSize = 16,
+            insets = { left = 4, right = 4, top = 4, bottom = 4 },
+        })
+
+        self.raidWindow.closeButton = CreateFrame(
+            "Button", nil, self.raidWindow, "UIPanelCloseButton"
+        )
+        self.raidWindow.closeButton:SetPoint("TOPRIGHT", -5, -5)
+        self.raidWindow.closeButton:SetScript(
+            "OnClick", function() self.raidWindow:Hide() end
+        )
+
+        self.raidWindow.dropdown = CreateFrame(
+            "Frame", "GpDbRaidDropdown",
+            self.raidWindow, "UIDropDownMenuTemplate"
+        )
+        self.raidWindow.dropdown:SetPoint("TOPLEFT", 10, -10)
+        self.raidWindow.dropdown:SetPoint("RIGHT", -260, 0)
+        self.raidWindow.dropdown:SetHeight(32)
+
+        local function UpdateDropdownText()
+            if self.raidWindow.selectedRaidId then
+                for i = 1, GetNumSavedInstances() do
+                    local name, id = GetSavedInstanceInfo(i)
+                    if id == self.raidWindow.selectedRaidId then
+                        UIDropDownMenu_SetText(
+                            self.raidWindow.dropdown,
+                            string.format("%d: %s", id, name)
+                        )
+                        return
+                    end
                 end
             else
-                row.nick:SetTextColor(1, 1, 1)
+                UIDropDownMenu_SetText(
+                    self.raidWindow.dropdown,
+                    "Выберите рейд"
+                )
             end
-            
-            row.gp:SetText(tostring(entry.gp))
-            row.gp:SetTextColor(1, 1, 1)
-            
-            row:Show()
-        else
-            row:Hide()
         end
-    end
-    
-    self.window.scrollChild:SetHeight(#self.gp_data * 25)
-    self.window.scrollFrame:UpdateScrollChildRect()
-end
 
-function GpDb:SaveToNsDb()
-    for _, entry in ipairs(self.gp_data) do
-        self.ns_db:addStaticStr("GP_DATA", entry.original_nick, nil, tostring(entry.gp))
-    end
-end
+        local function InitializeDropdown(frame, level, menuList)
+            local info = UIDropDownMenu_CreateInfo()
 
-function GpDb:LoadFromNsDb()
-    self.gp_data = {}
-    local data = self.ns_db.input_table["GP_DATA"]
-    if data then
-        for nick, gp in pairs(data) do
-            table.insert(self.gp_data, {
-                nick = nick,
-                original_nick = nick,
-                gp = tonumber(gp) or 0
-            })
-        end
-    end
-    self:SortData()
-    self:UpdateWindow()
-end
-
-function GpDb:_CreateRaidSelectionWindow()
-    self.raidWindow = CreateFrame("Frame", "GpDbRaidWindow", self.window)
-    self.raidWindow:SetFrameStrata("DIALOG")
-    self.raidWindow:SetSize(500, self.window:GetHeight() * 0.5)
-    self.raidWindow:SetPoint("BOTTOMLEFT", self.window, "BOTTOMRIGHT", 5, 0)
-    self.raidWindow:SetMovable(false)
-
-    self.raidWindow.background = self.raidWindow:CreateTexture(nil, "BACKGROUND")
-    self.raidWindow.background:SetTexture("Interface\\Buttons\\WHITE8X8")
-    self.raidWindow.background:SetVertexColor(0, 0, 0)
-    self.raidWindow.background:SetAlpha(1)
-    self.raidWindow.background:SetAllPoints(true)
-
-    self.raidWindow.borderFrame = CreateFrame("Frame", nil, self.raidWindow)
-    self.raidWindow.borderFrame:SetPoint("TOPLEFT", -3, 3)
-    self.raidWindow.borderFrame:SetPoint("BOTTOMRIGHT", 3, -3)
-    self.raidWindow.borderFrame:SetBackdrop({
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        edgeSize = 16,
-        insets = {left = 4, right = 4, top = 4, bottom = 4}
-    })
-
-    self.raidWindow.closeButton = CreateFrame("Button", nil, self.raidWindow, "UIPanelCloseButton")
-    self.raidWindow.closeButton:SetPoint("TOPRIGHT", -5, -5)
-    self.raidWindow.closeButton:SetScript("OnClick", function()
-        self.raidWindow:Hide()
-    end)
-
-    self.raidWindow.dropdown = CreateFrame("Frame", "GpDbRaidDropdown", self.raidWindow, "UIDropDownMenuTemplate")
-    self.raidWindow.dropdown:SetPoint("TOPLEFT", 10, -10)
-    self.raidWindow.dropdown:SetPoint("RIGHT", -260, 0)
-    self.raidWindow.dropdown:SetHeight(32)
-
-    local function UpdateDropdownText()
-        if self.raidWindow.selectedRaidId then
             for i = 1, GetNumSavedInstances() do
-                local name, id = GetSavedInstanceInfo(i)
-                if id == self.raidWindow.selectedRaidId then
-                    UIDropDownMenu_SetText(self.raidWindow.dropdown, string.format("%d: %s", id, name))
-                    return
-                end
-            end
-        else
-            UIDropDownMenu_SetText(self.raidWindow.dropdown, "Выберите рейд")
-        end
-    end
-
-    local function InitializeDropdown(frame, level, menuList)
-        local info = UIDropDownMenu_CreateInfo()
-        for i = 1, GetNumSavedInstances() do
-            local name, id, _, _, _, _, _, _, players = GetSavedInstanceInfo(i)
-            if name and id then
-                info.text = string.format("%d: %s (%d)", id, name, players)
-                info.arg1 = {id = id, name = name, players = players}
-                info.func = function(_, arg1)
-                    self.raidWindow.selectedRaidId = arg1.id
-                    self.raidWindow.selectedRaidName = arg1.name
-                    self.raidWindow.selectedRaidPlayers = arg1.players
-                    if self.saveSelectionEnabled then
-                        self.lastSelectionType = "raid"
-                        self.lastRaidId = arg1.id
-                        self.lastRaidName = arg1.name
-                        self.lastRaidPlayers = arg1.players
+                local name, id, _, _, _, _, _, _, players =
+                    GetSavedInstanceInfo(i)
+                if name and id then
+                    info.text = string.format(
+                        "%d: %s (%d)", id, name, players
+                    )
+                    info.arg1 = {
+                        id = id,
+                        name = name,
+                        players = players,
+                    }
+                    info.func = function(_, arg1)
+                        self.raidWindow.selectedRaidId = arg1.id
+                        self.raidWindow.selectedRaidName = arg1.name
+                        self.raidWindow.selectedRaidPlayers = arg1.players
+                        if self.saveSelectionEnabled then
+                            self.lastSelectionType = "raid"
+                            self.lastRaidId = arg1.id
+                            self.lastRaidName = arg1.name
+                            self.lastRaidPlayers = arg1.players
+                        end
+                        UpdateDropdownText()
+                        self.raidWindow.editBox:SetText("")
                     end
-                    UpdateDropdownText()
-                    self.raidWindow.editBox:SetText("")
+                    info.checked = (self.raidWindow.selectedRaidId == id)
+                    UIDropDownMenu_AddButton(info)
                 end
-                info.checked = (self.raidWindow.selectedRaidId == id)
-                UIDropDownMenu_AddButton(info)
             end
+
+            info.text = "Очистить выбор"
+            info.func = function()
+                self.raidWindow.selectedRaidId = nil
+                self.raidWindow.selectedRaidName = nil
+                if self.saveSelectionEnabled then
+                    self.lastSelectionType = nil
+                    self.lastRaidId = nil
+                    self.lastRaidName = nil
+                    self.lastRaidPlayers = 0
+                end
+                UpdateDropdownText()
+            end
+            info.notCheckable = true
+            UIDropDownMenu_AddButton(info)
         end
-        info.text = "Очистить выбор"
-        info.func = function()
-            self.raidWindow.selectedRaidId = nil
-            self.raidWindow.selectedRaidName = nil
-            if self.saveSelectionEnabled then
+
+        UIDropDownMenu_Initialize(
+            self.raidWindow.dropdown, InitializeDropdown
+        )
+        UIDropDownMenu_SetWidth(self.raidWindow.dropdown, 200)
+        UIDropDownMenu_SetButtonWidth(self.raidWindow.dropdown, 224)
+        UIDropDownMenu_JustifyText(self.raidWindow.dropdown, "LEFT")
+        UpdateDropdownText()
+
+        self.raidWindow.otherText = self.raidWindow:CreateFontString(
+            nil, "OVERLAY", "GameFontNormal"
+        )
+        self.raidWindow.otherText:SetPoint(
+            "TOPLEFT", self.raidWindow.dropdown, "BOTTOMLEFT", 0, -10
+        )
+        self.raidWindow.otherText:SetText("Другое:")
+
+        self.raidWindow.editBox = CreateFrame(
+            "EditBox", "fdsfsda111111",
+            self.raidWindow, "InputBoxTemplate"
+        )
+        self.raidWindow.editBox:SetPoint(
+            "TOPLEFT", self.raidWindow.otherText, "BOTTOMLEFT", 0, -5
+        )
+        self.raidWindow.editBox:SetPoint("RIGHT", -260, 0)
+        self.raidWindow.editBox:SetHeight(20)
+        self.raidWindow.editBox:SetAutoFocus(false)
+        self.raidWindow.editBox:SetScript(
+            "OnTextChanged",
+            function(editBox)
+                if editBox:GetText() ~= "" then
+                    if self.saveSelectionEnabled then
+                        self.lastSelectionType = "other"
+                        self.lastOtherText = editBox:GetText()
+                    end
+                    self.raidWindow.selectedRaidId = nil
+                    self.raidWindow.selectedRaidName = nil
+                    UpdateDropdownText()
+                end
+            end
+        )
+
+        self.raidWindow.saveCheckbox = CreateFrame(
+            "CheckButton", nil, self.raidWindow, "UICheckButtonTemplate"
+        )
+        self.raidWindow.saveCheckbox:SetPoint(
+            "TOPLEFT", self.raidWindow.editBox, "BOTTOMLEFT", 0, -10
+        )
+        self.raidWindow.saveCheckbox:SetSize(24, 24)
+        self.raidWindow.saveCheckbox.text =
+            self.raidWindow.saveCheckbox:CreateFontString(
+                nil, "OVERLAY", "GameFontNormal"
+            )
+        self.raidWindow.saveCheckbox.text:SetPoint(
+            "LEFT", self.raidWindow.saveCheckbox, "RIGHT", 5, 0
+        )
+        self.raidWindow.saveCheckbox.text:SetText("Сохранить выбор")
+        self.raidWindow.saveCheckbox:SetChecked(true)
+        self.saveSelectionEnabled = true
+        self.raidWindow.saveCheckbox:SetScript("OnClick", function()
+            self.saveSelectionEnabled =
+                self.raidWindow.saveCheckbox:GetChecked()
+        end)
+
+        self.raidWindow.selectedPlayersText =
+            self.raidWindow:CreateFontString(
+                nil, "OVERLAY", "GameFontNormalSmall"
+            )
+        self.raidWindow.selectedPlayersText:SetPoint(
+            "TOPLEFT", self.raidWindow.saveCheckbox, "BOTTOMLEFT", 0, -5
+        )
+        self.raidWindow.selectedPlayersText:SetPoint("RIGHT", -260, 0)
+        self.raidWindow.selectedPlayersText:SetHeight(70)
+        self.raidWindow.selectedPlayersText:SetJustifyH("LEFT")
+        self.raidWindow.selectedPlayersText:SetJustifyV("TOP")
+        self.raidWindow.selectedPlayersText:SetWordWrap(true)
+
+        local quickGPValues = { 5, 10, 20, 25, 50, 100 }
+        local lastQuickButton
+
+        for i, value in ipairs(quickGPValues) do
+            local btn = CreateFrame(
+                "Button", nil, self.raidWindow, "UIPanelButtonTemplate"
+            )
+            btn:SetSize(27, 20)
+            btn:SetText(tostring(value))
+            if i == 1 then
+                btn:SetPoint(
+                    "BOTTOMLEFT",
+                    self.raidWindow.selectedPlayersText,
+                    "BOTTOMLEFT", 0, -20
+                )
+            else
+                btn:SetPoint(
+                    "LEFT", lastQuickButton, "RIGHT", 2, 0
+                )
+            end
+            btn:SetScript("OnClick", function()
+                self.raidWindow.gpEditBox:SetText(tostring(value))
+                self.raidWindow.gpEditBox:HighlightText()
+            end)
+            lastQuickButton = btn
+        end
+
+        local minusBtn = CreateFrame(
+            "Button", nil, self.raidWindow, "UIPanelButtonTemplate"
+        )
+        minusBtn:SetSize(40, 22)
+        minusBtn:SetText("-/+")
+        minusBtn:SetPoint(
+            "LEFT", lastQuickButton, "RIGHT", 2, 0
+        )
+        minusBtn:SetScript("OnClick", function()
+            local currentValue =
+                tonumber(self.raidWindow.gpEditBox:GetText()) or 0
+            self.raidWindow.gpEditBox:SetText(tostring(-currentValue))
+            self.raidWindow.gpEditBox:HighlightText()
+        end)
+        lastQuickButton = minusBtn
+
+        local percentBtn = CreateFrame(
+            "Button", nil, self.raidWindow, "UIPanelButtonTemplate"
+        )
+        percentBtn:SetSize(27, 20)
+        percentBtn:SetText("%")
+        percentBtn:SetPoint(
+            "LEFT", lastQuickButton, "RIGHT", 2, 0
+        )
+        percentBtn:SetScript("OnClick", function()
+            local inputText = self.raidWindow.gpEditBox:GetText()
+            local percentValue = tonumber(inputText)
+            if not percentValue or percentValue <= 0 then
+                print(
+                    "|cFFFF0000ГП:|r Укажите положительное число"
+                    .. " для процента"
+                )
+                return
+            end
+            local selected = self:GetSelectedEntries()
+            if #selected ~= 1 then
+                print(
+                    "|cFFFF0000ГП:|r Процент можно применить"
+                    .. " только к одному игроку"
+                )
+                return
+            end
+            local playerGp = selected[1].gp or 0
+            local newGp = math.floor(playerGp * percentValue / 100)
+            self.raidWindow.gpEditBox:SetText(tostring(newGp))
+            self.raidWindow.gpEditBox:HighlightText()
+        end)
+
+        self.raidWindow.gpEditBox = CreateFrame(
+            "EditBox", "fdjkjfkjkj33333",
+            self.raidWindow, "InputBoxTemplate"
+        )
+        self.raidWindow.gpEditBox:SetPoint("BOTTOMLEFT", 10, 5)
+        self.raidWindow.gpEditBox:SetSize(100, 20)
+        self.raidWindow.gpEditBox:SetAutoFocus(false)
+        self.raidWindow.gpEditBox:SetScript(
+            "OnEscapePressed",
+            function() self.raidWindow.gpEditBox:ClearFocus() end
+        )
+        self.raidWindow.gpEditBox:SetScript(
+            "OnEnterPressed",
+            function() self.raidWindow.gpEditBox:ClearFocus() end
+        )
+
+        -- ====================================================================
+        -- КНОПКА «НАЧИСЛИТЬ» — главный обработчик
+        -- ====================================================================
+        self.raidWindow.awardButton = CreateFrame(
+            "Button", nil, self.raidWindow, "UIPanelButtonTemplate"
+        )
+        self.raidWindow.awardButton:SetPoint("BOTTOMRIGHT", -10, 5)
+        self.raidWindow.awardButton:SetSize(100, 22)
+        self.raidWindow.awardButton:SetText("Начислить")
+
+        self.raidWindow.awardButton:SetScript("OnClick", function()
+            dbgGp("AWARD-CLICK", "=== НАЧАЛО ОБРАБОТКИ КНОПКИ ===")
+
+            if not NSQC4.CanAssignGp() then
+                dbgGp("AWARD-SKIP", "CanAssignGp()=false (ПВЕ-сезон)")
+                return
+            end
+
+            if not self:_CheckOfficerRank() then
+                dbgGp("AWARD-SKIP", "не офицер")
+                print("|cFFFF0000ГП:|r Только офицеры могут начислять ГП")
+                self.raidWindow:Hide()
+                return
+            end
+
+            if next(self.selected_indices) == nil then
+                dbgGp("AWARD-SKIP", "нет выделенных игроков")
+                print("|cFFFF0000ГП:|r Нет выделенных игроков")
+                self.raidWindow:Hide()
+                return
+            end
+
+            local gpValue = tonumber(self.raidWindow.gpEditBox:GetText())
+            if not gpValue then
+                dbgGp("AWARD-SKIP", "не указано значение ГП")
+                print("|cFFFF0000ГП:|r Укажите значение ГП")
+                return
+            end
+
+            if not self.raidWindow.selectedRaidId
+            and not (self.lastOtherText or ""):match("%S") then
+                dbgGp("AWARD-SKIP", "не выбран рейд и нет причины")
+                print(
+                    "|cFFFF0000ГП:|r Нужно выбрать рейд"
+                    .. " или указать причину"
+                )
+                return
+            end
+
+            if not self.saveSelectionEnabled then
                 self.lastSelectionType = nil
                 self.lastRaidId = nil
                 self.lastRaidName = nil
                 self.lastRaidPlayers = 0
+                self.lastOtherText = nil
+                self.lastGPValue = 0
+            else
+                self.lastGPValue = gpValue
             end
-            UpdateDropdownText()
-        end
-        info.notCheckable = true
-        UIDropDownMenu_AddButton(info)
-    end
 
-    UIDropDownMenu_Initialize(self.raidWindow.dropdown, InitializeDropdown)
-    UIDropDownMenu_SetWidth(self.raidWindow.dropdown, 200)
-    UIDropDownMenu_SetButtonWidth(self.raidWindow.dropdown, 224)
-    UIDropDownMenu_JustifyText(self.raidWindow.dropdown, "LEFT")
-    UpdateDropdownText()
-
-    self.raidWindow.otherText = self.raidWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    self.raidWindow.otherText:SetPoint("TOPLEFT", self.raidWindow.dropdown, "BOTTOMLEFT", 0, -10)
-    self.raidWindow.otherText:SetText("Другое:")
-
-    self.raidWindow.editBox = CreateFrame("EditBox", "fdsfsda111111", self.raidWindow, "InputBoxTemplate")
-    self.raidWindow.editBox:SetPoint("TOPLEFT", self.raidWindow.otherText, "BOTTOMLEFT", 0, -5)
-    self.raidWindow.editBox:SetPoint("RIGHT", -260, 0)
-    self.raidWindow.editBox:SetHeight(20)
-    self.raidWindow.editBox:SetAutoFocus(false)
-    self.raidWindow.editBox:SetScript("OnTextChanged", function(editBox)
-        if editBox:GetText() ~= "" then
-            if self.saveSelectionEnabled then
-                self.lastSelectionType = "other"
-                self.lastOtherText = editBox:GetText()
+            -- Формируем строку лога
+            local logStr
+            if self.raidWindow.selectedRaidId then
+                local cleanRaidName = (
+                    self.raidWindow.selectedRaidName or ""
+                ):gsub("%s+", "_")
+                logStr = string.format(
+                    "%04d_%s_%d %d",
+                    self.raidWindow.selectedRaidId,
+                    cleanRaidName,
+                    self.raidWindow.selectedRaidPlayers or 0,
+                    gpValue
+                )
+            else
+                local cleanOtherText = (
+                    self.lastOtherText or ""
+                ):gsub("%s+", "_")
+                logStr = string.format(
+                    "%s %d", cleanOtherText, gpValue
+                )
             end
-            self.raidWindow.selectedRaidId = nil
-            self.raidWindow.selectedRaidName = nil
-            UpdateDropdownText()
-        end
-    end)
 
-    self.raidWindow.saveCheckbox = CreateFrame("CheckButton", nil, self.raidWindow, "UICheckButtonTemplate")
-    self.raidWindow.saveCheckbox:SetPoint("TOPLEFT", self.raidWindow.editBox, "BOTTOMLEFT", 0, -10)
-    self.raidWindow.saveCheckbox:SetSize(24, 24)
-    self.raidWindow.saveCheckbox.text = self.raidWindow.saveCheckbox:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    self.raidWindow.saveCheckbox.text:SetPoint("LEFT", self.raidWindow.saveCheckbox, "RIGHT", 5, 0)
-    self.raidWindow.saveCheckbox.text:SetText("Сохранить выбор")
-    self.raidWindow.saveCheckbox:SetChecked(true)
-    self.saveSelectionEnabled = true
-    self.raidWindow.saveCheckbox:SetScript("OnClick", function()
-        self.saveSelectionEnabled = self.raidWindow.saveCheckbox:GetChecked()
-    end)
+            dbgGp("AWARD-START",
+                "gpValue=", tostring(gpValue),
+                "logStr=", logStr,
+                "selectedCount=",
+                    tostring(#self:GetSelectedEntries())
+            )
 
-    self.raidWindow.selectedPlayersText = self.raidWindow:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    self.raidWindow.selectedPlayersText:SetPoint("TOPLEFT", self.raidWindow.saveCheckbox, "BOTTOMLEFT", 0, -5)
-    self.raidWindow.selectedPlayersText:SetPoint("RIGHT", -260, 0)
-    self.raidWindow.selectedPlayersText:SetHeight(70)
-    self.raidWindow.selectedPlayersText:SetJustifyH("LEFT")
-    self.raidWindow.selectedPlayersText:SetJustifyV("TOP")
-    self.raidWindow.selectedPlayersText:SetWordWrap(true)
+            -- ================================================================
+            -- Цикл по выделенным игрокам: отправка addon-сообщений
+            -- ================================================================
+            local nonGuildNicks = {}
+            local guildNicks = {}
 
-    local quickGPValues = {5, 10, 20, 25, 50, 100}
-    local lastQuickButton
-    for i, value in ipairs(quickGPValues) do
-        local btn = CreateFrame("Button", nil, self.raidWindow, "UIPanelButtonTemplate")
-        btn:SetSize(27, 20)
-        btn:SetText(tostring(value))
-        if i == 1 then
-            btn:SetPoint("BOTTOMLEFT", self.raidWindow.selectedPlayersText, "BOTTOMLEFT", 0, -20)
-        else
-            btn:SetPoint("LEFT", lastQuickButton, "RIGHT", 2, 0)
-        end
-        btn:SetScript("OnClick", function()
-            self.raidWindow.gpEditBox:SetText(tostring(value))
-            self.raidWindow.gpEditBox:HighlightText()
-        end)
-        lastQuickButton = btn
-    end
+            for index in pairs(self.selected_indices) do
+                if self.gp_data[index] then
+                    local entry = self.gp_data[index]
+                    local nick = entry.original_nick
+                    local isGuild = entry.isGuildMember
 
-    local minusBtn = CreateFrame("Button", nil, self.raidWindow, "UIPanelButtonTemplate")
-    minusBtn:SetSize(40, 22)
-    minusBtn:SetText("-/+")
-    minusBtn:SetPoint("LEFT", lastQuickButton, "RIGHT", 2, 0)
-    minusBtn:SetScript("OnClick", function()
-        local currentValue = tonumber(self.raidWindow.gpEditBox:GetText()) or 0
-        self.raidWindow.gpEditBox:SetText(tostring(-currentValue))
-        self.raidWindow.gpEditBox:HighlightText()
-    end)
-    lastQuickButton = minusBtn
-
-    local percentBtn = CreateFrame("Button", nil, self.raidWindow, "UIPanelButtonTemplate")
-    percentBtn:SetSize(27, 20)
-    percentBtn:SetText("%")
-    percentBtn:SetPoint("LEFT", lastQuickButton, "RIGHT", 2, 0)
-    percentBtn:SetScript("OnClick", function()
-        local inputText = self.raidWindow.gpEditBox:GetText()
-        local percentValue = tonumber(inputText)
-        if not percentValue or percentValue <= 0 then
-            print("|cFFFF0000ГП:|r Укажите положительное число для процента")
-            return
-        end
-        local selected = self:GetSelectedEntries()
-        if #selected ~= 1 then
-            print("|cFFFF0000ГП:|r Процент можно применить только к одному игроку")
-            return
-        end
-        local playerGp = selected[1].gp or 0
-        local newGp = math.floor(playerGp * percentValue / 100)
-        self.raidWindow.gpEditBox:SetText(tostring(newGp))
-        self.raidWindow.gpEditBox:HighlightText()
-    end)
-
-    self.raidWindow.gpEditBox = CreateFrame("EditBox", "fdjkjfkjkj33333", self.raidWindow, "InputBoxTemplate")
-    self.raidWindow.gpEditBox:SetPoint("BOTTOMLEFT", 10, 5)
-    self.raidWindow.gpEditBox:SetSize(100, 20)
-    self.raidWindow.gpEditBox:SetAutoFocus(false)
-    self.raidWindow.gpEditBox:SetScript("OnEscapePressed", function() self.raidWindow.gpEditBox:ClearFocus() end)
-    self.raidWindow.gpEditBox:SetScript("OnEnterPressed", function() self.raidWindow.gpEditBox:ClearFocus() end)
-
-    self.raidWindow.awardButton = CreateFrame("Button", nil, self.raidWindow, "UIPanelButtonTemplate")
-    self.raidWindow.awardButton:SetPoint("BOTTOMRIGHT", -10, 5)
-    self.raidWindow.awardButton:SetSize(100, 22)
-    self.raidWindow.awardButton:SetText("Начислить")
-    self.raidWindow.awardButton:SetScript("OnClick", function()
-        if not NSQC4.CanAssignGp() then return end
-
-        if not self:_CheckOfficerRank() then
-            print("|cFFFF0000ГП:|r Только офицеры могут начислять ГП")
-            self.raidWindow:Hide()
-            return
-        end
-        if next(self.selected_indices) == nil then
-            print("|cFFFF0000ГП:|r Нет выделенных игроков")
-            self.raidWindow:Hide()
-            return
-        end
-        local gpValue = tonumber(self.raidWindow.gpEditBox:GetText())
-        if not gpValue then
-            print("|cFFFF0000ГП:|r Укажите значение ГП")
-            return
-        end
-        if not self.raidWindow.selectedRaidId and not (self.lastOtherText or ""):match("%S") then
-            print("|cFFFF0000ГП:|r Нужно выбрать рейд или указать причину")
-            return
-        end
-        if not self.saveSelectionEnabled then
-            self.lastSelectionType = nil
-            self.lastRaidId = nil
-            self.lastRaidName = nil
-            self.lastRaidPlayers = 0
-            self.lastOtherText = nil
-            self.lastGPValue = 0
-        else
-            self.lastGPValue = gpValue
-        end
-
-        local logStr
-        if self.raidWindow.selectedRaidId then
-            local cleanRaidName = (self.raidWindow.selectedRaidName or ""):gsub("%s+", "_")
-            logStr = string.format("%04d_%s_%d %d",
-                self.raidWindow.selectedRaidId,
-                cleanRaidName,
-                self.raidWindow.selectedRaidPlayers or 0,
-                gpValue)
-        else
-            local cleanOtherText = (self.lastOtherText or ""):gsub("%s+", "_")
-            logStr = string.format("%s %d", cleanOtherText, gpValue)
-        end
-
-        local nonGuildNicks = {}
-
-        for index in pairs(self.selected_indices) do
-            if self.gp_data[index] then
-                local entry = self.gp_data[index]
-                local nick = entry.original_nick
-
-                if entry.isGuildMember then
-                    SendAddonMessage("nsGP1 " .. gpValue, nick, "GUILD")
-                else
-                    SendAddonMessage("nsGP1A", gpValue .. " " .. nick, "GUILD")
-                    table.insert(nonGuildNicks, nick)
-                end
-
-                local logIdentifier = entry.playerID or ("N:" .. nick)
-                logStr = logStr .. " " .. logIdentifier
-
-                self:AddLogEntry(gpValue, date("%H:%M"), UnitName("player"),
-                    self.raidWindow.selectedRaidName or self.raidWindow.editBox:GetText(), nick)
-            end
-        end
-
-        SendAddonMessage("nsGPlog", logStr, "GUILD")
-
-        for _, entry in ipairs(self:GetSelectedEntries()) do
-            entry.gp = (entry.gp or 0) + gpValue
-        end
-        self:UpdateWindow()
-        self.raidWindow:Hide()
-
-        if #nonGuildNicks > 0 then
-            local timerFrame = CreateFrame("Frame")
-            local elapsed = 0
-            local initialDelay = 1.0
-            local betweenDelay = 0.05
-            local currentIndex = 1
-            local phase = "waiting"
-
-            timerFrame:SetScript("OnUpdate", function(frame, dt)
-                elapsed = elapsed + dt
-
-                if phase == "waiting" then
-                    if elapsed >= initialDelay then
-                        phase = "sending"
-                        elapsed = 0
-                        SendAddonMessage("GetGPA", nonGuildNicks[currentIndex], "GUILD")
-                        currentIndex = currentIndex + 1
+                    -- Определяем prefix и channel
+                    local prefix, channel
+                    if isGuild then
+                        prefix  = "nsGP1"
+                        channel = "GUILD"
+                        table.insert(guildNicks, nick)
+                    else
+                        prefix  = "nsGP1A"
+                        channel = "RAID"
+                        table.insert(nonGuildNicks, nick)
                     end
-                elseif phase == "sending" then
-                    if elapsed >= betweenDelay then
-                        elapsed = 0
-                        if currentIndex <= #nonGuildNicks then
-                            SendAddonMessage("GetGPA", nonGuildNicks[currentIndex], "GUILD")
-                            currentIndex = currentIndex + 1
-                        else
-                            frame:SetScript("OnUpdate", nil)
-                            frame:Hide()
+
+                    local message = tostring(gpValue) .. " " .. nick
+
+                    dbgGp("AWARD-SEND",
+                        "nick=", nick,
+                        "gp=", tostring(gpValue),
+                        "isGuildMember=", tostring(isGuild),
+                        "prefix=", prefix,
+                        "channel=", channel,
+                        "message=", message
+                    )
+
+                    -- ========================================================
+                    -- ОТПРАВКА: SendAddonMessage
+                    --   свой гильдеец: prefix="nsGP1",  channel="GUILD"
+                    --   чужой гильдеец: prefix="nsGP1A", channel="RAID"
+                    -- ========================================================
+                    SendAddonMessage(prefix, message, channel)
+
+                    dbgGp("AWARD-SENT",
+                        "ОТПРАВЛЕНО:",
+                        "prefix=" .. prefix,
+                        "channel=" .. channel,
+                        "body=" .. message
+                    )
+
+                    logStr = logStr .. " " .. nick
+
+                    self:AddLogEntry(
+                        gpValue,
+                        date("%H:%M"),
+                        UnitName("player"),
+                        self.raidWindow.selectedRaidName
+                            or self.raidWindow.editBox:GetText(),
+                        nick
+                    )
+                end
+            end
+
+            -- Отправка лога в GUILD
+            dbgGp("AWARD-LOG",
+                "отправляем nsGPlog в GUILD:",
+                logStr
+            )
+            SendAddonMessage("nsGPlog", logStr, "GUILD")
+
+            -- Обновляем локальные данные
+            for _, entry in ipairs(self:GetSelectedEntries()) do
+                entry.gp = (entry.gp or 0) + gpValue
+            end
+            self:UpdateWindow()
+            self.raidWindow:Hide()
+
+            dbgGp("AWARD-SUMMARY",
+                "guildMembers=", tostring(#guildNicks),
+                "nonGuildMembers=", tostring(#nonGuildNicks),
+                "totalProcessed=",
+                    tostring(#guildNicks + #nonGuildNicks)
+            )
+
+            -- ================================================================
+            -- Запрос ГП для не-гильдейцев (с задержкой)
+            -- ================================================================
+            if #nonGuildNicks > 0 and NSQC4.RequestGp then
+                dbgGp("AWARD-REQUEST-NON-GUILD",
+                    "запрашиваем ГП для",
+                    tostring(#nonGuildNicks),
+                    "не-гильдейцев"
+                )
+
+                local timerFrame = CreateFrame("Frame")
+                local elapsed = 0
+                local initialDelay = 1.0
+                local betweenDelay = 0.05
+                local currentIndex = 1
+                local phase = "waiting"
+
+                timerFrame:SetScript(
+                    "OnUpdate",
+                    function(frame, dt)
+                        elapsed = elapsed + dt
+                        if phase == "waiting" then
+                            if elapsed >= initialDelay then
+                                phase = "sending"
+                                elapsed = 0
+                                dbgGp("AWARD-REQ-SEND",
+                                    "nsGpGet ->",
+                                    nonGuildNicks[currentIndex]
+                                )
+                                NSQC4.RequestGp(
+                                    nonGuildNicks[currentIndex]
+                                )
+                                currentIndex = currentIndex + 1
+                            end
+                        elseif phase == "sending" then
+                            if elapsed >= betweenDelay then
+                                elapsed = 0
+                                if currentIndex <= #nonGuildNicks then
+                                    dbgGp("AWARD-REQ-SEND",
+                                        "nsGpGet ->",
+                                        nonGuildNicks[currentIndex]
+                                    )
+                                    NSQC4.RequestGp(
+                                        nonGuildNicks[currentIndex]
+                                    )
+                                    currentIndex = currentIndex + 1
+                                else
+                                    dbgGp("AWARD-REQ-DONE",
+                                        "все запросы ГП отправлены"
+                                    )
+                                    frame:SetScript("OnUpdate", nil)
+                                    frame:Hide()
+                                end
+                            end
                         end
                     end
+                )
+            end
+
+            dbgGp("AWARD-CLICK", "=== КОНЕЦ ОБРАБОТКИ КНОПКИ ===")
+        end)
+
+        self.raidWindow:SetScript("OnHide", function()
+            if self.logWindow and self.logWindow:IsShown() then
+                self.logWindow:SetHeight(self.window:GetHeight())
+            end
+        end)
+        self.raidWindow:Hide()
+    end
+
+    function GpDb:RequestNonGuildGP()
+        if not IsInRaid() then return end
+        if not NSQC4.RequestGp then return end
+
+        local guildNames = {}
+        for i = 1, GetNumGuildMembers(true) do
+            local name = GetGuildRosterInfo(i)
+            if name then
+                guildNames[name:match("^(.-)-") or name] = true
+            end
+        end
+
+        for i = 1, GetNumGroupMembers() do
+            local raidName = GetRaidRosterInfo(i)
+            if raidName then
+                local plainName = raidName:match("^(.-)-") or raidName
+                if not guildNames[plainName] then
+                    dbgGp("REQ-NON-GUILD-GP",
+                        "запрос ГП для не-гильдейца:", plainName
+                    )
+                    NSQC4.RequestGp(plainName)
                 end
-            end)
-        end
-    end)
-
-    self.raidWindow:SetScript("OnHide", function()
-        if self.logWindow and self.logWindow:IsShown() then
-            self.logWindow:SetHeight(self.window:GetHeight())
-        end
-    end)
-    self.raidWindow:Hide()
-end
-
-function GpDb:RequestNonGuildGP()
-    if not IsInRaid() then return end
-
-    local guildNames = {}
-    for i = 1, GetNumGuildMembers(true) do
-        local name = GetGuildRosterInfo(i)
-        if name then
-            local plainName = name:match("^(.-)-") or name
-            guildNames[plainName] = true
-        end
-    end
-
-    for i = 1, GetNumGroupMembers() do
-        local raidName = GetRaidRosterInfo(i)
-        if raidName then
-            local plainName = raidName:match("^(.-)-") or raidName
-            if not guildNames[plainName] then
-                SendAddonMessage("GetGPA", plainName, "GUILD")
             end
         end
     end
-end
 
-function GpDb:_UpdatePlayerInfo()
-    if not self.raidWindow or not self.raidWindow:IsShown() then return end
-    local selected = self:GetSelectedEntries()
-    if #selected ~= 1 then
-        if self.raidWindow.playerInfoContainer then
-            self.raidWindow.playerInfoContainer:Hide()
-        end
-        return
-    end
-    local nick = selected[1].original_nick
-    local found = false
-    local playerData = nil
-    local rosterIndex = nil
-    for i = 1, GetNumGuildMembers(true) do
-        local name, rankName, rankIndex, level, classFileName, zone, publicNote, officerNote, online = GetGuildRosterInfo(i)
-        if name then
-            local plainName = name:match("^(.-)-") or name
-            if plainName == nick then
-                found = true
-                rosterIndex = i
-                playerData = {
-                    name = name,
-                    rankName = rankName,
-                    rankIndex = rankIndex,
-                    level = level,
-                    classFileName = classFileName,
-                    publicNote = publicNote or "",
-                    officerNote = officerNote or "",
-                    online = online,
-                    index = i
-                }
-                break
-            end
-        end
-    end
-    if not found then
-        if self.raidWindow.playerInfoContainer then
-            self.raidWindow.playerInfoContainer:Hide()
-        end
-        return
-    end
-    if self.lastCheckedPlayer ~= nick then
-        self.lastCheckedPlayer = nick
-        local myName = UnitName("player")
-        SendAddonMessage("ns_get_rl", myName .. " " .. nick, "GUILD")
-    end
-    if not self.raidWindow.playerInfoContainer then
-        self.raidWindow.playerInfoContainer = CreateFrame("Frame", nil, self.raidWindow)
-        self.raidWindow.playerInfoContainer:SetPoint("TOPRIGHT", -10, -30)
-        self.raidWindow.playerInfoContainer:SetSize(230, 240)
-
-        local checkboxName = "GpDbPlayerInfoCheckbox"
-        local checkbox = CreateFrame("CheckButton", checkboxName, self.raidWindow, "ChatConfigCheckButtonTemplate")
-        checkbox:SetSize(24, 24)
-        checkbox:SetPoint("TOPRIGHT", self.raidWindow.closeButton, "BOTTOMRIGHT", 0, -5)
-        checkbox:Disable()
-        checkbox.targetNick = nick
-        checkbox:SetScript("OnClick", function(self_cb)
-            local isChecked = self_cb:GetChecked()
-            local boolStr = isChecked and "1" or "nil"
-            SendAddonMessage("ns_its_rl", self_cb.targetNick .. " " .. boolStr, "GUILD")
-        end)
-
-        checkbox:SetScript("OnEnter", function(self_cb)
-            GameTooltip:SetOwner(self_cb, "ANCHOR_RIGHT")
-            local baseText = "Назначить игрока РЛом"
-            if #self.rl_tooltip_nicks > 0 then
-                local listStr = table.concat(self.rl_tooltip_nicks, ", ")
-                baseText = baseText .. "\n\nТекущие РЛы:\n" .. listStr
-            end
-            GameTooltip:SetText(baseText)
-            GameTooltip:Show()
-        end)
-        checkbox:SetScript("OnLeave", function()
-            GameTooltip:Hide()
-        end)
-
-        self.raidWindow.playerInfoCheckbox = checkbox
-        local textRegion = _G[checkboxName .. "Text"]
-        if textRegion then
-            textRegion:SetText("")
-        end
-        local myName = UnitName("player")
-        if self.confirmed_rl_nicks and self.confirmed_rl_nicks[myName] then
-            self.raidWindow.playerInfoCheckbox:Enable()
-        end
-
-        self.raidWindow.classText = self.raidWindow.playerInfoContainer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        self.raidWindow.classText:SetPoint("TOPLEFT", 0, -5)
-        self.raidWindow.classText:SetWidth(230)
-        self.raidWindow.levelText = self.raidWindow.playerInfoContainer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        self.raidWindow.levelText:SetPoint("TOPLEFT", 0, -25)
-        self.raidWindow.levelText:SetWidth(230)
-        self.raidWindow.offlineText = self.raidWindow.playerInfoContainer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        self.raidWindow.offlineText:SetPoint("TOPLEFT", 0, -45)
-        self.raidWindow.offlineText:SetWidth(230)
-        self.raidWindow.rankFrame = CreateFrame("Frame", nil, self.raidWindow.playerInfoContainer)
-        self.raidWindow.rankFrame:SetSize(230, 20)
-        self.raidWindow.rankFrame:SetPoint("TOPLEFT", 0, -65)
-        self.raidWindow.minusBtn = CreateFrame("Button", nil, self.raidWindow.rankFrame, "UIPanelButtonTemplate")
-        self.raidWindow.minusBtn:SetSize(20, 20)
-        self.raidWindow.minusBtn:SetPoint("LEFT", 0, 0)
-        self.raidWindow.minusBtn:SetText("-")
-        self.raidWindow.rankText = self.raidWindow.rankFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        self.raidWindow.rankText:SetPoint("LEFT", self.raidWindow.minusBtn, "RIGHT", 5, 0)
-        self.raidWindow.rankText:SetPoint("RIGHT", -25, 0)
-        self.raidWindow.plusBtn = CreateFrame("Button", nil, self.raidWindow.rankFrame, "UIPanelButtonTemplate")
-        self.raidWindow.plusBtn:SetSize(20, 20)
-        self.raidWindow.plusBtn:SetPoint("RIGHT", 0, 0)
-        self.raidWindow.plusBtn:SetText("+")
-        self.raidWindow.publicBtn = CreateFrame("Button", nil, self.raidWindow.playerInfoContainer, "UIPanelButtonTemplate")
-        self.raidWindow.publicBtn:SetSize(230, 20)
-        self.raidWindow.publicBtn:SetPoint("TOPLEFT", 0, -90)
-        self.raidWindow.officerBtn = CreateFrame("Button", nil, self.raidWindow.playerInfoContainer, "UIPanelButtonTemplate")
-        self.raidWindow.officerBtn:SetSize(230, 20)
-        self.raidWindow.officerBtn:SetPoint("TOPLEFT", 0, -115)
-
-        self.raidWindow.rlNotesBtn = CreateFrame("Button", nil, self.raidWindow.playerInfoContainer, "UIPanelButtonTemplate")
-        self.raidWindow.rlNotesBtn:SetSize(230, 20)
-        self.raidWindow.rlNotesBtn:SetPoint("TOPLEFT", 0, -140)
-        self.raidWindow.rlNotesBtn:SetText("Заметки РЛов")
-    else
-        self.raidWindow.playerInfoContainer:Show()
-        if self.raidWindow.playerInfoCheckbox then
-            self.raidWindow.playerInfoCheckbox.targetNick = nick
-        end
-    end
-
-    local db = self
-    local className = "Класс: ?"
-    if playerData.classFileName then
-        local color = RAID_CLASS_COLORS[playerData.classFileName]
-        if color then
-            local hex = string.format("|cFF%02x%02x%02x", color.r*255, color.g*255, color.b*255)
-            className = hex .. playerData.classFileName .. "|r"
-        else
-            className = "|cFFFFFFFF" .. playerData.classFileName .. "|r"
-        end
-    end
-    self.raidWindow.classText:SetText(className)
-    self.raidWindow.levelText:SetText("Уровень: " .. (playerData.level or "?"))
-    local offlineStr = "Офлайн: "
-    if playerData.online then
-        offlineStr = offlineStr .. "в сети"
-    else
-        local years, months, days, hours = GetGuildRosterLastOnline(rosterIndex)
-        if years ~= nil then
-            if years > 0 then
-                offlineStr = string.format("Офлайн: %dг %dм %dд %dч", years, months, days, hours)
-            elseif months > 0 then
-                offlineStr = string.format("Офлайн: %dм %dд %dч", months, days, hours)
-            else
-                offlineStr = string.format("Офлайн: %dд %dч", days, hours)
-            end
-        else
-            offlineStr = offlineStr .. "—"
-        end
-    end
-    self.raidWindow.offlineText:SetText(offlineStr)
-    self.raidWindow.rankText:SetText("Звание: " .. (playerData.rankName or "?"))
-    self.raidWindow.minusBtn:SetScript("OnClick", function()
-        if not db:_CheckOfficerRank() then
-            print("|cFFFF0000ГП:|r Только офицеры могут менять звания")
+    function GpDb:_UpdatePlayerInfo()
+        if not self.raidWindow
+        or not self.raidWindow:IsShown() then
             return
         end
-        GuildDemote(playerData.name)
-        local dbRef = db
-        local timerFrame = CreateFrame("Frame")
-        timerFrame:Hide()
 
-        local elapsed = 0
-        local delay = 0.5
-
-        timerFrame:SetScript("OnUpdate", function(frame, dt)
-            elapsed = elapsed + dt
-            if elapsed >= delay then
-                frame:SetScript("OnUpdate", nil)
-                frame:Hide()
-                dbRef:_UpdatePlayerInfo()
-            end
-        end)
-    end)
-    self.raidWindow.plusBtn:SetScript("OnClick", function()
-        if not db:_CheckOfficerRank() then
-            print("|cFFFF0000ГП:|r Только офицеры могут менять звания")
-            return
-        end
-        GuildPromote(playerData.name)
-        local dbRef = db
-        local timerFrame = CreateFrame("Frame")
-        timerFrame:Hide()
-
-        local elapsed = 0
-        local delay = 0.5
-
-        timerFrame:SetScript("OnUpdate", function(frame, dt)
-            elapsed = elapsed + dt
-            if elapsed >= delay then
-                frame:SetScript("OnUpdate", nil)
-                frame:Hide()
-                dbRef:_UpdatePlayerInfo()
-            end
-        end)
-    end)
-    self.raidWindow.publicBtn:SetText("Публ.: " .. (playerData.publicNote ~= "" and playerData.publicNote or "—"))
-    self.raidWindow.publicBtn:SetScript("OnClick", function()
-        StaticPopupDialogs["GP_EDIT_PUBLIC_NOTE"] = {
-            text = "Изменить публичную заметку для " .. playerData.name,
-            button1 = "OK",
-            button2 = "Отмена",
-            hasEditBox = true,
-            editBoxWidth = 200,
-            OnShow = function(self)
-                self.editBox:SetText(playerData.publicNote)
-                self.editBox:SetFocus()
-            end,
-            OnAccept = function(self)
-                local newNote = self.editBox:GetText()
-                if not db:_CheckOfficerRank() then
-                    print("|cFFFF0000ГП:|r Только офицеры могут редактировать заметки")
-                    return
-                end
-                GuildRosterSetPublicNote(playerData.index, newNote)
-                GuildRoster()
-                local frame = CreateFrame("Frame")
-                frame:SetScript("OnEvent", function()
-                    db:_UpdatePlayerInfo()
-                    frame:UnregisterEvent("GUILD_ROSTER_UPDATE")
-                end)
-                frame:RegisterEvent("GUILD_ROSTER_UPDATE")
-            end,
-            timeout = 0,
-            whileDead = true,
-            hideOnEscape = true
-        }
-        StaticPopup_Show("GP_EDIT_PUBLIC_NOTE")
-    end)
-    self.raidWindow.officerBtn:SetText("Оф.: " .. (playerData.officerNote ~= "" and playerData.officerNote or "—"))
-    self.raidWindow.officerBtn:SetScript("OnClick", function()
-        StaticPopupDialogs["GP_EDIT_OFFICER_NOTE"] = {
-            text = "Изменить офицерскую заметку для " .. playerData.name,
-            button1 = "OK",
-            button2 = "Отмена",
-            hasEditBox = true,
-            editBoxWidth = 200,
-            OnShow = function(self)
-                self.editBox:SetText(playerData.officerNote)
-                self.editBox:SetFocus()
-            end,
-            OnAccept = function(self)
-                local newNote = self.editBox:GetText()
-                if not db:_CheckOfficerRank() then
-                    print("|cFFFF0000ГП:|r Только офицеры могут редактировать заметки")
-                    return
-                end
-                GuildRosterSetOfficerNote(playerData.index, newNote)
-                GuildRoster()
-                local frame = CreateFrame("Frame")
-                frame:SetScript("OnEvent", function()
-                    db:_UpdatePlayerInfo()
-                    frame:UnregisterEvent("GUILD_ROSTER_UPDATE")
-                end)
-                frame:RegisterEvent("GUILD_ROSTER_UPDATE")
-            end,
-            timeout = 0,
-            whileDead = true,
-            hideOnEscape = true
-        }
-        StaticPopup_Show("GP_EDIT_OFFICER_NOTE")
-    end)
-
-    self.raidWindow.rlNotesBtn:SetScript("OnClick", function()
-        local selectedEntries = self:GetSelectedEntries()
-        if #selectedEntries == 1 then
-            local targetNick = selectedEntries[1].original_nick
+        local selected = self:GetSelectedEntries()
+        if #selected ~= 1 then
             if self.raidWindow.playerInfoContainer then
                 self.raidWindow.playerInfoContainer:Hide()
             end
-            SendAddonMessage("ns_get_rl_notes", targetNick, "GUILD")
-        else
-            print("|cFFFF0000[DEBUG]|r ОШИБКА: выделено не 1 игрок (выделено:", #selectedEntries, ")")
+            return
         end
-    end)
 
-    if self.raidWindow.playerInfoCheckbox:IsEnabled() then
-        self.raidWindow.rlNotesBtn:Show()
-    else
-        self.raidWindow.rlNotesBtn:Hide()
-    end
-end
+        local nick = selected[1].original_nick
+        local found = false
+        local playerData = nil
+        local rosterIndex = nil
 
-function GpDb:_UpdateSelectedPlayersText()
-    if not self.raidWindow then return end
-    
-    local selected = self:GetSelectedEntries()
-    local names = {}
-    
-    for _, entry in ipairs(selected) do
-        table.insert(names, entry.original_nick)
-    end
-    
-    local text = table.concat(names, ", ")
-    
-    if not self.raidWindow.selectedPlayersText then
-        self.raidWindow.selectedPlayersText = self.raidWindow:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        self.raidWindow.selectedPlayersText:SetPoint("TOPLEFT", self.raidWindow.saveCheckbox, "BOTTOMLEFT", 0, -5)
-        self.raidWindow.selectedPlayersText:SetPoint("RIGHT", -10, 0)
-        self.raidWindow.selectedPlayersText:SetHeight(80)
-        self.raidWindow.selectedPlayersText:SetJustifyH("LEFT")
-        self.raidWindow.selectedPlayersText:SetJustifyV("TOP")
-        self.raidWindow.selectedPlayersText:SetWordWrap(true)
-        
-        self.raidWindow.selectedPlayersTextContainer = CreateFrame("Frame", nil, self.raidWindow)
-        self.raidWindow.selectedPlayersTextContainer:SetAllPoints(self.raidWindow.selectedPlayersText)
-        self.raidWindow.selectedPlayersTextContainer:SetScript("OnEnter", function()
-            if self.raidWindow.selectedPlayersText.tooltip then
-                GameTooltip:SetOwner(self.raidWindow.selectedPlayersTextContainer, "ANCHOR_RIGHT")
-                GameTooltip:SetText("Выбранные игроки:")
-                GameTooltip:AddLine(self.raidWindow.selectedPlayersText.tooltip, 1, 1, 1, true)
+        for i = 1, GetNumGuildMembers(true) do
+            local name, rankName, rankIndex, level, classFileName,
+                  zone, publicNote, officerNote, online =
+                GetGuildRosterInfo(i)
+            if name then
+                local plainName = name:match("^(.-)-") or name
+                if plainName == nick then
+                    found = true
+                    rosterIndex = i
+                    playerData = {
+                        name         = name,
+                        rankName     = rankName,
+                        rankIndex    = rankIndex,
+                        level        = level,
+                        classFileName = classFileName,
+                        publicNote   = publicNote or "",
+                        officerNote  = officerNote or "",
+                        online       = online,
+                        index        = i,
+                    }
+                    break
+                end
+            end
+        end
+
+        if not found then
+            if self.raidWindow.playerInfoContainer then
+                self.raidWindow.playerInfoContainer:Hide()
+            end
+            return
+        end
+
+        if self.lastCheckedPlayer ~= nick then
+            self.lastCheckedPlayer = nick
+            local myName = UnitName("player")
+            SendAddonMessage(
+                "ns_get_rl", myName .. " " .. nick, "GUILD"
+            )
+        end
+
+        if not self.raidWindow.playerInfoContainer then
+            self.raidWindow.playerInfoContainer = CreateFrame(
+                "Frame", nil, self.raidWindow
+            )
+            self.raidWindow.playerInfoContainer:SetPoint(
+                "TOPRIGHT", -10, -30
+            )
+            self.raidWindow.playerInfoContainer:SetSize(230, 240)
+
+            local checkboxName = "GpDbPlayerInfoCheckbox"
+            local checkbox = CreateFrame(
+                "CheckButton", checkboxName,
+                self.raidWindow, "ChatConfigCheckButtonTemplate"
+            )
+            checkbox:SetSize(24, 24)
+            checkbox:SetPoint(
+                "TOPRIGHT",
+                self.raidWindow.closeButton,
+                "BOTTOMRIGHT", 0, -5
+            )
+            checkbox:Disable()
+            checkbox.targetNick = nick
+
+            checkbox:SetScript("OnClick", function(self_cb)
+                local isChecked = self_cb:GetChecked()
+                local boolStr = isChecked and "1" or "nil"
+                SendAddonMessage(
+                    "ns_its_rl",
+                    self_cb.targetNick .. " " .. boolStr,
+                    "GUILD"
+                )
+            end)
+
+            checkbox:SetScript("OnEnter", function(self_cb)
+                GameTooltip:SetOwner(self_cb, "ANCHOR_RIGHT")
+                local baseText = "Назначить игрока РЛом"
+                if #self.rl_tooltip_nicks > 0 then
+                    local listStr = table.concat(
+                        self.rl_tooltip_nicks, ", "
+                    )
+                    baseText = baseText
+                        .. "\nТекущие РЛы:\n" .. listStr
+                end
+                GameTooltip:SetText(baseText)
                 GameTooltip:Show()
+            end)
+
+            checkbox:SetScript(
+                "OnLeave", function() GameTooltip:Hide() end
+            )
+
+            self.raidWindow.playerInfoCheckbox = checkbox
+
+            local textRegion = _G[checkboxName .. "Text"]
+            if textRegion then textRegion:SetText("") end
+
+            local myName = UnitName("player")
+            if self.confirmed_rl_nicks
+            and self.confirmed_rl_nicks[myName] then
+                self.raidWindow.playerInfoCheckbox:Enable()
             end
-        end)
-        self.raidWindow.selectedPlayersTextContainer:SetScript("OnLeave", function()
-            GameTooltip:Hide()
-        end)
-    end
-    
-    if #text > 60 then
-        local shortText = string.sub(text, 1, 600) .. "..."
-        self.raidWindow.selectedPlayersText:SetText(shortText)
-        self.raidWindow.selectedPlayersText.tooltip = text
-    else
-        self.raidWindow.selectedPlayersText:SetText(text)
-        self.raidWindow.selectedPlayersText.tooltip = nil
-    end
-end
 
-function GpDb:RestoreRaidWindowState()
-    if not self.raidWindow then return end
-    
-    if self.lastSelectionType == "raid" and self.lastRaidId then
-        UIDropDownMenu_SetText(self.raidWindow.dropdown, string.format("%d: %s", self.lastRaidId, self.lastRaidName))
-        self.raidWindow.editBox:SetText("")
-        self.raidWindow.selectedRaidId = self.lastRaidId
-        self.raidWindow.selectedRaidName = self.lastRaidName
-        self.raidWindow.selectedRaidPlayers = self.lastRaidPlayers
-    elseif self.lastSelectionType == "other" and self.lastOtherText then
-        UIDropDownMenu_SetText(self.raidWindow.dropdown, "Выберите рейд")
-        self.raidWindow.editBox:SetText(self.lastOtherText)
-        self.raidWindow.selectedRaidId = nil
-        self.raidWindow.selectedRaidName = nil
-    else
-        UIDropDownMenu_SetText(self.raidWindow.dropdown, "Выберите рейд")
-        self.raidWindow.editBox:SetText("")
-        self.raidWindow.selectedRaidId = nil
-        self.raidWindow.selectedRaidName = nil
-    end
-    
-    if not self.lastGPValue then
-        self.lastGPValue = 0
-    end
-    self.raidWindow.gpEditBox:SetText(tostring(self.lastGPValue))
-    self.raidWindow.saveCheckbox:SetChecked(self.saveSelectionEnabled)
-    
-    self:_UpdateSelectedPlayersText()
-end
+            self.raidWindow.classText =
+                self.raidWindow.playerInfoContainer:CreateFontString(
+                    nil, "OVERLAY", "GameFontHighlightSmall"
+                )
+            self.raidWindow.classText:SetPoint("TOPLEFT", 0, -5)
+            self.raidWindow.classText:SetWidth(230)
 
-function GpDb:_CheckOfficerRank()
-    if not IsInGuild() then return false end
-    
-    local playerName = UnitName("player")
-    for i = 1, GetNumGuildMembers(true) do
-        local name, _, rankIndex = GetGuildRosterInfo(i)
-        if name and name == playerName then
-            local rankName = GuildControlGetRankName(rankIndex + 1)
-            if rankName == "Капитан" or rankName == "Лейтенант" or rankName == "Командор" then
-                return true
-            end
-            break
-        end
-    end
-    return false
-end
+            self.raidWindow.levelText =
+                self.raidWindow.playerInfoContainer:CreateFontString(
+                    nil, "OVERLAY", "GameFontHighlightSmall"
+                )
+            self.raidWindow.levelText:SetPoint("TOPLEFT", 0, -25)
+            self.raidWindow.levelText:SetWidth(230)
 
-function GpDb:ToggleRaidWindow()
-    if not self.raidWindow then
-        self:_CreateRaidSelectionWindow()
-    end
+            self.raidWindow.offlineText =
+                self.raidWindow.playerInfoContainer:CreateFontString(
+                    nil, "OVERLAY", "GameFontHighlightSmall"
+                )
+            self.raidWindow.offlineText:SetPoint("TOPLEFT", 0, -45)
+            self.raidWindow.offlineText:SetWidth(230)
 
-    local hasSelection = next(self.selected_indices) ~= nil
+            self.raidWindow.rankFrame = CreateFrame(
+                "Frame", nil, self.raidWindow.playerInfoContainer
+            )
+            self.raidWindow.rankFrame:SetSize(230, 20)
+            self.raidWindow.rankFrame:SetPoint("TOPLEFT", 0, -65)
 
-    if hasSelection then
-        if self.raidWindow:IsShown() then
-            self.raidWindow:Hide()
+            self.raidWindow.minusBtn = CreateFrame(
+                "Button", nil,
+                self.raidWindow.rankFrame, "UIPanelButtonTemplate"
+            )
+            self.raidWindow.minusBtn:SetSize(20, 20)
+            self.raidWindow.minusBtn:SetPoint("LEFT", 0, 0)
+            self.raidWindow.minusBtn:SetText("-")
+
+            self.raidWindow.rankText =
+                self.raidWindow.rankFrame:CreateFontString(
+                    nil, "OVERLAY", "GameFontHighlightSmall"
+                )
+            self.raidWindow.rankText:SetPoint(
+                "LEFT", self.raidWindow.minusBtn, "RIGHT", 5, 0
+            )
+            self.raidWindow.rankText:SetPoint("RIGHT", -25, 0)
+
+            self.raidWindow.plusBtn = CreateFrame(
+                "Button", nil,
+                self.raidWindow.rankFrame, "UIPanelButtonTemplate"
+            )
+            self.raidWindow.plusBtn:SetSize(20, 20)
+            self.raidWindow.plusBtn:SetPoint("RIGHT", 0, 0)
+            self.raidWindow.plusBtn:SetText("+")
+
+            self.raidWindow.publicBtn = CreateFrame(
+                "Button", nil,
+                self.raidWindow.playerInfoContainer,
+                "UIPanelButtonTemplate"
+            )
+            self.raidWindow.publicBtn:SetSize(230, 20)
+            self.raidWindow.publicBtn:SetPoint("TOPLEFT", 0, -90)
+
+            self.raidWindow.officerBtn = CreateFrame(
+                "Button", nil,
+                self.raidWindow.playerInfoContainer,
+                "UIPanelButtonTemplate"
+            )
+            self.raidWindow.officerBtn:SetSize(230, 20)
+            self.raidWindow.officerBtn:SetPoint("TOPLEFT", 0, -115)
+
+            self.raidWindow.rlNotesBtn = CreateFrame(
+                "Button", nil,
+                self.raidWindow.playerInfoContainer,
+                "UIPanelButtonTemplate"
+            )
+            self.raidWindow.rlNotesBtn:SetSize(230, 20)
+            self.raidWindow.rlNotesBtn:SetPoint("TOPLEFT", 0, -140)
+            self.raidWindow.rlNotesBtn:SetText("Заметки РЛов")
         else
-            self.raidWindow:Show()
-            UIDropDownMenu_Initialize(self.raidWindow.dropdown, nil)
-        end
-    end
-end
-
-function GpDb:ShowRlNotesEditor(targetNick, noteText)
-    if self.raidWindow and self.raidWindow:IsShown() and self.raidWindow.closeButton then
-        local script = self.raidWindow.closeButton:GetScript("OnClick")
-        if script then
-            script(self.raidWindow.closeButton)
-        end
-    end
-    if not self.rlNotesEditor then
-        self:_CreateRlNotesEditor()
-    end
-    self.rlNotesEditor.targetNick = targetNick
-    self.rlNotesEditor.editBox:SetText(noteText or "")
-    self.rlNotesEditor.title:SetText("Заметки РЛов: " .. targetNick)
-    self.rlNotesEditor:Show()
-    self.rlNotesEditor.editBox:SetFocus()
-end
-
-function GpDb:_CreateRlNotesEditor()
-    self.rlNotesEditor = CreateFrame("Frame", "GpDbRlNotesEditor", UIParent)
-    self.rlNotesEditor:SetSize(400, 300)
-    self.rlNotesEditor:SetPoint("CENTER", UIParent, "CENTER")
-    self.rlNotesEditor:SetFrameStrata("FULLSCREEN_DIALOG")
-    self.rlNotesEditor:EnableMouse(true)
-    self.rlNotesEditor:SetMovable(true)
-    self.rlNotesEditor:RegisterForDrag("LeftButton")
-    self.rlNotesEditor:SetScript("OnDragStart", self.rlNotesEditor.StartMoving)
-    self.rlNotesEditor:SetScript("OnDragStop", self.rlNotesEditor.StopMovingOrSizing)
-    local bg = self.rlNotesEditor:CreateTexture(nil, "BACKGROUND")
-    bg:SetTexture("Interface\\Buttons\\WHITE8X8")
-    bg:SetVertexColor(0.1, 0.1, 0.1, 0.9)
-    bg:SetAllPoints()
-    self.rlNotesEditor.border = CreateFrame("Frame", nil, self.rlNotesEditor)
-    self.rlNotesEditor.border:SetPoint("TOPLEFT", -3, 3)
-    self.rlNotesEditor.border:SetPoint("BOTTOMRIGHT", 3, -3)
-    self.rlNotesEditor.border:SetBackdrop({
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        edgeSize = 16,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 }
-    })
-    self.rlNotesEditor.title = self.rlNotesEditor:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    self.rlNotesEditor.title:SetPoint("TOP", 0, -10)
-    self.rlNotesEditor.title:SetText("Заметки РЛов")
-    self.rlNotesEditor.closeBtn = CreateFrame("Button", nil, self.rlNotesEditor, "UIPanelCloseButton")
-    self.rlNotesEditor.closeBtn:SetPoint("TOPRIGHT", -5, -5)
-    self.rlNotesEditor.closeBtn:SetScript("OnClick", function()
-        if self.rlNotesEditor.targetNick then
-            _rlNotesReassembly[self.rlNotesEditor.targetNick] = nil
-        end
-        self.rlNotesEditor:Hide()
-    end)
-    self.rlNotesEditor.saveBtn = CreateFrame("Button", nil, self.rlNotesEditor, "UIPanelButtonTemplate")
-    self.rlNotesEditor.saveBtn:SetSize(24, 24)
-    self.rlNotesEditor.saveBtn:SetPoint("TOPLEFT", 8, -8)
-    self.rlNotesEditor.saveBtn:SetText("S")
-    self.rlNotesEditor.saveBtn:SetScript("OnClick", function()
-        if not self.rlNotesEditor.targetNick then
-            print("|cFFFF0000[NSRL DEBUG]|r Ошибка: нет targetNick при сохранении")
-            self.rlNotesEditor:Hide()
-            return
-        end
-        local noteText = self.rlNotesEditor.editBox:GetText()
-        local targetNick = self.rlNotesEditor.targetNick
-        local prefix = "ns_RL_notes"
-        local MAX_BODY_BYTES = 240
-        local header = targetNick .. " "
-        local headerByteLen = #header
-        if headerByteLen >= MAX_BODY_BYTES then
-            print("|cFFFF0000[NSRL DEBUG]|r Ошибка: ник слишком длинный (байт:", headerByteLen, "):", targetNick)
-            self.rlNotesEditor:Hide()
-            return
-        end
-        local maxNoteBytes = MAX_BODY_BYTES - headerByteLen
-        local maxChars = math.floor(maxNoteBytes / 2)
-        if maxChars < 1 then maxChars = 1 end
-        local noteLen = utf8myLen(noteText) or 0
-        local chunks = {}
-        local startPos = 1
-        while startPos <= noteLen do
-            local endPos = startPos + maxChars - 1
-            if endPos > noteLen then
-                endPos = noteLen
+            self.raidWindow.playerInfoContainer:Show()
+            if self.raidWindow.playerInfoCheckbox then
+                self.raidWindow.playerInfoCheckbox.targetNick = nick
             end
-            local chunk = utf8mySub(noteText, startPos, endPos)
-            if not chunk or chunk == "" then
-                startPos = startPos + 1
+        end
+
+        local db = self
+        local className = "Класс: ?"
+        if playerData.classFileName then
+            local color = RAID_CLASS_COLORS[playerData.classFileName]
+            if color then
+                local hex = string.format(
+                    "|cFF%02x%02x%02x",
+                    color.r * 255,
+                    color.g * 255,
+                    color.b * 255
+                )
+                className = hex .. playerData.classFileName .. "|r"
             else
-                table.insert(chunks, header .. chunk)
-                startPos = endPos + 1
+                className = "|cFFFFFFFF"
+                    .. playerData.classFileName .. "|r"
             end
-            if startPos > 100000 then break end
         end
-        if #chunks == 0 then
-            table.insert(chunks, header)
-        end
-        local i = 1
-        local sendTimer = CreateFrame("Frame")
-        sendTimer:Hide()
-        local sendElapsed = 0
-        local sendDelay = 0.15
-        local ctx = self
+        self.raidWindow.classText:SetText(className)
+        self.raidWindow.levelText:SetText(
+            "Уровень: " .. (playerData.level or "?")
+        )
 
-        local function sendNext()
-            if i > #chunks then
-                _rlNotesReassembly[targetNick] = nil
-                ctx.rlNotesEditor:Hide()
-                sendTimer:SetScript("OnUpdate", nil)
-                sendTimer:Hide()
+        local offlineStr = "Офлайн: "
+        if playerData.online then
+            offlineStr = offlineStr .. "в сети"
+        else
+            local years, months, days, hours =
+                GetGuildRosterLastOnline(rosterIndex)
+            if years ~= nil then
+                if years > 0 then
+                    offlineStr = string.format(
+                        "Офлайн: %dг %dм %dд %dч",
+                        years, months, days, hours
+                    )
+                elseif months > 0 then
+                    offlineStr = string.format(
+                        "Офлайн: %dм %dд %dч",
+                        months, days, hours
+                    )
+                else
+                    offlineStr = string.format(
+                        "Офлайн: %dд %dч", days, hours
+                    )
+                end
+            else
+                offlineStr = offlineStr .. "—"
+            end
+        end
+        self.raidWindow.offlineText:SetText(offlineStr)
+
+        self.raidWindow.rankText:SetText(
+            "Звание: " .. (playerData.rankName or "?")
+        )
+
+        self.raidWindow.minusBtn:SetScript("OnClick", function()
+            if not db:_CheckOfficerRank() then
+                print(
+                    "|cFFFF0000ГП:|r Только офицеры"
+                    .. " могут менять звания"
+                )
+                return
+            end
+            GuildDemote(playerData.name)
+            local dbRef = db
+            local timerFrame = CreateFrame("Frame")
+            timerFrame:Hide()
+            local elapsed = 0
+            local delay = 0.5
+            timerFrame:SetScript("OnUpdate", function(frame, dt)
+                elapsed = elapsed + dt
+                if elapsed >= delay then
+                    frame:SetScript("OnUpdate", nil)
+                    frame:Hide()
+                    dbRef:_UpdatePlayerInfo()
+                end
+            end)
+        end)
+
+        self.raidWindow.plusBtn:SetScript("OnClick", function()
+            if not db:_CheckOfficerRank() then
+                print(
+                    "|cFFFF0000ГП:|r Только офицеры"
+                    .. " могут менять звания"
+                )
+                return
+            end
+            GuildPromote(playerData.name)
+            local dbRef = db
+            local timerFrame = CreateFrame("Frame")
+            timerFrame:Hide()
+            local elapsed = 0
+            local delay = 0.5
+            timerFrame:SetScript("OnUpdate", function(frame, dt)
+                elapsed = elapsed + dt
+                if elapsed >= delay then
+                    frame:SetScript("OnUpdate", nil)
+                    frame:Hide()
+                    dbRef:_UpdatePlayerInfo()
+                end
+            end)
+        end)
+
+        self.raidWindow.publicBtn:SetText(
+            "Публ.: " .. (
+                playerData.publicNote ~= ""
+                and playerData.publicNote
+                or "—"
+            )
+        )
+        self.raidWindow.publicBtn:SetScript("OnClick", function()
+            StaticPopupDialogs["GP_EDIT_PUBLIC_NOTE"] = {
+                text = "Изменить публичную заметку для "
+                    .. playerData.name,
+                button1 = "OK",
+                button2 = "Отмена",
+                hasEditBox = true,
+                editBoxWidth = 200,
+                OnShow = function(self)
+                    self.editBox:SetText(playerData.publicNote)
+                    self.editBox:SetFocus()
+                end,
+                OnAccept = function(self)
+                    local newNote = self.editBox:GetText()
+                    if not db:_CheckOfficerRank() then
+                        print(
+                            "|cFFFF0000ГП:|r Только офицеры"
+                            .. " могут редактировать заметки"
+                        )
+                        return
+                    end
+                    GuildRosterSetPublicNote(
+                        playerData.index, newNote
+                    )
+                    GuildRoster()
+                    local frame = CreateFrame("Frame")
+                    frame:SetScript("OnEvent", function()
+                        db:_UpdatePlayerInfo()
+                        frame:UnregisterEvent("GUILD_ROSTER_UPDATE")
+                    end)
+                    frame:RegisterEvent("GUILD_ROSTER_UPDATE")
+                end,
+                timeout = 0,
+                whileDead = true,
+                hideOnEscape = true,
+            }
+            StaticPopup_Show("GP_EDIT_PUBLIC_NOTE")
+        end)
+
+        self.raidWindow.officerBtn:SetText(
+            "Оф.: " .. (
+                playerData.officerNote ~= ""
+                and playerData.officerNote
+                or "—"
+            )
+        )
+        self.raidWindow.officerBtn:SetScript("OnClick", function()
+            StaticPopupDialogs["GP_EDIT_OFFICER_NOTE"] = {
+                text = "Изменить офицерскую заметку для "
+                    .. playerData.name,
+                button1 = "OK",
+                button2 = "Отмена",
+                hasEditBox = true,
+                editBoxWidth = 200,
+                OnShow = function(self)
+                    self.editBox:SetText(playerData.officerNote)
+                    self.editBox:SetFocus()
+                end,
+                OnAccept = function(self)
+                    local newNote = self.editBox:GetText()
+                    if not db:_CheckOfficerRank() then
+                        print(
+                            "|cFFFF0000ГП:|r Только офицеры"
+                            .. " могут редактировать заметки"
+                        )
+                        return
+                    end
+                    GuildRosterSetOfficerNote(
+                        playerData.index, newNote
+                    )
+                    GuildRoster()
+                    local frame = CreateFrame("Frame")
+                    frame:SetScript("OnEvent", function()
+                        db:_UpdatePlayerInfo()
+                        frame:UnregisterEvent("GUILD_ROSTER_UPDATE")
+                    end)
+                    frame:RegisterEvent("GUILD_ROSTER_UPDATE")
+                end,
+                timeout = 0,
+                whileDead = true,
+                hideOnEscape = true,
+            }
+            StaticPopup_Show("GP_EDIT_OFFICER_NOTE")
+        end)
+
+        self.raidWindow.rlNotesBtn:SetScript("OnClick", function()
+            local selectedEntries = self:GetSelectedEntries()
+            if #selectedEntries == 1 then
+                local targetNick = selectedEntries[1].original_nick
+                if self.raidWindow.playerInfoContainer then
+                    self.raidWindow.playerInfoContainer:Hide()
+                end
+                SendAddonMessage(
+                    "ns_get_rl_notes", targetNick, "GUILD"
+                )
+            else
+                dbg("RL-NOTES-SKIP",
+                    "selected=", tostring(#selectedEntries)
+                )
+            end
+        end)
+
+        if self.raidWindow.playerInfoCheckbox:IsEnabled() then
+            self.raidWindow.rlNotesBtn:Show()
+        else
+            self.raidWindow.rlNotesBtn:Hide()
+        end
+    end
+
+    function GpDb:_UpdateSelectedPlayersText()
+        if not self.raidWindow then return end
+
+        local selected = self:GetSelectedEntries()
+        local names = {}
+        for _, entry in ipairs(selected) do
+            table.insert(names, entry.original_nick)
+        end
+        local text = table.concat(names, ", ")
+
+        if not self.raidWindow.selectedPlayersText then
+            self.raidWindow.selectedPlayersText =
+                self.raidWindow:CreateFontString(
+                    nil, "OVERLAY", "GameFontNormalSmall"
+                )
+            self.raidWindow.selectedPlayersText:SetPoint(
+                "TOPLEFT",
+                self.raidWindow.saveCheckbox,
+                "BOTTOMLEFT", 0, -5
+            )
+            self.raidWindow.selectedPlayersText:SetPoint(
+                "RIGHT", -10, 0
+            )
+            self.raidWindow.selectedPlayersText:SetHeight(80)
+            self.raidWindow.selectedPlayersText:SetJustifyH("LEFT")
+            self.raidWindow.selectedPlayersText:SetJustifyV("TOP")
+            self.raidWindow.selectedPlayersText:SetWordWrap(true)
+
+            self.raidWindow.selectedPlayersTextContainer =
+                CreateFrame("Frame", nil, self.raidWindow)
+            self.raidWindow.selectedPlayersTextContainer:SetAllPoints(
+                self.raidWindow.selectedPlayersText
+            )
+            self.raidWindow.selectedPlayersTextContainer:SetScript(
+                "OnEnter",
+                function()
+                    if self.raidWindow.selectedPlayersText.tooltip then
+                        GameTooltip:SetOwner(
+                            self.raidWindow
+                                .selectedPlayersTextContainer,
+                            "ANCHOR_RIGHT"
+                        )
+                        GameTooltip:SetText("Выбранные игроки:")
+                        GameTooltip:AddLine(
+                            self.raidWindow
+                                .selectedPlayersText.tooltip,
+                            1, 1, 1, true
+                        )
+                        GameTooltip:Show()
+                    end
+                end
+            )
+            self.raidWindow.selectedPlayersTextContainer:SetScript(
+                "OnLeave",
+                function() GameTooltip:Hide() end
+            )
+        end
+
+        if #text > 60 then
+            local shortText = string.sub(text, 1, 600) .. "..."
+            self.raidWindow.selectedPlayersText:SetText(shortText)
+            self.raidWindow.selectedPlayersText.tooltip = text
+        else
+            self.raidWindow.selectedPlayersText:SetText(text)
+            self.raidWindow.selectedPlayersText.tooltip = nil
+        end
+    end
+
+    function GpDb:RestoreRaidWindowState()
+        if not self.raidWindow then return end
+
+        if self.lastSelectionType == "raid"
+        and self.lastRaidId then
+            UIDropDownMenu_SetText(
+                self.raidWindow.dropdown,
+                string.format(
+                    "%d: %s",
+                    self.lastRaidId,
+                    self.lastRaidName
+                )
+            )
+            self.raidWindow.editBox:SetText("")
+            self.raidWindow.selectedRaidId = self.lastRaidId
+            self.raidWindow.selectedRaidName = self.lastRaidName
+            self.raidWindow.selectedRaidPlayers =
+                self.lastRaidPlayers
+        elseif self.lastSelectionType == "other"
+        and self.lastOtherText then
+            UIDropDownMenu_SetText(
+                self.raidWindow.dropdown,
+                "Выберите рейд"
+            )
+            self.raidWindow.editBox:SetText(self.lastOtherText)
+            self.raidWindow.selectedRaidId = nil
+            self.raidWindow.selectedRaidName = nil
+        else
+            UIDropDownMenu_SetText(
+                self.raidWindow.dropdown,
+                "Выберите рейд"
+            )
+            self.raidWindow.editBox:SetText("")
+            self.raidWindow.selectedRaidId = nil
+            self.raidWindow.selectedRaidName = nil
+        end
+
+        if not self.lastGPValue then
+            self.lastGPValue = 0
+        end
+        self.raidWindow.gpEditBox:SetText(
+            tostring(self.lastGPValue)
+        )
+        self.raidWindow.saveCheckbox:SetChecked(
+            self.saveSelectionEnabled
+        )
+        self:_UpdateSelectedPlayersText()
+    end
+
+    function GpDb:_CheckOfficerRank()
+        if not IsInGuild() then return false end
+        local playerName = UnitName("player")
+        for i = 1, GetNumGuildMembers(true) do
+            local name, _, rankIndex = GetGuildRosterInfo(i)
+            if name and name == playerName then
+                local rankName =
+                    GuildControlGetRankName(rankIndex + 1)
+                if rankName == "Капитан"
+                or rankName == "Лейтенант"
+                or rankName == "Командор" then
+                    return true
+                end
+                break
+            end
+        end
+        return false
+    end
+
+    function GpDb:ToggleRaidWindow()
+        if not self.raidWindow then
+            self:_CreateRaidSelectionWindow()
+        end
+        local hasSelection = next(self.selected_indices) ~= nil
+        if hasSelection then
+            if self.raidWindow:IsShown() then
+                self.raidWindow:Hide()
+            else
+                self.raidWindow:Show()
+                UIDropDownMenu_Initialize(
+                    self.raidWindow.dropdown, nil
+                )
+            end
+        end
+    end
+
+    function GpDb:ShowRlNotesEditor(targetNick, noteText)
+        if self.raidWindow
+        and self.raidWindow:IsShown()
+        and self.raidWindow.closeButton then
+            local script =
+                self.raidWindow.closeButton:GetScript("OnClick")
+            if script then
+                script(self.raidWindow.closeButton)
+            end
+        end
+
+        if not self.rlNotesEditor then
+            self:_CreateRlNotesEditor()
+        end
+
+        self.rlNotesEditor.targetNick = targetNick
+        self.rlNotesEditor.editBox:SetText(noteText or "")
+        self.rlNotesEditor.title:SetText(
+            "Заметки РЛов: " .. targetNick
+        )
+        self.rlNotesEditor:Show()
+        self.rlNotesEditor.editBox:SetFocus()
+    end
+
+    function GpDb:_CreateRlNotesEditor()
+        self.rlNotesEditor = CreateFrame(
+            "Frame", "GpDbRlNotesEditor", UIParent
+        )
+        self.rlNotesEditor:SetSize(400, 300)
+        self.rlNotesEditor:SetPoint(
+            "CENTER", UIParent, "CENTER"
+        )
+        self.rlNotesEditor:SetFrameStrata("FULLSCREEN_DIALOG")
+        self.rlNotesEditor:EnableMouse(true)
+        self.rlNotesEditor:SetMovable(true)
+        self.rlNotesEditor:RegisterForDrag("LeftButton")
+        self.rlNotesEditor:SetScript(
+            "OnDragStart",
+            self.rlNotesEditor.StartMoving
+        )
+        self.rlNotesEditor:SetScript(
+            "OnDragStop",
+            self.rlNotesEditor.StopMovingOrSizing
+        )
+
+        local bg = self.rlNotesEditor:CreateTexture(
+            nil, "BACKGROUND"
+        )
+        bg:SetTexture("Interface\\Buttons\\WHITE8X8")
+        bg:SetVertexColor(0.1, 0.1, 0.1, 0.9)
+        bg:SetAllPoints()
+
+        self.rlNotesEditor.border = CreateFrame(
+            "Frame", nil, self.rlNotesEditor
+        )
+        self.rlNotesEditor.border:SetPoint("TOPLEFT", -3, 3)
+        self.rlNotesEditor.border:SetPoint("BOTTOMRIGHT", 3, -3)
+        self.rlNotesEditor.border:SetBackdrop({
+            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+            edgeSize = 16,
+            insets = {
+                left = 4, right = 4, top = 4, bottom = 4,
+            },
+        })
+
+        self.rlNotesEditor.title =
+            self.rlNotesEditor:CreateFontString(
+                nil, "OVERLAY", "GameFontNormal"
+            )
+        self.rlNotesEditor.title:SetPoint("TOP", 0, -10)
+        self.rlNotesEditor.title:SetText("Заметки РЛов")
+
+        self.rlNotesEditor.closeBtn = CreateFrame(
+            "Button", nil,
+            self.rlNotesEditor, "UIPanelCloseButton"
+        )
+        self.rlNotesEditor.closeBtn:SetPoint("TOPRIGHT", -5, -5)
+        self.rlNotesEditor.closeBtn:SetScript("OnClick", function()
+            if self.rlNotesEditor.targetNick then
+                _rlNotesReassembly[
+                    self.rlNotesEditor.targetNick
+                ] = nil
+            end
+            self.rlNotesEditor:Hide()
+        end)
+
+        self.rlNotesEditor.saveBtn = CreateFrame(
+            "Button", nil,
+            self.rlNotesEditor, "UIPanelButtonTemplate"
+        )
+        self.rlNotesEditor.saveBtn:SetSize(24, 24)
+        self.rlNotesEditor.saveBtn:SetPoint("TOPLEFT", 8, -8)
+        self.rlNotesEditor.saveBtn:SetText("S")
+        self.rlNotesEditor.saveBtn:SetScript("OnClick", function()
+            if not self.rlNotesEditor.targetNick then
+                dbg("RL-NOTES-SAVE-SKIP", "no targetNick")
+                self.rlNotesEditor:Hide()
                 return
             end
 
-            SendAddonMessage(prefix, chunks[i], "GUILD")
-            i = i + 1
+            local noteText = self.rlNotesEditor.editBox:GetText()
+            local targetNick = self.rlNotesEditor.targetNick
+            local prefix = "ns_RL_notes"
+            local MAX_BODY_BYTES = 240
+            local header = targetNick .. " "
+            local headerByteLen = #header
 
-            sendElapsed = 0
-            sendTimer:SetScript("OnUpdate", function(frame, dt)
-                sendElapsed = sendElapsed + dt
-                if sendElapsed >= sendDelay then
-                    frame:SetScript("OnUpdate", nil)
-                    frame:Hide()
-                    sendNext()
+            if headerByteLen >= MAX_BODY_BYTES then
+                dbg(
+                    "RL-NOTES-SAVE-ERR",
+                    "nick too long", targetNick
+                )
+                self.rlNotesEditor:Hide()
+                return
+            end
+
+            local maxNoteBytes = MAX_BODY_BYTES - headerByteLen
+            local maxChars = math.floor(maxNoteBytes / 2)
+            if maxChars < 1 then maxChars = 1 end
+
+            local noteLen = utf8myLen(noteText) or 0
+            local chunks = {}
+            local startPos = 1
+
+            while startPos <= noteLen do
+                local endPos = startPos + maxChars - 1
+                if endPos > noteLen then
+                    endPos = noteLen
                 end
-            end)
-        end
-        sendNext()
-    end)
-    self.rlNotesEditor.saveBtn:SetScript("OnEnter", function(self_btn)
-        GameTooltip:SetOwner(self_btn, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Сохранить")
-        GameTooltip:Show()
-    end)
-    self.rlNotesEditor.saveBtn:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-    end)
-    self.rlNotesEditor.fullBtn = CreateFrame("Button", nil, self.rlNotesEditor, "UIPanelButtonTemplate")
-    self.rlNotesEditor.fullBtn:SetSize(24, 24)
-    self.rlNotesEditor.fullBtn:SetPoint("LEFT", self.rlNotesEditor.saveBtn, "RIGHT", 2, 0)
-    self.rlNotesEditor.fullBtn:SetText("F")
-    self.rlNotesEditor.fullBtn:SetScript("OnClick", function()
-        if not self.rlNotesEditor.targetNick then
-            print("|cFFFF0000[NSRL DEBUG]|r Ошибка: нет targetNick при запросе истории")
-            return
-        end
-        local targetNick = self.rlNotesEditor.targetNick
-        SendAddonMessage("ns_RL_notes_full", targetNick, "GUILD")
-    end)
-    self.rlNotesEditor.fullBtn:SetScript("OnEnter", function(self_btn)
-        GameTooltip:SetOwner(self_btn, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Получить историю правок")
-        GameTooltip:Show()
-    end)
-    self.rlNotesEditor.fullBtn:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-    end)
-    local scrollFrame = CreateFrame("ScrollFrame", "GpDbRlNotesScrollFrame", self.rlNotesEditor, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOP", 0, -40)
-    scrollFrame:SetPoint("BOTTOM", 0, 40)
-    scrollFrame:SetPoint("LEFT", 10, 0)
-    scrollFrame:SetPoint("RIGHT", -30, 0)
-    local scrollChild = CreateFrame("Frame")
-    scrollChild:SetWidth(360)
-    scrollChild:SetHeight(1000)
-    scrollFrame:SetScrollChild(scrollChild)
-    self.rlNotesEditor.editBox = CreateFrame("EditBox", "jjjj1111", scrollChild, "InputBoxTemplate")
-    self.rlNotesEditor.editBox:SetSize(360, 220)
-    self.rlNotesEditor.editBox:SetPoint("TOPLEFT")
-    self.rlNotesEditor.editBox:SetMultiLine(true)
-    self.rlNotesEditor.editBox:SetMaxLetters(1000)
-    self.rlNotesEditor.editBox:SetAutoFocus(false)
-    self.rlNotesEditor.editBox:SetScript("OnTextChanged", function(_, userInput)
-        if userInput then
-            local text = self.rlNotesEditor.editBox:GetText()
-            local lines = 1
-            for _ in text:gmatch("\n") do lines = lines + 1 end
-            local height = math.max(220, lines * 20)
-            scrollChild:SetHeight(height)
-            scrollFrame:UpdateScrollChildRect()
-        end
-    end)
-    self.rlNotesEditor.editBox:SetScript("OnEscapePressed", function()
-        if self.rlNotesEditor.targetNick then
-            _rlNotesReassembly[self.rlNotesEditor.targetNick] = nil
-        end
-        self.rlNotesEditor:Hide()
-    end)
-    local editBg = self.rlNotesEditor.editBox:CreateTexture(nil, "BACKGROUND")
-    editBg:SetTexture("Interface\\Buttons\\WHITE8X8")
-    editBg:SetVertexColor(0.2, 0.2, 0.2, 0.8)
-    editBg:SetAllPoints()
-end
+                local chunk = utf8mySub(
+                    noteText, startPos, endPos
+                )
+                if not chunk or chunk == "" then
+                    startPos = startPos + 1
+                else
+                    table.insert(chunks, header .. chunk)
+                    startPos = endPos + 1
+                end
+                if startPos > 100000 then break end
+            end
 
+            if #chunks == 0 then
+                table.insert(chunks, header)
+            end
 
+            local i = 1
+            local sendTimer = CreateFrame("Frame")
+            sendTimer:Hide()
+            local sendElapsed = 0
+            local sendDelay = 0.15
+            local ctx = self
 
+            local function sendNext()
+                if i > #chunks then
+                    _rlNotesReassembly[targetNick] = nil
+                    ctx.rlNotesEditor:Hide()
+                    sendTimer:SetScript("OnUpdate", nil)
+                    sendTimer:Hide()
+                    return
+                end
+                SendAddonMessage(
+                    prefix, chunks[i], "GUILD"
+                )
+                i = i + 1
+                sendElapsed = 0
+                sendTimer:SetScript(
+                    "OnUpdate",
+                    function(frame, dt)
+                        sendElapsed = sendElapsed + dt
+                        if sendElapsed >= sendDelay then
+                            frame:SetScript("OnUpdate", nil)
+                            frame:Hide()
+                            sendNext()
+                        end
+                    end
+                )
+            end
+            sendNext()
+        end)
+
+        self.rlNotesEditor.saveBtn:SetScript(
+            "OnEnter",
+            function(self_btn)
+                GameTooltip:SetOwner(self_btn, "ANCHOR_RIGHT")
+                GameTooltip:SetText("Сохранить")
+                GameTooltip:Show()
+            end
+        )
+        self.rlNotesEditor.saveBtn:SetScript(
+            "OnLeave",
+            function() GameTooltip:Hide() end
+        )
+
+        self.rlNotesEditor.fullBtn = CreateFrame(
+            "Button", nil,
+            self.rlNotesEditor, "UIPanelButtonTemplate"
+        )
+        self.rlNotesEditor.fullBtn:SetSize(24, 24)
+        self.rlNotesEditor.fullBtn:SetPoint(
+            "LEFT",
+            self.rlNotesEditor.saveBtn,
+            "RIGHT", 2, 0
+        )
+        self.rlNotesEditor.fullBtn:SetText("F")
+        self.rlNotesEditor.fullBtn:SetScript("OnClick", function()
+            if not self.rlNotesEditor.targetNick then
+                dbg("RL-NOTES-FULL-SKIP", "no targetNick")
+                return
+            end
+            SendAddonMessage(
+                "ns_RL_notes_full",
+                self.rlNotesEditor.targetNick,
+                "GUILD"
+            )
+        end)
+        self.rlNotesEditor.fullBtn:SetScript(
+            "OnEnter",
+            function(self_btn)
+                GameTooltip:SetOwner(self_btn, "ANCHOR_RIGHT")
+                GameTooltip:SetText("Получить историю правок")
+                GameTooltip:Show()
+            end
+        )
+        self.rlNotesEditor.fullBtn:SetScript(
+            "OnLeave",
+            function() GameTooltip:Hide() end
+        )
+
+        local scrollFrame = CreateFrame(
+            "ScrollFrame", "GpDbRlNotesScrollFrame",
+            self.rlNotesEditor, "UIPanelScrollFrameTemplate"
+        )
+        scrollFrame:SetPoint("TOP", 0, -40)
+        scrollFrame:SetPoint("BOTTOM", 0, 40)
+        scrollFrame:SetPoint("LEFT", 10, 0)
+        scrollFrame:SetPoint("RIGHT", -30, 0)
+
+        local scrollChild = CreateFrame("Frame")
+        scrollChild:SetWidth(360)
+        scrollChild:SetHeight(1000)
+        scrollFrame:SetScrollChild(scrollChild)
+
+        self.rlNotesEditor.editBox = CreateFrame(
+            "EditBox", "jjjj1111",
+            scrollChild, "InputBoxTemplate"
+        )
+        self.rlNotesEditor.editBox:SetSize(360, 220)
+        self.rlNotesEditor.editBox:SetPoint("TOPLEFT")
+        self.rlNotesEditor.editBox:SetMultiLine(true)
+        self.rlNotesEditor.editBox:SetMaxLetters(1000)
+        self.rlNotesEditor.editBox:SetAutoFocus(false)
+        self.rlNotesEditor.editBox:SetScript(
+            "OnTextChanged",
+            function(_, userInput)
+                if userInput then
+                    local text =
+                        self.rlNotesEditor.editBox:GetText()
+                    local lines = 1
+                    for _ in text:gmatch("\n") do
+                        lines = lines + 1
+                    end
+                    local height = math.max(220, lines * 20)
+                    scrollChild:SetHeight(height)
+                    scrollFrame:UpdateScrollChildRect()
+                end
+            end
+        )
+        self.rlNotesEditor.editBox:SetScript(
+            "OnEscapePressed",
+            function()
+                if self.rlNotesEditor.targetNick then
+                    _rlNotesReassembly[
+                        self.rlNotesEditor.targetNick
+                    ] = nil
+                end
+                self.rlNotesEditor:Hide()
+            end
+        )
+
+        local editBg = self.rlNotesEditor.editBox:CreateTexture(
+            nil, "BACKGROUND"
+        )
+        editBg:SetTexture("Interface\\Buttons\\WHITE8X8")
+        editBg:SetVertexColor(0.2, 0.2, 0.2, 0.8)
+        editBg:SetAllPoints()
+    end
 
     if not gpDb then
         gpDb = GpDb:new({})
@@ -2249,22 +2985,19 @@ end
     NSQC4._gpWindow = gpDb
 
     function NSQC4.RefreshPveSeasonCheckbox()
-        if NSQC4._gpWindow and NSQC4._gpWindow.window
-           and NSQC4._gpWindow.window.pveSeasonCheckbox then
+        if NSQC4._gpWindow
+        and NSQC4._gpWindow.window
+        and NSQC4._gpWindow.window.pveSeasonCheckbox then
             NSQC4._gpWindow.window.pveSeasonCheckbox:SetChecked(
-                nsDbc4.settings.gp.pveSeason == true)
+                nsDbc4.settings.gp.pveSeason == true
+            )
         end
     end
 
-    print("|cff00ff00[NSQC4-TEST]|r GP.lua выполняется до конца. NSQC4_GP_TEST зарегистрирована.")
-
-    -- ========================================================================
-    -- Метаданные модуля gp (одна галочка на все 10 файлов)
-    -- ========================================================================
     NSQC4.SetModuleMeta("gp", {
         label   = "ГП / Аукцион / Лут",
-        tooltip = "Управление ГП: окно со списком, начисление, аукцион, выдача лута с босса, трекер рейда.",
+        tooltip = "Управление ГП: окно со списком, начисление,"
+            .. " аукцион, выдача лута с босса, трекер рейда.",
         order   = 70,
     })
-
 end)
