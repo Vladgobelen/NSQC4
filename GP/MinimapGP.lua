@@ -169,14 +169,21 @@ NSQC4.RegisterModule("gp", function()
                 local entry = rez[i]
                 if entry and entry['nome'] then
                     local playerName = entry['nome']
+                    local plainName = playerName:match("^(.-)-") or playerName
+
+                    if entry.public == "НЕ В ГИЛЬДИИ" and NSQC4.RequestGp then
+                        if not gpDb or gpDb:GetExternalGp(plainName) == nil then
+                            NSQC4.RequestGp(plainName)
+                        end
+                    end
+
                     local displayName = (playerName ~= myNome) and "|cFF6495ED" or "|cffff0000"
                     local publicNote = entry['public'] or ""
                     local znach = entry['znach'] or ""
 
-                    -- Кэш внешних ГП (для не-гильдейцев)
                     if gpDb and gpDb.GetExternalGp then
-                        local cachedGp = gpDb:GetExternalGp(playerName)
-                        if cachedGp ~= nil and cachedGp ~= 0 then
+                        local cachedGp = gpDb:GetExternalGp(plainName)
+                        if cachedGp ~= nil then
                             znach = cachedGp
                         end
                     end
@@ -278,5 +285,18 @@ NSQC4.RegisterModule("gp", function()
     btn:SetScript("OnClick", function(b, mouseButton)
         OnClick(b, mouseButton)
     end)
+
+    -- Обновлять тултип при приходе внешнего ГП
+    if gpDb and gpDb.SetExternalGp and not gpDb._nsMinimapGpHooked then
+        gpDb._nsMinimapGpHooked = true
+        local origSetExternalGp = gpDb.SetExternalGp
+        gpDb.SetExternalGp = function(self, nick, gp)
+            origSetExternalGp(self, nick, gp)
+            if btn:IsMouseOver() then
+                GameTooltip:ClearLines()
+                OnEnter(btn)
+            end
+        end
+    end
 
 end)
