@@ -572,7 +572,7 @@ NSQC4.RegisterModule("gp", function()
         end)
 
         self.window.scrollFrame = CreateFrame(
-            "ScrollFrame", "ScrollFrame",
+            "ScrollFrame", "NSQC4GpScrollFrame",
             self.window, "UIPanelScrollFrameTemplate"
         )
         self.window.scrollFrame:SetPoint("TOPLEFT", 0, -85)
@@ -1282,17 +1282,25 @@ NSQC4.RegisterModule("gp", function()
             db.gp_data = filteredData
         end
 
-        db.window.countText:SetText(
-            string.format("Отображается игроков: %d", #db.gp_data)
-        )
-        db.window.totalText:SetText(string.format(
-            "Всего игроков с ГП: %d (из %d в гильдии)",
-            totalWithGP, GetNumGuildMembers(true)
-        ))
+        if db.window then
+            if db.window.countText then
+                db.window.countText:SetText(
+                    string.format("Отображается игроков: %d", #db.gp_data)
+                )
+            end
+            if db.window.totalText then
+                db.window.totalText:SetText(string.format(
+                    "Всего игроков с ГП: %d (из %d в гильдии)",
+                    totalWithGP, GetNumGuildMembers(true)
+                ))
+            end
+        end
 
-        db:ClearSelection()
-        db:SortData()
-        db:UpdateWindow()
+        if db.window and db.window.scrollFrame then
+            db:ClearSelection()
+            db:SortData()
+            db:UpdateWindow()
+        end
     end
 
     function GpDb:SetExternalGp(nick, gp)
@@ -1490,6 +1498,10 @@ NSQC4.RegisterModule("gp", function()
             end
         end)
 
+        if not self.window or not self.window.scrollFrame then
+            return
+        end
+
         self:ClearSelection()
         self:UpdateWindow()
     end
@@ -1497,17 +1509,9 @@ NSQC4.RegisterModule("gp", function()
     function GpDb:UpdateWindow()
         if not self.window or not self.rows then return end
 
-        local offset = FauxScrollFrame_GetOffset(self.window.scrollFrame)
-        local visibleRows = math.floor(
-            (self.window.scrollFrame:GetHeight() - 30) / 25
-        )
-        self.visible_rows = visibleRows
-
-        for i = 1, self.visible_rows do
-            local row = self.rows[i]
-            local dataIndex = i + offset
-            if dataIndex <= #self.gp_data then
-                local entry = self.gp_data[dataIndex]
+        for i, row in ipairs(self.rows) do
+            local entry = self.gp_data[i]
+            if entry then
                 row.nick:SetText(entry.nick)
                 row.gp:SetText(tostring(entry.gp))
                 if entry.classColor then
@@ -1525,14 +1529,8 @@ NSQC4.RegisterModule("gp", function()
             end
         end
 
-        self:RefreshRowHighlights()
-        FauxScrollFrame_Update(
-            self.window.scrollFrame,
-            #self.gp_data,
-            self.visible_rows,
-            25
-        )
-        self:UpdateRaidWindowVisibility()
+        self.window.scrollChild:SetHeight(#self.gp_data * 25)
+        self.window.scrollFrame:UpdateScrollChildRect()
     end
 
     function GpDb:SaveToNsDb()
