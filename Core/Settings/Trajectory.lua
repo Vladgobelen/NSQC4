@@ -1,13 +1,30 @@
 -- ============================================================================
 -- NSQC4 / Core / Settings / Trajectory
--- Жесты-маршруты под Shift / Ctrl / Alt.
+-- Жесты-маршруты под ДВУМЯ модификаторами одновременно:
+--   Shift+Ctrl, Shift+Alt, Ctrl+Alt.
+-- Одиночные (только Shift/Ctrl/Alt) и все три — ИГНОРИРУЮТСЯ.
+-- Это убирает конфликт с геймплеем.
 --
--- /ns_traj                — окно «Жесты-маршруты»
--- /ns_traj debug          — статус
--- /ns_traj trace          — вкл/выкл внутренние [TRAJ ...] сообщения
--- /ns_traj record         — записать новый жест (ждёт модификатор → рисование → отпускание)
--- /ns_traj test           — распознать следующий жест (показать dev)
--- /ns_traj stop           — принудительно завершить текущую запись
+-- ВАЖНО: старые шаблоны с одиночным модификатором ("shift", "ctrl", "alt")
+-- больше не распознаются — их надо удалить и записать заново под комбинацию.
+--
+-- Отладка по умолчанию ВЫКЛЮЧЕНА и НЕ сохраняется.
+--   /ns_traj debug         — статус (всегда)
+--   /ns_traj debug on|off  — вкл/выкл отладку на сессию
+--
+-- prepare() инвертирует Y: вверх = −Y, вниз = +Y (экранная система для шаблона).
+-- Оверлей рисует СЫРОЙ маршрут в системе UIParent (Y вверх) — как двигалась мышь.
+--
+-- Действие жеста (в редакторе, второй раздел, радиокнопки):
+--   • Код  — многострочный Lua (loadstring + pcall)
+--   • Текст — SendChatMessage в выбранный канал
+--
+-- Настройки:
+--   drawRoute            — рисовать маршрут текстурами
+--   hideOverlayInCombat  — не рисовать маршрут в бою (модуль работает)
+--   disableInCombat      — не реагировать на модификаторы в бою:
+--                          запись/распознавание приостанавливаются,
+--                          начатая запись НЕ прерывается, ждёт выхода из боя.
 -- ============================================================================
 
 NSQC4 = NSQC4 or {}
@@ -15,7 +32,7 @@ NSQC4 = NSQC4 or {}
 NSQC4.RegisterModule("trajectory", function()
 
     -- ========================================================================
-    -- Отладка
+    -- Отладка (по умолчанию ВЫКЛ, не сохраняется, только на сессию)
     -- ========================================================================
     local TDBG = { enabled = false }
     local function dbg(tag, ...)
@@ -24,37 +41,92 @@ NSQC4.RegisterModule("trajectory", function()
         for _, v in ipairs({...}) do p[#p + 1] = tostring(v) end
         print(unpack(p))
     end
+    local function say(...)
+        if not TDBG.enabled then return end
+        print(...)
+    end
 
     -- ========================================================================
-    -- Модификаторы
+    -- Состояние
     -- ========================================================================
-    local MODS = { "shift", "ctrl", "alt" }
+    local rec = {
+        active         = false,
+        mode           = nil,
+        points         = {},
+        startX         = 0,
+        startY         = 0,
+        lastMoveAt     = 0,
+        replaceId      = nil,
+        modifier       = nil,
+        started        = false,
+        pendingMode    = nil,
+        pendingReplace = nil,
+        paused         = false,
+    }
 
-    local function modDown(mod)
-        if not NSQC4.Modifiers then return false end
-        if mod == "shift" then return NSQC4.Modifiers.ShiftDown and NSQC4.Modifiers.ShiftDown() or false end
-        if mod == "ctrl"  then return NSQC4.Modifiers.CtrlDown  and NSQC4.Modifiers.CtrlDown()  or false end
-        if mod == "alt"   then return NSQC4.Modifiers.AltDown   and NSQC4.Modifiers.AltDown()   or false end
+    local OVERLAY = {
+        enabled = true,
+        every   = 10,
+        maxDots = 96,
+        size    = 6,
+        dots    = {},
+        frame   = nil,
+    }
+
+    local stableFrames = 0
+    local awayFrames   = 0
+    local lastStable   = false
+
+    -- ========================================================================
+    -- Модификаторы (делегируем в NSQC4.Modifiers)
+    -- ========================================================================
+    local function twoDown()
+        if NSQC4.Modifiers and NSQC4.Modifiers.TwoOrMoreDown then
+            return NSQC4.Modifiers.TwoOrMoreDown()
+        end
         return false
     end
 
-    local function anyDown()
-        return modDown("shift") or modDown("ctrl") or modDown("alt")
-    end
-
-    -- приоритет: Shift > Ctrl > Alt
-    local function currentModifier()
-        if modDown("shift") then return "shift" end
-        if modDown("ctrl")  then return "ctrl"  end
-        if modDown("alt")   then return "alt"   end
+    local function currentModifiers()
+        if NSQC4.Modifiers and NSQC4.Modifiers.CurrentCombo then
+            return NSQC4.Modifiers.CurrentCombo()
+        end
         return nil
     end
 
     local function modLabel(mod)
-        if mod == "shift" then return "Shift" end
-        if mod == "ctrl"  then return "Ctrl"  end
-        if mod == "alt"   then return "Alt"   end
+        if mod == "shift+ctrl" then return "Shift+Ctrl" end
+        if mod == "shift+alt"  then return "Shift+Alt"  end
+        if mod == "ctrl+alt"   then return "Ctrl+Alt"   end
+        if mod == "shift+ctrl+alt" then return "Shift+Ctrl+Alt" end
         return "?"
+    end
+
+    local function inCombat()
+        return UnitAffectingCombat and UnitAffectingCombat("player") or false
+    end
+
+    -- ========================================================================
+    -- Действия: каналы чата
+    -- ========================================================================
+    local CHAT_TARGETS = {
+        { key = "say",     chatType = nil,       label = "Сказать" },
+        { key = "party",   chatType = "PARTY",   label = "Группа" },
+        { key = "raid",    chatType = "RAID",    label = "Рейд" },
+        { key = "guild",   chatType = "GUILD",   label = "Гильдия" },
+        { key = "officer", chatType = "OFFICER", label = "Офицерский" },
+    }
+    local CHAT_BY_KEY = {}
+    for _, t in ipairs(CHAT_TARGETS) do CHAT_BY_KEY[t.key] = t end
+
+    local function normalizeChat(key)
+        if CHAT_BY_KEY[key] then return key end
+        return "say"
+    end
+
+    local function normalizeAction(a)
+        if a == "text" then return "text" end
+        return "code"
     end
 
     -- ========================================================================
@@ -67,21 +139,21 @@ NSQC4.RegisterModule("trajectory", function()
         local o = nsDbc4.settings.trajectory.opts
         if not o then
             o = {
-                showText        = true,
-                tolerance       = 0.25,
-                algorithm       = "shape",
-                sampleCount     = 32,
-                minStepPx       = 0.75,
-                recordOnMod     = true,
-                shiftStable     = 2,
-                idleTimeoutMs   = 400,
-                recordTimeoutMs = 15000,
+                tolerance           = 0.25,
+                algorithm           = "strict",
+                sampleCount         = 32,
+                minStepPx           = 0.75,
+                recordOnMod         = true,
+                shiftStable         = 2,
+                idleTimeoutMs       = 400,
+                drawRoute           = true,
+                hideOverlayInCombat = false,
+                disableInCombat     = false,
             }
             nsDbc4.settings.trajectory.opts = o
         end
-        if o.showText == nil then o.showText = true end
         if o.tolerance == nil then o.tolerance = 0.25 end
-        if o.algorithm == nil then o.algorithm = "shape" end
+        if o.algorithm == nil then o.algorithm = "strict" end
         if o.sampleCount == nil then o.sampleCount = 32 end
         if o.minStepPx == nil then o.minStepPx = 0.75 end
         if o.recordOnMod == nil then
@@ -91,7 +163,11 @@ NSQC4.RegisterModule("trajectory", function()
         o.recordOnShift = o.recordOnMod
         if o.shiftStable == nil then o.shiftStable = 2 end
         if o.idleTimeoutMs == nil then o.idleTimeoutMs = 400 end
-        if o.recordTimeoutMs == nil then o.recordTimeoutMs = 15000 end
+        if o.drawRoute == nil then o.drawRoute = true end
+        if o.hideOverlayInCombat == nil then o.hideOverlayInCombat = false end
+        if o.disableInCombat == nil then o.disableInCombat = false end
+
+        OVERLAY.enabled = o.drawRoute and true or false
         return o
     end
 
@@ -103,14 +179,101 @@ NSQC4.RegisterModule("trajectory", function()
         return nsDbc4.settings.trajectory.list
     end
 
+    local VALID_MODS = {
+        ["shift+ctrl"] = true,
+        ["shift+alt"]  = true,
+        ["ctrl+alt"]   = true,
+        ["shift+ctrl+alt"] = true,
+    }
+
     local function ensureGesture(g)
         g.id = g.id or ("t" .. tostring(math.random(100000, 999999)))
         g.name = g.name or ""
         g.code = g.code or ""
         g.points = g.points or {}
         g.rawLen = g.rawLen or 0
-        g.modifier = g.modifier or "shift"
+        if not VALID_MODS[g.modifier or ""] then
+            g.modifier = "shift+ctrl"
+        end
+        g.action = normalizeAction(g.action)
+        g.chat = normalizeChat(g.chat)
+        g.text = g.text or ""
         return g
+    end
+
+    local function migrateList()
+        for _, g in ipairs(ensureDb()) do
+            g.action = normalizeAction(g.action)
+            g.chat = normalizeChat(g.chat)
+            g.text = g.text or ""
+        end
+    end
+
+    -- ========================================================================
+    -- Оверлей
+    -- ========================================================================
+    local function ensureOverlayFrame()
+        if OVERLAY.frame then return OVERLAY.frame end
+        local f = CreateFrame("Frame", "NSQC4TrajOverlay", UIParent)
+        f:SetAllPoints(UIParent)
+        f:SetFrameStrata("TOOLTIP")
+        f:EnableMouse(false)
+        f:Hide()
+        OVERLAY.frame = f
+        return f
+    end
+
+    local function clearOverlay()
+        for _, tex in ipairs(OVERLAY.dots) do
+            tex:Hide()
+        end
+        if OVERLAY.frame then OVERLAY.frame:Hide() end
+    end
+
+    local function overlayAllowed()
+        if not OVERLAY.enabled then return false end
+        local o = ensureOpts()
+        if o.hideOverlayInCombat and inCombat() then return false end
+        if o.disableInCombat and inCombat() then return false end
+        return true
+    end
+
+    local function overlayDot(idx, relX, relY, r, g, b, a)
+        if not overlayAllowed() then return end
+        local parent = ensureOverlayFrame()
+        local tex = OVERLAY.dots[idx]
+        if not tex then
+            tex = parent:CreateTexture(nil, "OVERLAY")
+            tex:SetTexture("Interface\\Buttons\\WHITE8x8")
+            OVERLAY.dots[idx] = tex
+        end
+        if tex:GetParent() ~= parent then
+            tex:SetParent(parent)
+        end
+        tex:ClearAllPoints()
+        tex:SetSize(OVERLAY.size, OVERLAY.size)
+        tex:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT",
+            rec.startX + relX - OVERLAY.size / 2,
+            rec.startY + relY - OVERLAY.size / 2)
+        tex:SetVertexColor(r, g, b, a or 1)
+        tex:Show()
+        parent:Show()
+    end
+
+    local function dumpPoints(pts)
+        if not TDBG.enabled then return end
+        if #pts < 2 then return end
+        local shown = {}
+        local function emit(i)
+            if shown[i] or not pts[i] then return end
+            shown[i] = true
+            local p = pts[i]
+            print(string.format("|cffaa66ff[TRAJ PT]|r i=%d raw=(%.1f,%.1f) flipped=(%.1f,%.1f)",
+                i, p.x, p.y, p.x, -p.y))
+        end
+        for i = 1, math.min(3, #pts) do emit(i) end
+        for i = 4, #pts, OVERLAY.every do emit(i) end
+        for i = math.max(1, #pts - 2), #pts do emit(i) end
     end
 
     -- ========================================================================
@@ -207,7 +370,11 @@ NSQC4.RegisterModule("trajectory", function()
     local function prepare(raw, n)
         n = n or 32
         if #raw < 2 then return nil end
-        local r = resample(raw, n)
+        local flipped = {}
+        for i, p in ipairs(raw) do
+            flipped[i] = { x = p.x, y = -p.y }
+        end
+        local r = resample(flipped, n)
         return normalize(r)
     end
 
@@ -217,7 +384,7 @@ NSQC4.RegisterModule("trajectory", function()
         if not probe then return nil, 1 end
         local best, bestDev = nil, math.huge
         for _, g in ipairs(ensureDb()) do
-            if g.points and #g.points >= 2 and (g.modifier or "shift") == modifier then
+            if g.points and #g.points >= 2 and VALID_MODS[g.modifier or ""] and g.modifier == modifier then
                 local dev = deviation(probe, g.points, opts.algorithm)
                 if dev < bestDev then bestDev, best = dev, g end
             end
@@ -229,21 +396,43 @@ NSQC4.RegisterModule("trajectory", function()
     end
 
     -- ========================================================================
-    -- Состояние записи
+    -- Выполнение действия
     -- ========================================================================
-    local rec = {
-        active       = false,
-        mode         = nil,
-        points       = {},
-        startX       = 0,
-        startY       = 0,
-        lastMoveAt   = 0,
-        replaceId    = nil,
-        sawModDown   = false,
-        startedAt    = 0,
-        modifier     = nil,       -- "shift" | "ctrl" | "alt"
-    }
+    local function runCode(code)
+        if not code or code == "" then return end
+        local fn, err = loadstring(code)
+        if not fn then
+            print("|cffff0000[TRAJ]|r ошибка компиляции: " .. tostring(err))
+            return
+        end
+        local ok, runErr = pcall(fn)
+        if not ok then
+            print("|cffff0000[TRAJ]|r ошибка выполнения: " .. tostring(runErr))
+        end
+    end
 
+    local function runText(g)
+        local text = g.text or ""
+        if text == "" then return end
+        local target = CHAT_BY_KEY[normalizeChat(g.chat)]
+        local chatType = target and target.chatType or nil
+        local ok, err = pcall(SendChatMessage, text, chatType)
+        if not ok then
+            print("|cffff0000[TRAJ]|r ошибка отправки текста: " .. tostring(err))
+        end
+    end
+
+    local function runGestureAction(g)
+        if normalizeAction(g.action) == "text" then
+            runText(g)
+        else
+            runCode(g.code)
+        end
+    end
+
+    -- ========================================================================
+    -- Запись
+    -- ========================================================================
     local function cursorPos()
         local x, y = GetCursorPosition()
         local s = UIParent:GetEffectiveScale()
@@ -251,119 +440,129 @@ NSQC4.RegisterModule("trajectory", function()
     end
 
     local function beginRecording(mode, replaceId, modifier)
-        local opts = ensureOpts()
-        rec.active       = true
-        rec.mode         = mode or "run"
-        rec.points       = {}
-        rec.replaceId    = replaceId
-        rec.lastMoveAt   = GetTime()
-        rec.sawModDown   = false
-        rec.startedAt    = GetTime()
-        rec.modifier     = modifier
-        local x, y = cursorPos()
-        rec.startX, rec.startY = x, y
-        rec.points[1] = { x = 0, y = 0 }
+        rec.active     = true
+        rec.mode       = mode or "run"
+        rec.points     = {}
+        rec.replaceId  = replaceId
+        rec.lastMoveAt = GetTime()
+        rec.modifier   = modifier
+        rec.started    = false
+        rec.startX, rec.startY = 0, 0
+        rec.paused     = false
+        clearOverlay()
         dbg("REC", "start mode=" .. tostring(rec.mode)
-            .. " mod=" .. tostring(rec.modifier or "?")
-            .. (replaceId and (" replaceId=" .. tostring(replaceId)) or ""))
+            .. " mod=" .. tostring(rec.modifier or "?"))
     end
 
     local function endRecording(reason)
         if not rec.active then return end
         rec.active = false
-        local pts  = rec.points
+        local pts = rec.points
         local mode = rec.mode
         local replaceId = rec.replaceId
-        local modifier = rec.modifier or "shift"
+        local modifier = rec.modifier or "shift+ctrl"
+        local wasStarted = rec.started
         rec.mode = nil
         rec.replaceId = nil
         rec.modifier = nil
-        rec.sawModDown = false
+        rec.started = false
+        rec.paused = false
 
         dbg("REC", "end reason=" .. tostring(reason) .. " points=" .. #pts)
 
-        if #pts < 2 then
-            dbg("REC", "слишком мало точек — выходим")
+        if not wasStarted or #pts < 2 then
+            clearOverlay()
             return
         end
+
+        dumpPoints(pts)
 
         local opts = ensureOpts()
 
         if mode == "record" then
             local prepared = prepare(pts, opts.sampleCount)
-            if not prepared then return end
+            if not prepared then clearOverlay() return end
             if replaceId then
-                local g = nil
                 for _, it in ipairs(ensureDb()) do
-                    if it.id == replaceId then g = it; break end
-                end
-                if g then
-                    g.points = prepared
-                    g.rawLen = #pts
-                    g.modifier = modifier
-                    if opts.showText then
-                        print("|cffaa66ff[TRAJ]|r перезаписан " .. ((g.name ~= "" and g.name) or g.id)
+                    if it.id == replaceId then
+                        it.points = prepared
+                        it.rawLen = #pts
+                        it.modifier = modifier
+                        say("|cffaa66ff[TRAJ]|r перезаписан "
+                            .. ((it.name ~= "" and it.name) or it.id)
                             .. " [" .. modLabel(modifier) .. "] (" .. #pts .. " точек)")
+                        if NSQC4.TrajectoryUI then NSQC4.TrajectoryUI:OpenEditor(it.id) end
+                        clearOverlay()
+                        return
                     end
-                    if NSQC4.TrajectoryUI then NSQC4.TrajectoryUI:OpenEditor(g.id) end
-                    return
                 end
             end
             local g = ensureGesture({ name = "", code = "", points = prepared, rawLen = #pts, modifier = modifier })
             table.insert(ensureDb(), g)
-            if opts.showText then
-                print("|cffaa66ff[TRAJ]|r записан жест " .. g.id
-                    .. " [" .. modLabel(modifier) .. "] (" .. #pts .. " точек)")
-            end
+            say("|cffaa66ff[TRAJ]|r записан жест " .. g.id
+                .. " [" .. modLabel(modifier) .. "] (" .. #pts .. " точек)")
             if NSQC4.TrajectoryUI then NSQC4.TrajectoryUI:OpenEditor(g.id) end
+            clearOverlay()
             return
         end
 
         local g, dev = recognize(pts, opts, modifier)
         if mode == "test" then
             if g then
-                print("|cffaa66ff[TRAJ]|r совпало: " .. ((g.name ~= "" and g.name) or g.id)
+                say("|cffaa66ff[TRAJ]|r совпало: " .. ((g.name ~= "" and g.name) or g.id)
                     .. " [" .. modLabel(g.modifier) .. "]  dev=" .. string.format("%.3f", dev))
             else
-                print("|cffaa66ff[TRAJ]|r не найдено [" .. modLabel(modifier)
+                say("|cffaa66ff[TRAJ]|r не найдено [" .. modLabel(modifier)
                     .. "] (лучший dev=" .. string.format("%.3f", dev) .. ")")
+            end
+            clearOverlay()
+            return
+        end
+
+        if g then
+            say("|cffaa66ff[TRAJ]|r выполнен: " .. ((g.name ~= "" and g.name) or g.id)
+                .. " [" .. modLabel(g.modifier) .. "]  dev=" .. string.format("%.3f", dev))
+            runGestureAction(g)
+        end
+
+        clearOverlay()
+    end
+
+    -- ========================================================================
+    -- OnUpdate
+    -- ========================================================================
+    local tracker = CreateFrame("Frame")
+    tracker:SetScript("OnUpdate", function()
+        local opts = ensureOpts()
+
+        -- «Отключать в бою»: не реагируем на модификаторы, но НЕ прерываем начатую запись.
+        if opts.disableInCombat and inCombat() then
+            if rec.active and not rec.paused then
+                rec.paused = true
+                clearOverlay()
+                dbg("REC", "paused (combat)")
+            end
+            if not rec.active then
+                stableFrames = 0
+                awayFrames   = 0
+                lastStable   = false
             end
             return
         end
 
-        -- run
-        if g then
-            if opts.showText then
-                print("|cffaa66ff[TRAJ]|r выполнен: " .. ((g.name ~= "" and g.name) or g.id)
-                    .. " [" .. modLabel(g.modifier) .. "]  dev=" .. string.format("%.3f", dev))
+        if rec.paused then
+            rec.paused = false
+            dbg("REC", "resumed (out of combat)")
+            if rec.active and rec.started then
+                local x, y = cursorPos()
+                rec.startX, rec.startY = x, y
+                rec.lastMoveAt = GetTime()
             end
-            if g.code and g.code ~= "" then
-                local fn, err = loadstring(g.code)
-                if not fn then
-                    print("|cffff0000[TRAJ]|r ошибка компиляции: " .. tostring(err))
-                else
-                    local ok, rerr = pcall(fn)
-                    if not ok then print("|cffff0000[TRAJ]|r ошибка: " .. tostring(rerr)) end
-                end
-            end
-        else
-            dbg("RUN", "нет совпадения, лучший dev=" .. string.format("%.3f", dev))
         end
-    end
 
-    -- ========================================================================
-    -- Дебаунс модификатора + OnUpdate
-    -- ========================================================================
-    local stableFrames = 0
-    local awayFrames   = 0
-    local lastStable   = false
+        local two = twoDown()
 
-    local tracker = CreateFrame("Frame")
-    tracker:SetScript("OnUpdate", function()
-        local opts = ensureOpts()
-        local any = anyDown()
-
-        if any then
+        if two then
             stableFrames = stableFrames + 1
             awayFrames = 0
         else
@@ -374,52 +573,55 @@ NSQC4.RegisterModule("trajectory", function()
         local stable = (stableFrames >= (opts.shiftStable or 2))
         local away   = (awayFrames   >= (opts.shiftStable or 2))
 
-        -- «Боевой» режим: старт по стабильному нажатию любого модификатора
-        if stable and not lastStable then
+        if away and lastStable then
+            lastStable = false
+            if rec.active then
+                endRecording("mod-up")
+            end
+            return
+        end
+
+        if not stable then
+            return
+        end
+
+        if not lastStable then
             lastStable = true
             if opts.recordOnMod and not rec.active then
-                local m = currentModifier() or "shift"
-                beginRecording("run", nil, m)
-            end
-        elseif away and lastStable then
-            lastStable = false
-            if rec.active and rec.mode == "run" then
-                endRecording("mod-up")
+                local m = currentModifiers() or "shift+ctrl"
+                local mode = rec.pendingMode or "run"
+                local replaceId = rec.pendingReplace
+                rec.pendingMode = nil
+                rec.pendingReplace = nil
+                beginRecording(mode, replaceId, m)
             end
         end
 
         if not rec.active then return end
 
-        -- record / test
-        if rec.mode == "record" or rec.mode == "test" then
-            -- фиксируем модификатор, как только он стабильно нажат
-            if stable and not rec.modifier then
-                rec.modifier = currentModifier() or "shift"
-                rec.sawModDown = true
-                dbg("REC", "modifier locked: " .. tostring(rec.modifier))
-            end
-
-            if opts.recordOnMod then
-                -- завершаем только после того, как модификатор был зажат и потом отпущен
-                if rec.sawModDown and away then
-                    endRecording("mod-up") return
-                end
-                -- таймаут, если модификатор так и не нажали
-                local now = GetTime()
-                if not rec.sawModDown
-                   and (now - rec.startedAt) * 1000 >= (opts.recordTimeoutMs or 15000) then
-                    endRecording("timeout-no-mod") return
-                end
-            else
-                local now = GetTime()
-                if (now - rec.lastMoveAt) * 1000 >= opts.idleTimeoutMs then
-                    endRecording("idle") return
-                end
-            end
+        if not rec.modifier then
+            rec.modifier = currentModifiers() or "shift+ctrl"
         end
 
-        -- Копим точки
         local x, y = cursorPos()
+
+        if not rec.started then
+            if rec.startX == 0 and rec.startY == 0 then
+                rec.startX, rec.startY = x, y
+                dbg("REC", "anchor set")
+                return
+            end
+            local dx0, dy0 = x - rec.startX, y - rec.startY
+            if dx0*dx0 + dy0*dy0 >= (opts.minStepPx * opts.minStepPx) then
+                rec.started = true
+                rec.points = { { x = 0, y = 0 } }
+                rec.lastMoveAt = GetTime()
+                overlayDot(1, 0, 0, 0, 1, 0, 1)
+                dbg("REC", "first move")
+            end
+            return
+        end
+
         local nx, ny = x - rec.startX, y - rec.startY
         local last = rec.points[#rec.points]
         if last then
@@ -427,6 +629,12 @@ NSQC4.RegisterModule("trajectory", function()
             if dx*dx + dy*dy >= (opts.minStepPx * opts.minStepPx) then
                 rec.points[#rec.points+1] = { x = nx, y = ny }
                 rec.lastMoveAt = GetTime()
+                if #rec.points <= OVERLAY.maxDots then
+                    local idx = #rec.points
+                    local r, g, b = 1, 0.82, 0
+                    if idx == 2 then r, g, b = 0.5, 1, 0.5 end
+                    overlayDot(idx, nx, ny, r, g, b, 1)
+                end
             end
         end
     end)
@@ -439,11 +647,21 @@ NSQC4.RegisterModule("trajectory", function()
 
     function T:List() return ensureDb() end
     function T:Opts() return ensureOpts() end
-    function T:Recognize(raw, modifier) return recognize(raw, ensureOpts(), modifier or "shift") end
+    function T:Recognize(raw, modifier) return recognize(raw, ensureOpts(), modifier or "shift+ctrl") end
     function T:Prepare(raw, n) return prepare(raw, n) end
+    function T:ChatTargets() return CHAT_TARGETS end
 
     function T:Add(name, modifier)
-        local g = ensureGesture({ name = name or "", code = "", points = {}, modifier = modifier or "shift" })
+        if not VALID_MODS[modifier or ""] then modifier = "shift+ctrl" end
+        local g = ensureGesture({
+            name = name or "",
+            code = "",
+            points = {},
+            modifier = modifier,
+            action = "code",
+            chat = "say",
+            text = "",
+        })
         table.insert(ensureDb(), g)
         return g
     end
@@ -458,44 +676,51 @@ NSQC4.RegisterModule("trajectory", function()
 
     function T:Get(id)
         for _, g in ipairs(ensureDb()) do
-            if g.id == id then return g end
+            if g.id == id then
+                g.action = normalizeAction(g.action)
+                g.chat = normalizeChat(g.chat)
+                g.text = g.text or ""
+                return g
+            end
         end
         return nil
     end
 
     function T:StartRecord(replaceId)
         if rec.active then endRecording("force") end
-        local m = currentModifier()  -- если что-то уже зажато — берём его
-        beginRecording("record", replaceId, m)
-        print("|cffaa66ff[TRAJ]|r рисуй жест под Shift/Ctrl/Alt…")
+        rec.pendingMode = "record"
+        rec.pendingReplace = replaceId
+        say("|cffaa66ff[TRAJ]|r зажми ДВА модификатора (Shift+Ctrl / Shift+Alt / Ctrl+Alt) и рисуй…")
     end
 
     function T:StartTest()
         if rec.active then endRecording("force") end
-        local m = currentModifier()
-        beginRecording("test", nil, m)
-        print("|cffaa66ff[TRAJ]|r нарисуй жест для проверки под Shift/Ctrl/Alt…")
+        rec.pendingMode = "test"
+        rec.pendingReplace = nil
+        say("|cffaa66ff[TRAJ]|r зажми ДВА модификатора и нарисуй для проверки…")
     end
 
     function T:Stop()
         if rec.active then
             endRecording("manual")
         else
-            print("|cffaa66ff[TRAJ]|r нечего останавливать")
+            rec.pendingMode = nil
+            rec.pendingReplace = nil
+            say("|cffaa66ff[TRAJ]|r нечего останавливать")
         end
     end
 
-    function T:IsRecording() return rec.active, rec.mode, #rec.points, rec.modifier end
+    function T:IsRecording() return rec.active, rec.mode, #rec.points, rec.modifier, rec.paused end
 
     function T:SetTrace(on)
         TDBG.enabled = on and true or false
-        print("|cffaa66ff[TRAJ]|r trace " .. (TDBG.enabled and "ON" or "OFF"))
+        print("|cffaa66ff[TRAJ]|r debug " .. (TDBG.enabled and "ON (до перезахода)" or "OFF"))
     end
 
     function T:GetDebugState()
         return {
-            anyDown      = anyDown(),
-            currentMod   = currentModifier(),
+            twoDown      = twoDown(),
+            currentMods  = currentModifiers(),
             stableFrames = stableFrames,
             awayFrames   = awayFrames,
             lastStable   = lastStable,
@@ -503,10 +728,14 @@ NSQC4.RegisterModule("trajectory", function()
             mode         = rec.mode,
             modifier     = rec.modifier,
             pointCount   = #rec.points,
-            replaceId    = rec.replaceId,
-            sawModDown   = rec.sawModDown,
+            started      = rec.started,
+            pendingMode  = rec.pendingMode,
+            paused       = rec.paused,
             templates    = #ensureDb(),
             trace        = TDBG.enabled,
+            overlay      = OVERLAY.enabled,
+            overlayEvery = OVERLAY.every,
+            inCombat     = inCombat(),
         }
     end
 
@@ -542,7 +771,7 @@ NSQC4.RegisterModule("trajectory", function()
 
         local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
         title:SetPoint("TOP", 0, -14)
-        title:SetText("Жесты-маршруты (Shift/Ctrl/Alt)")
+        title:SetText("Жесты-маршруты (2 модификатора)")
 
         local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
         close:SetPoint("TOPRIGHT", -4, -4)
@@ -580,7 +809,7 @@ NSQC4.RegisterModule("trajectory", function()
 
         local hint = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         hint:SetPoint("TOPLEFT", 20, -82)
-        hint:SetText("«Записать» → зажми Shift/Ctrl/Alt → нарисуй → отпусти.")
+        hint:SetText("«Записать» → зажми ДВА модификатора (Shift+Ctrl / Shift+Alt / Ctrl+Alt) → нарисуй → отпусти.")
 
         local div = f:CreateTexture(nil, "OVERLAY")
         div:SetTexture(0.5, 0.5, 0.5, 0.5)
@@ -604,6 +833,7 @@ NSQC4.RegisterModule("trajectory", function()
         function f:Refresh()
             for _, row in ipairs(self.rows) do row:Hide() end
             self.rows = {}
+            migrateList()
             local list = ensureDb()
             local y = 0
             if #list == 0 then
@@ -621,10 +851,11 @@ NSQC4.RegisterModule("trajectory", function()
                 row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
                 row:SetBackdropColor(0.15, 0.15, 0.15, 0.6)
                 local name = (g.name ~= "" and g.name) or ("(без имени)")
-                local mod  = modLabel(g.modifier or "shift")
+                local mod  = modLabel(g.modifier or "shift+ctrl")
+                local actionLabel = (normalizeAction(g.action) == "text") and "текст" or "код"
                 local left = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
                 left:SetPoint("LEFT", 8, 0)
-                left:SetText("|cffFFD100" .. name .. "|r  |cff66aaff[" .. mod .. "]|r")
+                left:SetText("|cffFFD100" .. name .. "|r  |cff66aaff[" .. mod .. "]|r |cff66ccff<" .. actionLabel .. ">|r")
                 local info = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
                 info:SetPoint("RIGHT", -8, 0)
                 info:SetText("точек: " .. tostring(#(g.points or {})))
@@ -644,7 +875,7 @@ NSQC4.RegisterModule("trajectory", function()
         if editorFrame then return editorFrame end
 
         local f = CreateFrame("Frame", "NSQC4TrajectoryEditorFrame", UIParent)
-        f:SetSize(560, 460)
+        f:SetSize(560, 720)
         f:SetPoint("CENTER", 140, 0)
         f:SetFrameStrata("DIALOG")
         f:SetMovable(true)
@@ -682,12 +913,12 @@ NSQC4.RegisterModule("trajectory", function()
 
         local modLabelFS = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         modLabelFS:SetPoint("TOPLEFT", 20, -76)
-        modLabelFS:SetText("Модификатор:")
+        modLabelFS:SetText("Модификаторы:")
 
         local modButtons = {}
         local function mkModBtn(x, mod)
             local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-            b:SetSize(90, 24)
+            b:SetSize(120, 24)
             b:SetPoint("TOPLEFT", x, -72)
             b:SetText(modLabel(mod))
             b:SetScript("OnClick", function()
@@ -701,18 +932,47 @@ NSQC4.RegisterModule("trajectory", function()
             modButtons[mod] = b
             return b
         end
-        mkModBtn(140, "shift")
-        mkModBtn(240, "ctrl")
-        mkModBtn(340, "alt")
+        mkModBtn(130, "shift+ctrl")
+        mkModBtn(260, "shift+alt")
+        mkModBtn(390, "ctrl+alt")
         f.modButtons = modButtons
 
-        local codeLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        codeLabel:SetPoint("TOPLEFT", 20, -108)
+        -- --------------------------------------------------------------------
+        -- Второй раздел: действие (радиокнопки Код / Текст)
+        -- --------------------------------------------------------------------
+        local actionTitle = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        actionTitle:SetPoint("TOPLEFT", 20, -108)
+        actionTitle:SetText("Действие жеста:")
+
+        local rbCode = CreateFrame("CheckButton", nil, f, "UIRadioButtonTemplate")
+        rbCode:SetPoint("TOPLEFT", 20, -128)
+        rbCode:SetSize(22, 22)
+        local rbCodeLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        rbCodeLbl:SetPoint("LEFT", rbCode, "RIGHT", 4, 0)
+        rbCodeLbl:SetText("Код (Lua)")
+        f.rbCode = rbCode
+
+        local rbText = CreateFrame("CheckButton", nil, f, "UIRadioButtonTemplate")
+        rbText:SetPoint("LEFT", rbCodeLbl, "RIGHT", 40, 0)
+        rbText:SetSize(22, 22)
+        local rbTextLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        rbTextLbl:SetPoint("LEFT", rbText, "RIGHT", 4, 0)
+        rbTextLbl:SetText("Текст в чат")
+        f.rbText = rbText
+
+        -- Панель кода
+        local codePanel = CreateFrame("Frame", nil, f)
+        codePanel:SetPoint("TOPLEFT", 20, -160)
+        codePanel:SetSize(520, 210)
+        f.codePanel = codePanel
+
+        local codeLabel = codePanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        codeLabel:SetPoint("TOPLEFT", 0, 0)
         codeLabel:SetText("Код (Lua):")
 
-        local codeBox = CreateFrame("EditBox", nil, f)
-        codeBox:SetSize(520, 200)
-        codeBox:SetPoint("TOPLEFT", 20, -128)
+        local codeBox = CreateFrame("EditBox", nil, codePanel)
+        codeBox:SetSize(520, 185)
+        codeBox:SetPoint("TOPLEFT", 0, -18)
         codeBox:SetMultiLine(true)
         codeBox:SetAutoFocus(false)
         codeBox:SetFontObject("ChatFontNormal")
@@ -727,6 +987,120 @@ NSQC4.RegisterModule("trajectory", function()
         codeBox:SetTextInsets(4, 4, 4, 4)
         f.codeBox = codeBox
 
+        -- Панель текста
+        local textPanel = CreateFrame("Frame", nil, f)
+        textPanel:SetPoint("TOPLEFT", 20, -160)
+        textPanel:SetSize(520, 210)
+        f.textPanel = textPanel
+
+        local chatLabel = textPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        chatLabel:SetPoint("TOPLEFT", 0, 0)
+        chatLabel:SetText("Канал:")
+
+        local chatBtn = CreateFrame("Button", nil, textPanel, "UIPanelButtonTemplate")
+        chatBtn:SetSize(130, 24)
+        chatBtn:SetPoint("LEFT", chatLabel, "RIGHT", 8, 0)
+        f.chatBtn = chatBtn
+
+        local function currentChatKey()
+            local g = selectedId and NSQC4.Trajectory:Get(selectedId)
+            return g and normalizeChat(g.chat) or "say"
+        end
+        local function updateChatBtn()
+            local t = CHAT_BY_KEY[currentChatKey()]
+            chatBtn:SetText(t and t.label or "?")
+        end
+        chatBtn:SetScript("OnClick", function()
+            if not selectedId then return end
+            local g = NSQC4.Trajectory:Get(selectedId)
+            if not g then return end
+            local cur = normalizeChat(g.chat)
+            local idx = 1
+            for i, t in ipairs(CHAT_TARGETS) do
+                if t.key == cur then idx = i; break end
+            end
+            idx = idx + 1
+            if idx > #CHAT_TARGETS then idx = 1 end
+            g.chat = CHAT_TARGETS[idx].key
+            updateChatBtn()
+        end)
+        f.updateChatBtn = updateChatBtn
+
+        local textLabel = textPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        textLabel:SetPoint("TOPLEFT", 0, -32)
+        textLabel:SetText("Текст:")
+
+        local textBox = CreateFrame("EditBox", nil, textPanel)
+        textBox:SetSize(520, 155)
+        textBox:SetPoint("TOPLEFT", 0, -52)
+        textBox:SetMultiLine(true)
+        textBox:SetAutoFocus(false)
+        textBox:SetMaxLetters(255)
+        textBox:SetFontObject("ChatFontNormal")
+        textBox:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            edgeSize = 8,
+            insets = { left = 2, right = 2, top = 2, bottom = 2 },
+        })
+        textBox:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
+        textBox:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+        textBox:SetTextInsets(4, 4, 4, 4)
+        f.textBox = textBox
+
+        -- Переключение видимости панелей + синхронизация радиокнопок.
+        local updatingAction = false
+        local function updateActionPanels()
+            if updatingAction then return end
+            updatingAction = true
+
+            local g = selectedId and NSQC4.Trajectory:Get(selectedId)
+            local action = g and normalizeAction(g.action) or "code"
+            if action == "text" then
+                f.codePanel:Hide()
+                f.textPanel:Show()
+                rbCode:SetChecked(false)
+                rbText:SetChecked(true)
+                updateChatBtn()
+            else
+                f.textPanel:Hide()
+                f.codePanel:Show()
+                rbCode:SetChecked(true)
+                rbText:SetChecked(false)
+            end
+
+            updatingAction = false
+        end
+        f.updateActionPanels = updateActionPanels
+
+        rbCode:SetScript("OnClick", function(self)
+            if updatingAction then
+                local g = selectedId and NSQC4.Trajectory:Get(selectedId)
+                self:SetChecked(g and normalizeAction(g.action) == "code" or false)
+                return
+            end
+            if not selectedId then return end
+            local g = NSQC4.Trajectory:Get(selectedId)
+            if not g then return end
+            g.action = "code"
+            updateActionPanels()
+            if mainFrame then mainFrame:Refresh() end
+        end)
+        rbText:SetScript("OnClick", function(self)
+            if updatingAction then
+                local g = selectedId and NSQC4.Trajectory:Get(selectedId)
+                self:SetChecked(g and normalizeAction(g.action) == "text" or false)
+                return
+            end
+            if not selectedId then return end
+            local g = NSQC4.Trajectory:Get(selectedId)
+            if not g then return end
+            g.action = "text"
+            updateActionPanels()
+            if mainFrame then mainFrame:Refresh() end
+        end)
+
+        -- Кнопки внизу
         local reRecBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
         reRecBtn:SetSize(150, 26)
         reRecBtn:SetPoint("BOTTOMLEFT", 20, 18)
@@ -746,6 +1120,9 @@ NSQC4.RegisterModule("trajectory", function()
             if not g then return end
             g.name = f.nameBox:GetText() or ""
             g.code = f.codeBox:GetText() or ""
+            g.text = f.textBox:GetText() or ""
+            g.action = normalizeAction(g.action)
+            g.chat = normalizeChat(g.chat)
             if mainFrame then mainFrame:Refresh() end
             f:Hide()
         end)
@@ -769,9 +1146,11 @@ NSQC4.RegisterModule("trajectory", function()
             self.title:SetText("Жест: " .. ((g.name ~= "" and g.name) or g.id))
             self.nameBox:SetText(g.name or "")
             self.codeBox:SetText(g.code or "")
+            self.textBox:SetText(g.text or "")
             for mod, b in pairs(self.modButtons) do
-                b:SetNormalFontObject((g.modifier or "shift") == mod and GameFontNormalLarge or GameFontNormal)
+                b:SetNormalFontObject((g.modifier or "shift+ctrl") == mod and GameFontNormalLarge or GameFontNormal)
             end
+            self.updateActionPanels()
         end
 
         editorFrame = f
@@ -782,7 +1161,7 @@ NSQC4.RegisterModule("trajectory", function()
         if optionsFrame then return optionsFrame end
 
         local f = CreateFrame("Frame", "NSQC4TrajectoryOptionsFrame", UIParent)
-        f:SetSize(420, 340)
+        f:SetSize(420, 400)
         f:SetPoint("CENTER", 220, 80)
         f:SetFrameStrata("DIALOG")
         f:SetMovable(true)
@@ -815,6 +1194,8 @@ NSQC4.RegisterModule("trajectory", function()
             cb.text:SetText(text)
             cb:SetScript("OnClick", function(self)
                 ensureOpts()[key] = self:GetChecked() and true or false
+                OVERLAY.enabled = ensureOpts().drawRoute and true or false
+                if not OVERLAY.enabled then clearOverlay() end
             end)
             cb:SetScript("OnEnter", function(self)
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -825,20 +1206,24 @@ NSQC4.RegisterModule("trajectory", function()
             return cb
         end
 
-        f.cbText  = mkCheckbox(-46, "Писать в чат", "showText",
-            "Выводить сообщения о записанных/распознанных жестах.")
-        f.cbMod   = mkCheckbox(-84, "Требовать модификатор", "recordOnMod",
-            "Если включено — запись/проверка ждёт Shift/Ctrl/Alt, завершается по отпусканию. Если выключено — запись идёт без модификатора, завершается по бездействию курсора.")
+        f.cbMod     = mkCheckbox(-46,  "Требовать модификатор", "recordOnMod",
+            "Включено: запись только под ДВУМЯ модификаторами. Выключено: запись идёт без модификатора.")
+        f.cbRoute   = mkCheckbox(-84,  "Рисовать маршрут", "drawRoute",
+            "Пока зажат модификатор — рисовать маршрут текстурами. При отпускании всё очищается.")
+        f.cbHideCom = mkCheckbox(-122, "Не отображать маршрут в бою", "hideOverlayInCombat",
+            "Модуль продолжает работать в бою, но текстуры маршрута не рисуются.")
+        f.cbDisCom  = mkCheckbox(-160, "Отключать в бою", "disableInCombat",
+            "В бою модуль не реагирует на модификаторы: запись/распознавание приостанавливаются. Начатая запись не прерывается, а ждёт выхода из боя.")
 
         local tolLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        tolLabel:SetPoint("TOPLEFT", 20, -124)
+        tolLabel:SetPoint("TOPLEFT", 20, -200)
         tolLabel:SetText("Допуск отклонения:")
 
         local tolValue = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
         tolValue:SetPoint("LEFT", tolLabel, "RIGHT", 8, 0)
 
         local slider = CreateFrame("Slider", "NSQC4TrajTolSlider", f, "OptionsSliderTemplate")
-        slider:SetPoint("TOPLEFT", 20, -150)
+        slider:SetPoint("TOPLEFT", 20, -226)
         slider:SetSize(360, 16)
         slider:SetMinMaxValues(0.01, 1.0)
         slider:SetValueStep(0.01)
@@ -857,12 +1242,12 @@ NSQC4.RegisterModule("trajectory", function()
         f.tolValue = tolValue
 
         local algoLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        algoLabel:SetPoint("TOPLEFT", 20, -196)
+        algoLabel:SetPoint("TOPLEFT", 20, -272)
         algoLabel:SetText("Алгоритм:")
 
         local shapeBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
         shapeBtn:SetSize(150, 24)
-        shapeBtn:SetPoint("TOPLEFT", 20, -220)
+        shapeBtn:SetPoint("TOPLEFT", 20, -296)
         shapeBtn:SetText("Shape")
         shapeBtn:SetScript("OnClick", function()
             ensureOpts().algorithm = "shape"
@@ -882,8 +1267,10 @@ NSQC4.RegisterModule("trajectory", function()
 
         function f:Refresh()
             local o = ensureOpts()
-            self.cbText:SetChecked(o.showText and true or false)
             self.cbMod:SetChecked(o.recordOnMod and true or false)
+            self.cbRoute:SetChecked(o.drawRoute and true or false)
+            self.cbHideCom:SetChecked(o.hideOverlayInCombat and true or false)
+            self.cbDisCom:SetChecked(o.disableInCombat and true or false)
             self.slider:SetValue(o.tolerance)
             self.tolValue:SetText(string.format("%.2f", o.tolerance))
             self.shapeBtn:SetNormalFontObject(o.algorithm == "shape" and GameFontNormalLarge or GameFontNormal)
@@ -895,11 +1282,18 @@ NSQC4.RegisterModule("trajectory", function()
     end
 
     function UI:Open()
+        migrateList()
         local f = CreateMainFrame()
         f:Show(); f:Raise(); f:Refresh()
     end
     function UI:OpenEditor(id)
         selectedId = id
+        local g = NSQC4.Trajectory:Get(id)
+        if g then
+            g.action = normalizeAction(g.action)
+            g.chat = normalizeChat(g.chat)
+            g.text = g.text or ""
+        end
         local f = CreateEditorFrame()
         f:Show(); f:Raise(); f:Refresh()
     end
@@ -914,32 +1308,71 @@ NSQC4.RegisterModule("trajectory", function()
     SLASH_NSTRAJ1 = "/ns_traj"
     SlashCmdList["NSTRAJ"] = function(msg)
         msg = (msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+
         if msg == "debug" then
             local s = NSQC4.Trajectory:GetDebugState()
-            print("|cffaa66ff[TRAJ]|r anyDown=" .. tostring(s.anyDown)
-                .. " currentMod=" .. tostring(s.currentMod)
+            print("|cffaa66ff[TRAJ]|r debug=" .. tostring(TDBG.enabled)
+                .. " twoDown=" .. tostring(s.twoDown)
+                .. " currentMods=" .. tostring(s.currentMods)
                 .. " stableFrames=" .. tostring(s.stableFrames)
                 .. " awayFrames=" .. tostring(s.awayFrames)
                 .. " lastStable=" .. tostring(s.lastStable))
             print("  active=" .. tostring(s.active)
                 .. " mode=" .. tostring(s.mode)
                 .. " modifier=" .. tostring(s.modifier)
+                .. " started=" .. tostring(s.started)
                 .. " points=" .. tostring(s.pointCount)
-                .. " replaceId=" .. tostring(s.replaceId)
-                .. " sawModDown=" .. tostring(s.sawModDown)
+                .. " pendingMode=" .. tostring(s.pendingMode)
+                .. " paused=" .. tostring(s.paused)
                 .. " templates=" .. tostring(s.templates)
-                .. " trace=" .. tostring(s.trace))
+                .. " overlay=" .. tostring(s.overlay)
+                .. " every=" .. tostring(s.overlayEvery)
+                .. " inCombat=" .. tostring(s.inCombat))
             local o = ensureOpts()
             print("  tol=" .. tostring(o.tolerance)
                 .. " algo=" .. tostring(o.algorithm)
                 .. " samples=" .. tostring(o.sampleCount)
                 .. " recordOnMod=" .. tostring(o.recordOnMod)
+                .. " drawRoute=" .. tostring(o.drawRoute)
+                .. " hideOverlayInCombat=" .. tostring(o.hideOverlayInCombat)
+                .. " disableInCombat=" .. tostring(o.disableInCombat)
                 .. " shiftStable=" .. tostring(o.shiftStable)
-                .. " idleTimeoutMs=" .. tostring(o.idleTimeoutMs)
-                .. " recordTimeoutMs=" .. tostring(o.recordTimeoutMs))
+                .. " idleTimeoutMs=" .. tostring(o.idleTimeoutMs))
             return
         end
-        if msg == "trace" then NSQC4.Trajectory:SetTrace(not TDBG.enabled); return end
+
+        if msg == "debug on" then
+            TDBG.enabled = true
+            print("|cffaa66ff[TRAJ]|r debug ON (до перезахода)")
+            return
+        end
+        if msg == "debug off" then
+            TDBG.enabled = false
+            print("|cffaa66ff[TRAJ]|r debug OFF")
+            return
+        end
+
+        if msg == "overlay on"  then
+            ensureOpts().drawRoute = true
+            OVERLAY.enabled = true
+            print("|cffaa66ff[TRAJ]|r overlay ON")
+            if optionsFrame then optionsFrame:Refresh() end
+            return
+        end
+        if msg == "overlay off" then
+            ensureOpts().drawRoute = false
+            OVERLAY.enabled = false
+            clearOverlay()
+            print("|cffaa66ff[TRAJ]|r overlay OFF")
+            if optionsFrame then optionsFrame:Refresh() end
+            return
+        end
+        if msg:match("^points %d+$") then
+            local n = tonumber(msg:match("^points (%d+)$")) or 10
+            OVERLAY.every = math.max(1, n)
+            print("|cffaa66ff[TRAJ]|r points every " .. OVERLAY.every)
+            return
+        end
         if msg == "record" then NSQC4.Trajectory:StartRecord(); return end
         if msg == "test"   then NSQC4.Trajectory:StartTest();   return end
         if msg == "stop"   then NSQC4.Trajectory:Stop();        return end
@@ -951,28 +1384,30 @@ NSQC4.RegisterModule("trajectory", function()
     -- ========================================================================
     if NSQC4.SlashPanel_RegisterButton then
         NSQC4.SlashPanel_RegisterButton(
-            "Т",
+            "Г",
             "/ns_traj",
             {
-                { text = "Жесты-маршруты",                                  r = 0.66, g = 0.40, b = 1.00 },
+                { text = "Жесты-маршруты (2 модификатора)",                  r = 0.66, g = 0.40, b = 1.00 },
                 { text = " " },
                 { text = "Запись и распознавание маршрута курсора",          r = 0.85, g = 0.85, b = 0.85 },
-                { text = "под Shift / Ctrl / Alt.",                          r = 0.85, g = 0.85, b = 0.85 },
+                { text = "под Shift+Ctrl / Shift+Alt / Ctrl+Alt.",          r = 0.85, g = 0.85, b = 0.85 },
                 { text = " " },
                 { text = "«Записать жест» — создать шаблон.",                r = 0.85, g = 0.85, b = 0.85 },
                 { text = "«Проверить жест» — показать отклонение.",          r = 0.85, g = 0.85, b = 0.85 },
                 { text = "«Стоп» — принудительно завершить запись.",         r = 0.85, g = 0.85, b = 0.85 },
                 { text = " " },
-                { text = "Модификатор берётся из первого зажатого",          r = 0.70, g = 0.70, b = 0.70 },
-                { text = "при старте записи (Shift > Ctrl > Alt).",          r = 0.70, g = 0.70, b = 0.70 },
+                { text = "Действие: код Lua или текст в чат.",               r = 0.85, g = 0.85, b = 0.85 },
+                { text = " " },
+                { text = "/ns_traj debug on|off — отладка на сессию",        r = 0.70, g = 0.70, b = 0.70 },
+                { text = "/ns_traj overlay on|off — маршрут текстурами",     r = 0.70, g = 0.70, b = 0.70 },
             },
             function() UI:Open() end
         )
     end
 
     NSQC4.SetModuleMeta("trajectory", {
-        label   = "Жесты-маршруты (Shift/Ctrl/Alt)",
-        tooltip = "Запись и распознавание маршрута курсора под модификатором.",
+        label   = "Жесты-маршруты (2 модификатора)",
+        tooltip = "Запись и распознавание маршрута курсора под двумя модификаторами.",
         order   = 110,
     })
 

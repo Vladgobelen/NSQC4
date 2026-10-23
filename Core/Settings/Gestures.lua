@@ -1,6 +1,22 @@
 -- ============================================================================
 -- NSQC4 / Core / Settings / Gestures
--- Жесты по 16 точкам экрана под зажатым модификатором (Shift / Ctrl / Alt).
+-- Жесты по 16 точкам экрана под ОДНИМ зажатым модификатором.
+-- Если зажато 2+ модификатора, модуль молчит (уступает Trajectory).
+--
+-- Точки имеют ПРИОРИТЕТ (порядок). Жест срабатывает, только если точки
+-- посещены в порядке приоритета (1 -> 2 -> 3...).
+--
+-- Сброс сессии происходит:
+--   1) при отпускании модификатора;
+--   2) при выполнении жеста (+ карантин до выхода из точки);
+--   3) при возврате в уже пройденную точку текущего набора (+ карантин);
+--   4) при наведении на точку не по порядку (PRIORITY-FAIL) (+ карантин).
+-- Точки, не участвующие ни в одном невыполненном жесте, ИГНОРИРУЮТСЯ
+-- (без сброса — это просто транзит курсора через постороннюю зону).
+--
+-- Действие жеста (в редакторе, второй раздел, радиокнопки):
+--   • Код  — многострочный Lua (loadstring + pcall)
+--   • Текст — SendChatMessage в выбранный канал
 -- ============================================================================
 
 NSQC4 = NSQC4 or {}
@@ -8,12 +24,12 @@ NSQC4 = NSQC4 or {}
 NSQC4.RegisterModule("gestures", function()
 
     -- ========================================================================
-    -- Отладка
+    -- Отладка (ВЫКЛЮЧЕНА)
     -- ========================================================================
     local GDBG = { enabled = false }
     local function dbg(tag, ...)
         if not GDBG.enabled then return end
-        local p = { "|cff00ddaa[GEST " .. tag .. "]|r" }
+        local p = { "|cff00ddaa[GEST-" .. tag .. "]|r" }
         for _, v in ipairs({...}) do p[#p + 1] = tostring(v) end
         print(unpack(p))
     end
@@ -50,9 +66,32 @@ NSQC4.RegisterModule("gestures", function()
     local MOD_LABELS = { shift = "Shift", ctrl = "Ctrl", alt = "Alt" }
     local MOD_ORDER  = { "shift", "ctrl", "alt" }
 
+    -- ========================================================================
+    -- Действия: каналы чата
+    -- ========================================================================
+    local CHAT_TARGETS = {
+        { key = "say",     chatType = nil,       label = "Сказать" },
+        { key = "party",   chatType = "PARTY",   label = "Группа" },
+        { key = "raid",    chatType = "RAID",    label = "Рейд" },
+        { key = "guild",   chatType = "GUILD",   label = "Гильдия" },
+        { key = "officer", chatType = "OFFICER", label = "Офицерский" },
+    }
+    local CHAT_BY_KEY = {}
+    for _, t in ipairs(CHAT_TARGETS) do CHAT_BY_KEY[t.key] = t end
+
+    local function normalizeChat(key)
+        if CHAT_BY_KEY[key] then return key end
+        return "say"
+    end
+
     local function normalizeMod(mod)
         if mod == "ctrl" or mod == "alt" then return mod end
         return "shift"
+    end
+
+    local function normalizeAction(a)
+        if a == "text" then return "text" end
+        return "code"
     end
 
     local function ensureGesture(g)
@@ -61,12 +100,25 @@ NSQC4.RegisterModule("gestures", function()
         g.code = g.code or ""
         g.corners = g.corners or {}
         g.mod = normalizeMod(g.mod)
+        g.action = normalizeAction(g.action)
+        g.chat = normalizeChat(g.chat)
+        g.text = g.text or ""
         return g
     end
 
     local function migrateList()
         for _, g in ipairs(ensureDb()) do
             g.mod = normalizeMod(g.mod)
+            g.action = normalizeAction(g.action)
+            g.chat = normalizeChat(g.chat)
+            g.text = g.text or ""
+            if g.corners then
+                for cid, val in pairs(g.corners) do
+                    if type(val) == "number" then
+                        g.corners[cid] = { count = val, order = 1 }
+                    end
+                end
+            end
         end
     end
 
@@ -136,13 +188,17 @@ NSQC4.RegisterModule("gestures", function()
     end
 
     -- ========================================================================
-    -- Модификаторы
+    -- Модификаторы (строго один)
     -- ========================================================================
     local function activeModifier()
         if not NSQC4.Modifiers then return nil end
-        if NSQC4.Modifiers.ShiftDown and NSQC4.Modifiers.ShiftDown() then return "shift" end
-        if NSQC4.Modifiers.CtrlDown  and NSQC4.Modifiers.CtrlDown()  then return "ctrl"  end
-        if NSQC4.Modifiers.AltDown   and NSQC4.Modifiers.AltDown()   then return "alt"   end
+        local s = NSQC4.Modifiers.ShiftDown and NSQC4.Modifiers.ShiftDown() or false
+        local c = NSQC4.Modifiers.CtrlDown  and NSQC4.Modifiers.CtrlDown()  or false
+        local a = NSQC4.Modifiers.AltDown   and NSQC4.Modifiers.AltDown()   or false
+
+        if s and not c and not a then return "shift" end
+        if c and not s and not a then return "ctrl"  end
+        if a and not s and not c then return "alt"   end
         return nil
     end
 
@@ -153,9 +209,8 @@ NSQC4.RegisterModule("gestures", function()
 
     local function getHighlighter(cornerId)
         if hl[cornerId] then return hl[cornerId] end
-
         local f = CreateFrame("Frame", nil, UIParent)
-        f:SetFrameStrata("TOOLTIP") -- Поверх всех окон
+        f:SetFrameStrata("TOOLTIP")
         f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
         f:SetBackdropColor(1, 0.82, 0, 0.15)
         f:Hide()
@@ -165,8 +220,6 @@ NSQC4.RegisterModule("gestures", function()
         f.count:SetTextColor(1, 1, 1)
         f.count:SetText("")
 
-        -- Задаём размер и позицию ОДИН РАЗ при создании
-        -- Размер = 2 * RADIUS, чтобы квадрат накрывал ровно ту зону, где срабатывает точка
         local w, h = screenSize()
         for _, c in ipairs(CORNERS) do
             if c.id == cornerId then
@@ -176,7 +229,6 @@ NSQC4.RegisterModule("gestures", function()
                 break
             end
         end
-
         hl[cornerId] = f
         return f
     end
@@ -202,29 +254,125 @@ NSQC4.RegisterModule("gestures", function()
     local visited = {}
     local currentCorner = nil
     local fired = {}
-    local sessionLocked = false
     local sessionMod = nil
+    local hoverFrames = 0
+    local lastRawCorner = nil
+    local quarantineCorner = nil
 
     local function resetSession()
         dbg("RESET", "сброс прогресса")
         visited = {}
         currentCorner = nil
         fired = {}
-        sessionLocked = false
+        hoverFrames = 0
+        lastRawCorner = nil
     end
 
     -- ========================================================================
-    -- Выполнение
+    -- Выполнение действия
     -- ========================================================================
     local function runCode(code)
         if not code or code == "" then return end
         local fn, err = loadstring(code)
         if not fn then
             dbg("RUN", "ошибка компиляции:", err)
+            print("|cffff0000[GESTURES]|r ошибка компиляции: " .. tostring(err))
             return
         end
         local ok, runErr = pcall(fn)
-        if not ok then dbg("RUN", "ошибка выполнения:", runErr) end
+        if not ok then
+            dbg("RUN", "ошибка выполнения:", runErr)
+            print("|cffff0000[GESTURES]|r ошибка выполнения: " .. tostring(runErr))
+        end
+    end
+
+    local function runText(g)
+        local text = g.text or ""
+        if text == "" then
+            dbg("RUN", "текст пуст — пропуск")
+            return
+        end
+        local target = CHAT_BY_KEY[normalizeChat(g.chat)]
+        local chatType = target and target.chatType or nil
+        local ok, err = pcall(SendChatMessage, text, chatType)
+        if not ok then
+            dbg("RUN", "ошибка SendChatMessage:", err)
+            print("|cffff0000[GESTURES]|r ошибка отправки текста: " .. tostring(err))
+        else
+            dbg("RUN", "текст отправлен в", target and target.label or "?")
+        end
+    end
+
+    local function runGestureAction(g)
+        if normalizeAction(g.action) == "text" then
+            runText(g)
+        else
+            runCode(g.code)
+        end
+    end
+
+    -- ========================================================================
+    -- Проверки существования/ёмкости жеста для точки
+    -- ========================================================================
+    local function pointStillNeeded(cid, mod)
+        local curVis = visited[cid] or 0
+        local declared = false
+        local hasCapacity = false
+        for _, g in ipairs(ensureDb()) do
+            if g.mod == mod and not fired[g.id] then
+                local data = g.corners and g.corners[cid]
+                if data and data.count and data.count > 0 then
+                    declared = true
+                    if data.count > curVis then
+                        hasCapacity = true
+                    end
+                end
+            end
+        end
+        if hasCapacity then return true, "" end
+        if declared then return false, "exhausted" end
+        return false, "absent"
+    end
+
+    local function pointAllowedByPriority(cid, mod)
+        local debugReason = ""
+        for _, g in ipairs(ensureDb()) do
+            if g.mod == mod and not fired[g.id] then
+                local sorted = {}
+                for gcid, data in pairs(g.corners or {}) do
+                    if data.count and data.count > 0 then
+                        table.insert(sorted, { id = gcid, order = data.order or 1, count = data.count })
+                    end
+                end
+                table.sort(sorted, function(a, b) return a.order < b.order end)
+
+                local myPos = nil
+                for i, pt in ipairs(sorted) do
+                    if pt.id == cid then myPos = i; break end
+                end
+
+                if myPos then
+                    local previousDone = true
+                    local missing = ""
+                    for i = 1, myPos - 1 do
+                        local prevPt = sorted[i]
+                        local vis = visited[prevPt.id] or 0
+                        if vis < prevPt.count then
+                            previousDone = false
+                            missing = GetCornerLabel(prevPt.id) .. " (" .. vis .. "/" .. prevPt.count .. ")"
+                            break
+                        end
+                    end
+
+                    if previousDone then
+                        return true, ""
+                    else
+                        debugReason = "ждём: " .. missing
+                    end
+                end
+            end
+        end
+        return false, debugReason
     end
 
     -- ========================================================================
@@ -233,16 +381,15 @@ NSQC4.RegisterModule("gestures", function()
     local function rebuildHighlight()
         local opts = ensureOpts()
         if not (opts.highlightShift or opts.highlightHover) then hideAllHighlight(); return end
-        if sessionLocked then hideAllHighlight(); return end
         if not sessionMod then hideAllHighlight(); return end
 
         local needed = {}
         for _, g in ipairs(ensureDb()) do
             if g.mod == sessionMod and not fired[g.id] then
-                for cid, n in pairs(g.corners or {}) do
-                    if n and n > 0 and GetCornerById(cid) then
-                        if not needed[cid] or n > needed[cid] then
-                            needed[cid] = n
+                for cid, data in pairs(g.corners or {}) do
+                    if data.count and data.count > 0 and GetCornerById(cid) then
+                        if not needed[cid] or data.count > needed[cid] then
+                            needed[cid] = data.count
                         end
                     end
                 end
@@ -273,114 +420,107 @@ NSQC4.RegisterModule("gestures", function()
     tracker:SetScript("OnUpdate", function()
         local mod = activeModifier()
 
-        -- Модификатор отпущен — полный сброс
         if not mod then
             if sessionMod ~= nil then
-                dbg("UPDATE", "модификатор отпущен")
+                dbg("MOD-UP", "модификатор отпущен")
                 sessionMod = nil
+                quarantineCorner = nil
                 resetSession()
             end
             hideAllHighlight()
             return
         end
 
-        -- Смена модификатора
         if sessionMod ~= mod then
-            dbg("UPDATE", "смена модификатора на", mod)
+            dbg("MOD-CHANGE", "смена модификатора на", mod)
+            quarantineCorner = nil
             resetSession()
             sessionMod = mod
-            -- ВАЖНО: при смене модификатора сразу сбрасываем currentCorner,
-            -- чтобы текущая точка под курсором засчиталась в этом же кадре
-            currentCorner = nil 
         end
 
         local opts = ensureOpts()
 
-        if sessionLocked then
-            hideAllHighlight()
-            return
-        end
-
-        if opts.highlightShift then
-            rebuildHighlight()
-        elseif not opts.highlightHover then
-            hideAllHighlight()
-        end
+        if opts.highlightShift then rebuildHighlight()
+        elseif not opts.highlightHover then hideAllHighlight() end
 
         local cx, cy = cursorPos()
         local rawCorner = whichCorner(cx, cy)
 
-        -- Выход из зоны
-        if currentCorner and currentCorner ~= rawCorner then
+        if quarantineCorner then
+            if rawCorner == quarantineCorner then
+                dbg("QUARANTINE", "ждём выхода из", GetCornerLabel(quarantineCorner))
+                return
+            else
+                dbg("QUARANTINE", "вышли из", GetCornerLabel(quarantineCorner), "— снимаем")
+                quarantineCorner = nil
+                hoverFrames = 0
+                lastRawCorner = nil
+                currentCorner = nil
+            end
+        end
+
+        if rawCorner == lastRawCorner then
+            hoverFrames = hoverFrames + 1
+        else
+            hoverFrames = 0
+            lastRawCorner = rawCorner
             currentCorner = nil
         end
 
-        -- Вход в зону
-        if rawCorner and currentCorner ~= rawCorner then
+        if rawCorner and hoverFrames >= 3 and currentCorner ~= rawCorner then
             currentCorner = rawCorner
             local cid = rawCorner
 
-            -- Проверяем, есть ли эта точка ХОТЯ БЫ В ОДНОМ жесте текущего модификатора
-            local isPointInAnyGesture = false
-            for _, g in ipairs(ensureDb()) do
-                if g.mod == mod and (g.corners[cid] or 0) > 0 then
-                    isPointInAnyGesture = true
-                    break
+            dbg("HOVER", "держимся 3 кадра в зоне", GetCornerLabel(cid))
+
+            local ok, why = pointStillNeeded(cid, mod)
+            if not ok then
+                if why == "exhausted" then
+                    dbg("IGNORE", "точка", GetCornerLabel(cid), "исчерпана — СБРОС + КАРАНТИН")
+                    if opts.showText then
+                        print("|cff00ffff[GESTURES]|r Сброс (повтор в пройденную точку).")
+                    end
+                    quarantineCorner = cid
+                    resetSession()
+                    hideAllHighlight()
+                    return
+                else
+                    dbg("IGNORE", "точка", GetCornerLabel(cid), "нет в невыполненных жестах — игнор")
+                    return
                 end
             end
 
-            if not isPointInAnyGesture then
-                dbg("IGNORE", "точка", cid, "игнорируется (нет в жестах)")
+            local canProceed, reason = pointAllowedByPriority(cid, mod)
+            if not canProceed then
+                dbg("PRIORITY-FAIL", "заход в", GetCornerLabel(cid), "отклонён:", reason, "— СБРОС + КАРАНТИН")
+                if opts.showText then
+                    print("|cff00ffff[GESTURES]|r Сброс (нарушен порядок).")
+                end
+                quarantineCorner = cid
+                resetSession()
+                hideAllHighlight()
                 return
             end
 
-            -- Засчитываем заход
             visited[cid] = (visited[cid] or 0) + 1
-            dbg("STEP", "зашёл в", cid, "счётчик:", visited[cid])
+            dbg("STEP", "ЗАСЧИТАНО", GetCornerLabel(cid), "счётчик:", visited[cid])
 
             if opts.showText then
                 print("|cff00ffff[GESTURES]|r " .. GetCornerLabel(cid) .. " (" .. visited[cid] .. ")")
-            end
-
-            -- Проверяем: превышен ли лимит?
-            local overLimitForAll = true
-            for _, g in ipairs(ensureDb()) do
-                if g.mod == mod then
-                    local validForThis = true
-                    for vcid, vcnt in pairs(visited) do
-                        local need = (g.corners[vcid] or 0)
-                        if vcnt > need then
-                            validForThis = false
-                            break
-                        end
-                    end
-                    if validForThis then
-                        overLimitForAll = false
-                        break
-                    end
-                end
-            end
-
-            if overLimitForAll then
-                dbg("FAIL", "превышен лимит по всем жестам, сброс")
-                if opts.showText then print("|cff00ffff[GESTURES]|r Превышен лимит. Сброс.") end
-                resetSession()
-                return
             end
 
             if opts.highlightHover and not opts.highlightShift then
                 rebuildHighlight()
             end
 
-            -- Проверяем на срабатывание
             for _, g in ipairs(ensureDb()) do
                 if g.mod == mod and not fired[g.id] then
                     local allDone = true
                     local hasAny = false
-                    for gcid, need in pairs(g.corners or {}) do
-                        if need and need > 0 and GetCornerById(gcid) then
+                    for gcid, data in pairs(g.corners or {}) do
+                        if data.count and data.count > 0 then
                             hasAny = true
-                            if (visited[gcid] or 0) < need then
+                            if (visited[gcid] or 0) < data.count then
                                 allDone = false
                                 break
                             end
@@ -389,19 +529,16 @@ NSQC4.RegisterModule("gestures", function()
 
                     if hasAny and allDone then
                         fired[g.id] = true
-                        for gcid in pairs(g.corners or {}) do
-                            visited[gcid] = 0
-                        end
                         if opts.showText then
-                            print("|cff00ffff[GESTURES]|r   ["
-                                .. (MOD_LABELS[g.mod] or "?") .. "] "
-                                .. ((g.name ~= "" and g.name) or g.id) .. ": выполнено")
+                            print("|cff00ffff[GESTURES]|r   [" .. (MOD_LABELS[g.mod] or "?") .. "] " .. ((g.name ~= "" and g.name) or g.id) .. ": ВЫПОЛНЕНО")
                         end
-                        runCode(g.code)
+                        runGestureAction(g)
 
-                        sessionLocked = true
+                        dbg("DONE", "жест выполнен — СБРОС + КАРАНТИН")
+                        quarantineCorner = cid
+                        resetSession()
                         hideAllHighlight()
-                        break
+                        return
                     end
                 end
             end
@@ -418,10 +555,19 @@ NSQC4.RegisterModule("gestures", function()
     function G:Opts() return ensureOpts() end
     function G:ModifierLabels() return MOD_LABELS end
     function G:ModifierOrder() return MOD_ORDER end
+    function G:ChatTargets() return CHAT_TARGETS end
 
     function G:Add(name, mod)
         local list = ensureDb()
-        local g = ensureGesture({ name = name or "", code = "", corners = {}, mod = normalizeMod(mod) })
+        local g = ensureGesture({
+            name = name or "",
+            code = "",
+            corners = {},
+            mod = normalizeMod(mod),
+            action = "code",
+            chat = "say",
+            text = "",
+        })
         table.insert(list, g)
         dbg("ADD", g.id, g.name, g.mod)
         return g
@@ -439,6 +585,9 @@ NSQC4.RegisterModule("gestures", function()
         for _, g in ipairs(ensureDb()) do
             if g.id == id then
                 g.mod = normalizeMod(g.mod)
+                g.action = normalizeAction(g.action)
+                g.chat = normalizeChat(g.chat)
+                g.text = g.text or ""
                 return g
             end
         end
@@ -448,25 +597,6 @@ NSQC4.RegisterModule("gestures", function()
     function G:GetCorners() return CORNERS end
     function G:GetCornerLabel(id) return GetCornerLabel(id) end
     function G:GetRadius() return RADIUS end
-
-    function G:GetDebugState()
-        local cx, cy = cursorPos()
-        local w, h = screenSize()
-        local visList, firedList = {}, {}
-        for id, n in pairs(visited) do visList[#visList + 1] = id .. "=" .. n end
-        for id in pairs(fired) do firedList[#firedList + 1] = id end
-        return {
-            modifier = activeModifier(),
-            sessionMod = sessionMod,
-            cursorX = cx, cursorY = cy,
-            screenW = w, screenH = h,
-            inCorner = whichCorner(cx, cy),
-            visited = visList,
-            currentCorner = currentCorner,
-            fired = firedList,
-            sessionLocked = sessionLocked,
-        }
-    end
 
     -- ========================================================================
     -- UI
@@ -479,12 +609,8 @@ NSQC4.RegisterModule("gestures", function()
     local optionsFrame
     local selectedGestureId
 
-    -- ------------------------------------------------------------------------
-    -- Главное окно (MEDIUM)
-    -- ------------------------------------------------------------------------
     local function CreateMainFrame()
         if mainFrame then return mainFrame end
-
         local f = CreateFrame("Frame", "NSQC4GesturesFrame", UIParent)
         f:SetSize(520, 460)
         f:SetPoint("CENTER")
@@ -576,12 +702,9 @@ NSQC4.RegisterModule("gestures", function()
         local scroll = CreateFrame("ScrollFrame", "NSQC4GesturesScroll", f, "UIPanelScrollFrameTemplate")
         scroll:SetPoint("TOPLEFT", 20, -115)
         scroll:SetPoint("BOTTOMRIGHT", -40, 20)
-
         local content = CreateFrame("Frame", "NSQC4GesturesContent", scroll)
         content:SetSize(440, 1)
         scroll:SetScrollChild(content)
-
-        f.scroll = scroll
         f.content = content
         f.rows = {}
 
@@ -610,24 +733,24 @@ NSQC4.RegisterModule("gestures", function()
 
                 local name = (g.name and g.name ~= "") and g.name or "(без имени)"
                 local mod = normalizeMod(g.mod)
-                local modLabelText = MOD_LABELS[mod] or mod
+                local actionLabel = (normalizeAction(g.action) == "text") and "текст" or "код"
                 local cornersText = ""
                 local n = 0
-                for cid, cnt in pairs(g.corners or {}) do
-                    if cnt and cnt > 0 then
+                for cid, data in pairs(g.corners or {}) do
+                    if data.count and data.count > 0 then
                         n = n + 1
-                        if n <= 3 then
+                        if n <= 2 then
                             if cornersText ~= "" then cornersText = cornersText .. ", " end
-                            cornersText = cornersText .. GetCornerLabel(cid) .. "×" .. cnt
+                            cornersText = cornersText .. GetCornerLabel(cid) .. "(P" .. (data.order or 1) .. "×" .. data.count .. ")"
                         end
                     end
                 end
                 if n == 0 then cornersText = "|cff808080нет точек|r" end
-                if n > 3 then cornersText = cornersText .. ", …" end
+                if n > 2 then cornersText = cornersText .. ", …" end
 
                 local left = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
                 left:SetPoint("LEFT", 8, 0)
-                left:SetText("|cff808080[" .. modLabelText .. "]|r |cffFFD100" .. name .. "|r")
+                left:SetText("|cff808080[" .. (MOD_LABELS[mod] or mod) .. "]|r |cffFFD100" .. name .. "|r |cff66ccff<" .. actionLabel .. ">|r")
 
                 local right = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
                 right:SetPoint("RIGHT", -8, 0)
@@ -646,13 +769,12 @@ NSQC4.RegisterModule("gestures", function()
     end
 
     -- ------------------------------------------------------------------------
-    -- Редактор (DIALOG)
+    -- Редактор жеста
     -- ------------------------------------------------------------------------
     local function CreateEditorFrame()
         if editorFrame then return editorFrame end
-
         local f = CreateFrame("Frame", "NSQC4GestureEditorFrame", UIParent)
-        f:SetSize(560, 780) -- Увеличили высоту окна с 730 до 780
+        f:SetSize(560, 840)
         f:SetPoint("CENTER", 160, 0)
         f:SetFrameStrata("DIALOG")
         f:SetMovable(true)
@@ -679,12 +801,12 @@ NSQC4.RegisterModule("gestures", function()
 
         local hint = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         hint:SetPoint("TOPLEFT", 20, -40)
-        hint:SetText("ЛКМ — +1. ПКМ — −1. Срабатывает под выбранным модификатором.")
+        hint:SetText("ЛКМ — добавить точку. ПКМ — уменьшить.")
 
         local mapSize = 340
         local map = CreateFrame("Frame", nil, f)
         map:SetSize(mapSize, mapSize)
-        map:SetPoint("TOP", 0, -112) 
+        map:SetPoint("TOP", 0, -112)
         map:SetBackdrop({
             bgFile = "Interface\\Buttons\\WHITE8x8",
             edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -700,11 +822,7 @@ NSQC4.RegisterModule("gestures", function()
             local b = CreateFrame("Button", nil, map)
             b:SetSize(70, 70)
             b:SetPoint("CENTER", map, "BOTTOMLEFT", c.fx * mapSize, c.fy * mapSize)
-            b:SetBackdrop({
-                bgFile = "Interface\\Buttons\\WHITE8x8",
-                edgeFile = "Interface\\Buttons\\WHITE8x8",
-                edgeSize = 1,
-            })
+            b:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
             b:SetBackdropColor(0.2, 0.2, 0.2, 0.7)
             b:SetBackdropBorderColor(0.5, 0.5, 0.5, 1)
             b.cornerId = c.id
@@ -720,10 +838,26 @@ NSQC4.RegisterModule("gestures", function()
                 local g = NSQC4.Gestures and NSQC4.Gestures:Get(selectedGestureId)
                 if not g then return end
                 g.corners = g.corners or {}
-                local cur = g.corners[c.id] or 0
-                if button == "LeftButton" then cur = cur + 1; if cur > 99 then cur = 99 end
-                elseif button == "RightButton" then cur = cur - 1; if cur < 0 then cur = 0 end end
-                if cur == 0 then g.corners[c.id] = nil else g.corners[c.id] = cur end
+
+                local data = g.corners[c.id]
+
+                if button == "LeftButton" then
+                    if not data then
+                        local maxOrder = 0
+                        for _, d in pairs(g.corners) do if (d.order or 0) > maxOrder then maxOrder = d.order end end
+                        g.corners[c.id] = { count = 1, order = maxOrder + 1 }
+                    else
+                        data.count = data.count + 1
+                        if data.count > 99 then data.count = 99 end
+                    end
+                elseif button == "RightButton" then
+                    if data then
+                        data.count = data.count - 1
+                        if data.count <= 0 then
+                            g.corners[c.id] = nil
+                        end
+                    end
+                end
                 f:Refresh()
             end)
 
@@ -731,9 +865,13 @@ NSQC4.RegisterModule("gestures", function()
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 GameTooltip:SetText(c.label, 1, 0.82, 0)
                 local g = selectedGestureId and NSQC4.Gestures and NSQC4.Gestures:Get(selectedGestureId)
-                local cnt = g and g.corners and g.corners[c.id] or 0
-                GameTooltip:AddLine("Счётчик: " .. tostring(cnt), 1, 1, 1)
-                GameTooltip:AddLine("ID: " .. c.id, 0.6, 0.6, 0.6)
+                local data = g and g.corners and g.corners[c.id]
+                if data then
+                    GameTooltip:AddLine("Приоритет: " .. tostring(data.order or 1), 1, 1, 1)
+                    GameTooltip:AddLine("Счётчик: " .. tostring(data.count or 1), 1, 1, 1)
+                else
+                    GameTooltip:AddLine("Не задана", 0.5, 0.5, 0.5)
+                end
                 GameTooltip:Show()
             end)
             b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -741,9 +879,8 @@ NSQC4.RegisterModule("gestures", function()
         end
         f.points = points
 
-        -- СДВИНУТО ЕЩЁ НА 50 ПИКСЕЛЕЙ ВНИЗ (было -470, стало -520)
         local modTitle = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        modTitle:SetPoint("TOPLEFT", 20, -520) 
+        modTitle:SetPoint("TOPLEFT", 20, -516)
         modTitle:SetText("Модификатор:")
 
         local modButtons = {}
@@ -769,13 +906,9 @@ NSQC4.RegisterModule("gestures", function()
             if prev then
                 b:SetPoint("LEFT", prev, "RIGHT", 8, 0)
             else
-                b:SetPoint("TOPLEFT", 120, -516) -- было -466, стало -516
+                b:SetPoint("TOPLEFT", 120, -512)
             end
-            b:SetBackdrop({
-                bgFile = "Interface\\Buttons\\WHITE8x8",
-                edgeFile = "Interface\\Buttons\\WHITE8x8",
-                edgeSize = 1,
-            })
+            b:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
             b:SetBackdropColor(0.15, 0.15, 0.15, 0.8)
             b:SetBackdropBorderColor(0.5, 0.5, 0.5, 1)
 
@@ -796,26 +929,53 @@ NSQC4.RegisterModule("gestures", function()
         end
         f.modButtons = modButtons
 
-        -- Имя (было -515, стало -565)
         local nameLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        nameLabel:SetPoint("TOPLEFT", 20, -565)
+        nameLabel:SetPoint("TOPLEFT", 20, -555)
         nameLabel:SetText("Имя:")
 
         local nameBox = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
         nameBox:SetSize(420, 24)
-        nameBox:SetPoint("TOPLEFT", 70, -561)
+        nameBox:SetPoint("TOPLEFT", 70, -551)
         nameBox:SetAutoFocus(false)
         nameBox:SetMaxLetters(40)
         f.nameBox = nameBox
 
-        -- Код (было -545, стало -595)
-        local codeLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        codeLabel:SetPoint("TOPLEFT", 20, -595)
+        -- --------------------------------------------------------------------
+        -- Второй раздел: действие (радиокнопки Код / Текст)
+        -- --------------------------------------------------------------------
+        local actionTitle = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        actionTitle:SetPoint("TOPLEFT", 20, -588)
+        actionTitle:SetText("Действие жеста:")
+
+        local rbCode = CreateFrame("CheckButton", nil, f, "UIRadioButtonTemplate")
+        rbCode:SetPoint("TOPLEFT", 20, -608)
+        rbCode:SetSize(22, 22)
+        local rbCodeLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        rbCodeLbl:SetPoint("LEFT", rbCode, "RIGHT", 4, 0)
+        rbCodeLbl:SetText("Код (Lua)")
+        f.rbCode = rbCode
+
+        local rbText = CreateFrame("CheckButton", nil, f, "UIRadioButtonTemplate")
+        rbText:SetPoint("LEFT", rbCodeLbl, "RIGHT", 40, 0)
+        rbText:SetSize(22, 22)
+        local rbTextLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        rbTextLbl:SetPoint("LEFT", rbText, "RIGHT", 4, 0)
+        rbTextLbl:SetText("Текст в чат")
+        f.rbText = rbText
+
+        -- Панель кода
+        local codePanel = CreateFrame("Frame", nil, f)
+        codePanel:SetPoint("TOPLEFT", 20, -640)
+        codePanel:SetSize(520, 130)
+        f.codePanel = codePanel
+
+        local codeLabel = codePanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        codeLabel:SetPoint("TOPLEFT", 0, 0)
         codeLabel:SetText("Код (Lua):")
 
-        local codeBox = CreateFrame("EditBox", nil, f)
-        codeBox:SetSize(520, 100)
-        codeBox:SetPoint("TOPLEFT", 20, -615)
+        local codeBox = CreateFrame("EditBox", nil, codePanel)
+        codeBox:SetSize(520, 105)
+        codeBox:SetPoint("TOPLEFT", 0, -18)
         codeBox:SetMultiLine(true)
         codeBox:SetAutoFocus(false)
         codeBox:SetFontObject("ChatFontNormal")
@@ -830,6 +990,118 @@ NSQC4.RegisterModule("gestures", function()
         codeBox:SetTextInsets(4, 4, 4, 4)
         f.codeBox = codeBox
 
+        -- Панель текста
+        local textPanel = CreateFrame("Frame", nil, f)
+        textPanel:SetPoint("TOPLEFT", 20, -640)
+        textPanel:SetSize(520, 130)
+        f.textPanel = textPanel
+
+        local chatLabel = textPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        chatLabel:SetPoint("TOPLEFT", 0, 0)
+        chatLabel:SetText("Канал:")
+
+        local chatBtn = CreateFrame("Button", nil, textPanel, "UIPanelButtonTemplate")
+        chatBtn:SetSize(130, 24)
+        chatBtn:SetPoint("LEFT", chatLabel, "RIGHT", 8, 0)
+        f.chatBtn = chatBtn
+
+        local function currentChatKey()
+            local g = selectedGestureId and NSQC4.Gestures:Get(selectedGestureId)
+            return g and normalizeChat(g.chat) or "say"
+        end
+        local function updateChatBtn()
+            local t = CHAT_BY_KEY[currentChatKey()]
+            chatBtn:SetText(t and t.label or "?")
+        end
+        chatBtn:SetScript("OnClick", function()
+            if not selectedGestureId then return end
+            local g = NSQC4.Gestures:Get(selectedGestureId)
+            if not g then return end
+            local cur = normalizeChat(g.chat)
+            local idx = 1
+            for i, t in ipairs(CHAT_TARGETS) do
+                if t.key == cur then idx = i; break end
+            end
+            idx = idx + 1
+            if idx > #CHAT_TARGETS then idx = 1 end
+            g.chat = CHAT_TARGETS[idx].key
+            updateChatBtn()
+        end)
+        f.updateChatBtn = updateChatBtn
+
+        local textLabel = textPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        textLabel:SetPoint("TOPLEFT", 0, -32)
+        textLabel:SetText("Текст:")
+
+        local textBox = CreateFrame("EditBox", nil, textPanel)
+        textBox:SetSize(520, 72)
+        textBox:SetPoint("TOPLEFT", 0, -52)
+        textBox:SetMultiLine(true)
+        textBox:SetAutoFocus(false)
+        textBox:SetMaxLetters(255)
+        textBox:SetFontObject("ChatFontNormal")
+        textBox:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            edgeSize = 8,
+            insets = { left = 2, right = 2, top = 2, bottom = 2 },
+        })
+        textBox:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
+        textBox:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+        textBox:SetTextInsets(4, 4, 4, 4)
+        f.textBox = textBox
+
+        -- Переключение видимости панелей + синхронизация радиокнопок.
+        local updatingAction = false
+        local function updateActionPanels()
+            if updatingAction then return end
+            updatingAction = true
+
+            local g = selectedGestureId and NSQC4.Gestures:Get(selectedGestureId)
+            local action = g and normalizeAction(g.action) or "code"
+            if action == "text" then
+                f.codePanel:Hide()
+                f.textPanel:Show()
+                rbCode:SetChecked(false)
+                rbText:SetChecked(true)
+                updateChatBtn()
+            else
+                f.textPanel:Hide()
+                f.codePanel:Show()
+                rbCode:SetChecked(true)
+                rbText:SetChecked(false)
+            end
+
+            updatingAction = false
+        end
+        f.updateActionPanels = updateActionPanels
+
+        rbCode:SetScript("OnClick", function(self)
+            if updatingAction then
+                self:SetChecked(normalizeAction(NSQC4.Gestures:Get(selectedGestureId).action) == "code")
+                return
+            end
+            if not selectedGestureId then return end
+            local g = NSQC4.Gestures:Get(selectedGestureId)
+            if not g then return end
+            g.action = "code"
+            updateActionPanels()
+            if mainFrame then mainFrame:Refresh() end
+        end)
+        rbText:SetScript("OnClick", function(self)
+            if updatingAction then
+                self:SetChecked(normalizeAction(NSQC4.Gestures:Get(selectedGestureId).action) == "text")
+                return
+            end
+            if not selectedGestureId then return end
+            local g = NSQC4.Gestures:Get(selectedGestureId)
+            if not g then return end
+            g.action = "text"
+            updateActionPanels()
+            if mainFrame then mainFrame:Refresh() end
+        end)
+
+        -- Кнопки внизу
         local saveBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
         saveBtn:SetSize(130, 26)
         saveBtn:SetPoint("BOTTOMLEFT", 20, 18)
@@ -840,7 +1112,10 @@ NSQC4.RegisterModule("gestures", function()
             if not g then return end
             g.name = f.nameBox:GetText() or ""
             g.code = f.codeBox:GetText() or ""
+            g.text = f.textBox:GetText() or ""
             g.mod = normalizeMod(g.mod)
+            g.action = normalizeAction(g.action)
+            g.chat = normalizeChat(g.chat)
             if mainFrame then mainFrame:Refresh() end
             f:Hide()
         end)
@@ -874,14 +1149,15 @@ NSQC4.RegisterModule("gestures", function()
             local g = NSQC4.Gestures and NSQC4.Gestures:Get(selectedGestureId)
             if not g then return end
             local mod = normalizeMod(g.mod)
-            self.title:SetText("Жест: " .. ((g.name ~= "" and g.name) or g.id)
-                .. " [" .. (MOD_LABELS[mod] or mod) .. "]")
+            self.title:SetText("Жест: " .. ((g.name ~= "" and g.name) or g.id) .. " [" .. (MOD_LABELS[mod] or mod) .. "]")
             self.nameBox:SetText(g.name or "")
             self.codeBox:SetText(g.code or "")
+            self.textBox:SetText(g.text or "")
+
             for id, b in pairs(self.points) do
-                local cnt = (g.corners and g.corners[id]) or 0
-                if cnt > 0 then
-                    b.countText:SetText(tostring(cnt))
+                local data = g.corners and g.corners[id]
+                if data and data.count > 0 then
+                    b.countText:SetText("P" .. (data.order or 1) .. " x" .. data.count)
                     b.countText:SetTextColor(1, 0.82, 0)
                     b:SetBackdropColor(0.3, 0.25, 0, 0.9)
                     b:SetBackdropBorderColor(1, 0.82, 0, 1)
@@ -892,18 +1168,15 @@ NSQC4.RegisterModule("gestures", function()
                 end
             end
             self.updateModButtons()
+            self.updateActionPanels()
         end
 
         editorFrame = f
         return f
     end
 
-    -- ------------------------------------------------------------------------
-    -- Настройки (DIALOG)
-    -- ------------------------------------------------------------------------
     local function CreateOptionsFrame()
         if optionsFrame then return optionsFrame end
-
         local f = CreateFrame("Frame", "NSQC4GesturesOptionsFrame", UIParent)
         f:SetSize(400, 240)
         f:SetPoint("CENTER", 200, 100)
@@ -957,9 +1230,6 @@ NSQC4.RegisterModule("gestures", function()
         return f
     end
 
-    -- ------------------------------------------------------------------------
-    -- Публичный API UI
-    -- ------------------------------------------------------------------------
     function UI:Open()
         migrateList()
         local f = CreateMainFrame()
@@ -971,7 +1241,12 @@ NSQC4.RegisterModule("gestures", function()
     function UI:OpenEditor(gestureId)
         selectedGestureId = gestureId
         local g = NSQC4.Gestures and NSQC4.Gestures:Get(gestureId)
-        if g then g.mod = normalizeMod(g.mod) end
+        if g then
+            g.mod = normalizeMod(g.mod)
+            g.action = normalizeAction(g.action)
+            g.chat = normalizeChat(g.chat)
+            g.text = g.text or ""
+        end
         local f = CreateEditorFrame()
         f:Show()
         f:Raise()
@@ -985,30 +1260,17 @@ NSQC4.RegisterModule("gestures", function()
         f:Raise()
     end
 
-    -- ========================================================================
-    -- Слэш-команда
-    -- ========================================================================
     SLASH_NSGESTURES1 = "/ns_gestures"
     SlashCmdList["NSGESTURES"] = function(msg)
         msg = (msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
         if msg == "debug" then
             local o = ensureOpts()
-            print("|cff00ffff[GEST-DEBUG]|r opts: showText=" .. tostring(o.showText)
-                .. " highlightShift=" .. tostring(o.highlightShift))
-            local s = NSQC4.Gestures and NSQC4.Gestures.GetDebugState and NSQC4.Gestures:GetDebugState()
-            if s then
-                print("|cff00ffff[GEST-DEBUG]|r modifier=" .. tostring(s.modifier)
-                    .. " sessionMod=" .. tostring(s.sessionMod)
-                    .. " inCorner=" .. tostring(s.inCorner))
-            end
+            print("|cff00ffff[GEST-DEBUG]|r opts: showText=" .. tostring(o.showText) .. " highlightShift=" .. tostring(o.highlightShift))
             return
         end
         UI:Open()
     end
 
-    -- ========================================================================
-    -- Кнопка на панели
-    -- ========================================================================
     if NSQC4.SlashPanel_RegisterButton then
         NSQC4.SlashPanel_RegisterButton(
             "Ж",
@@ -1016,14 +1278,12 @@ NSQC4.RegisterModule("gestures", function()
             {
                 { text = "Жесты по точкам экрана", r = 1.00, g = 0.82, b = 0.00 },
                 { text = "Shift / Ctrl / Alt — на выбор у жеста.", r = 0.85, g = 0.85, b = 0.85 },
+                { text = "Действие: код Lua или текст в чат.", r = 0.85, g = 0.85, b = 0.85 },
             },
             function() UI:Open() end
         )
     end
 
-    -- ========================================================================
-    -- Метаданные
-    -- ========================================================================
     NSQC4.SetModuleMeta("gestures", {
         label   = "Жесты (Shift / Ctrl / Alt)",
         tooltip = "Жесты по 16 точкам экрана под зажатым модификатором.",
@@ -1031,6 +1291,5 @@ NSQC4.RegisterModule("gestures", function()
     })
 
     migrateList()
-    dbg("INIT", "готов")
 
 end)
