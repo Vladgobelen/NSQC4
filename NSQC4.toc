@@ -9,6 +9,7 @@ Core\Settings\Settings.lua
 Core\ModuleRegistry.lua
 Core\Settings\Modifiers.lua
 Core\Settings\Gestures.lua
+Core\Settings\Trajectory.lua
 Core\ChatHandler.lua
 Core\ChatCatcher.lua
 Core\Compat.lua

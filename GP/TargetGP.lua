@@ -112,7 +112,7 @@ end
 
 local function IsInMyGuild(short)
     if not short then return false end
-    for i = 1, GetNumGuildMembers() do
+    for i = 1, GetNumGuildMembers(true) do
         local n = GetGuildRosterInfo(i)
         if n and ShortName(n) == short then return true end
     end

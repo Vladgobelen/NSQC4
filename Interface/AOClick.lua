@@ -328,7 +328,7 @@ NSQC4.RegisterModule("ui_ao", function()
             local oldAddMessage = chatFrame.AddMessage
             chatFrame.AddMessage = function(self2, msg, ...)
                 if msg and type(msg) == "string" then
-                    -- (A) [Имя:числа] — пересобираем из чисел (2 или 3), с нулями
+                    -- (A) [Имя:числа] — пересобираем из чисел (2 или 3)
                     msg = msg:gsub(
                         "%[([^%[%]:]+):([%d%-:]+)%]",
                         function(name, inner)
@@ -370,6 +370,18 @@ NSQC4.RegisterModule("ui_ao", function()
                                 return "[" .. name .. "]"
                             end
                             return "[" .. name .. ":" .. table.concat(parts, ":") .. "]"
+                        end)
+
+                    -- (A2) [Имя:gp] — одно число, добавить репу из кэша
+                    msg = msg:gsub(
+                        "%[([^%[%]:]+):(%d+)%]",
+                        function(name, gp)
+                            local cleanName = name:match("^([^%-]+)") or name
+                            local repNum = nsDbc4 and nsDbc4.reputation and nsDbc4.reputation[cleanName]
+                            if repNum and tonumber(repNum) ~= 0 and not aoSettings.hideRep then
+                                return "[" .. name .. ":" .. gp .. ":" .. tostring(repNum) .. "]"
+                            end
+                            return "[" .. name .. ":" .. gp .. "]"
                         end)
 
                     -- (B) |Hplayer:Имя|h[Имя]|h — стандартный ник (гильдейские)
