@@ -1190,7 +1190,7 @@ local function ProcessRaidMessage(sender, msg, event)
         local isPass = (cleanMsg == "пас" or cleanMsg == "Пас" or cleanMsg == "ПАС" or cleanMsg == "-")
         local amount = tonumber(cleanMsg:match("^%s*(%d+)%s*$"))
         if isPass or amount then
-            if sender ~= myName and db.active.startedBy == myName then
+            if db.active.startedBy == myName then
                 tr("BID raid-text", "sender="..tostring(sender), "amount="..tostring(amount), "isPass="..tostring(isPass))
                 local bidData = db.active.bids[sender]
                 if not bidData then
