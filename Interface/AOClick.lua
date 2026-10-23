@@ -328,23 +328,48 @@ NSQC4.RegisterModule("ui_ao", function()
             local oldAddMessage = chatFrame.AddMessage
             chatFrame.AddMessage = function(self2, msg, ...)
                 if msg and type(msg) == "string" then
-                    -- (A) [Имя:lvl:gp] без |Hplayer: → добавляем репу в конец
-                    --     (для не-гильдейских, у кого нет guildInfo,
-                    --      но есть репа в кэше AOReputation)
+                    -- (A) [Имя:числа] — пересобираем из чисел (2 или 3), с нулями
                     msg = msg:gsub(
-                        "%[([^%[%]:]+):(%d%d?):(%-?%d+)%]",
-                        function(name, level, gp)
+                        "%[([^%[%]:]+):([%d%-:]+)%]",
+                        function(name, inner)
+                            local nums = {}
+                            for n in inner:gmatch("%-?%d+") do
+                                nums[#nums + 1] = n
+                            end
+                            if #nums < 2 then
+                                return "[" .. name .. ":" .. inner .. "]"
+                            end
+
+                            local level = nums[1]
+                            local gp    = nums[2]
+                            local rep   = nums[3]
+
                             local lv = tonumber(level)
                             if not lv or lv < 1 or lv > 80 then
-                                return "[" .. name .. ":" .. level .. ":" .. gp .. "]"
+                                return "[" .. name .. ":" .. inner .. "]"
                             end
+
                             local cleanName = name:match("^([^%-]+)") or name
-                            local repNum = nsDbc4 and nsDbc4.reputation and nsDbc4.reputation[cleanName]
-                            if repNum and tonumber(repNum) ~= 0 and not aoSettings.hideRep then
-                                return "[" .. name .. ":" .. level .. ":" .. gp
-                                    .. ":" .. tostring(repNum) .. "]"
+                            local cacheRep = nsDbc4 and nsDbc4.reputation and nsDbc4.reputation[cleanName]
+                            local repNum = rep or cacheRep
+
+                            local lvNum = tonumber(level)
+                            local gvNum = tonumber(gp)
+                            local rvNum = repNum and tonumber(repNum) or nil
+
+                            local hideL = aoSettings.hideLevel or lvNum == 80 or lvNum == 0
+                            local hideG = aoSettings.hideGP    or gvNum == 0
+                            local hideR = aoSettings.hideRep   or rvNum == 0 or rvNum == nil or rvNum == gvNum
+
+                            local parts = {}
+                            if not hideL then parts[#parts + 1] = level end
+                            if not hideG then parts[#parts + 1] = gp    end
+                            if not hideR then parts[#parts + 1] = tostring(repNum) end
+
+                            if #parts == 0 then
+                                return "[" .. name .. "]"
                             end
-                            return "[" .. name .. ":" .. level .. ":" .. gp .. "]"
+                            return "[" .. name .. ":" .. table.concat(parts, ":") .. "]"
                         end)
 
                     -- (B) |Hplayer:Имя|h[Имя]|h — стандартный ник (гильдейские)
@@ -362,13 +387,17 @@ NSQC4.RegisterModule("ui_ao", function()
                             local level = gd and gd.level
                             local gp    = gd and gd.gp
 
-                            if level == 80 or level == "80" then level = nil end
-                            if level == 0 or level == "0" then level = nil end
-                            if gp == 0 or gp == "0" then gp = nil end
+                            local lvNum = tonumber(level)
+                            local gvNum = tonumber(gp)
+                            local rvNum = repNum and tonumber(repNum) or nil
 
-                            if aoSettings.hideLevel then level = nil end
-                            if aoSettings.hideGP    then gp    = nil end
-                            if aoSettings.hideRep   then repNum = nil end
+                            local hideL = aoSettings.hideLevel or lvNum == 80 or lvNum == 0
+                            local hideG = aoSettings.hideGP    or gvNum == 0
+                            local hideR = aoSettings.hideRep   or rvNum == 0 or rvNum == nil
+
+                            if hideL then level = nil end
+                            if hideG then gp    = nil end
+                            if hideR then repNum = nil end
 
                             local parts = {}
                             if level then parts[#parts + 1] = tostring(level) end
