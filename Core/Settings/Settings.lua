@@ -98,13 +98,20 @@ end
 -- ============================================================================
 
 -- Возвращает актуальный отсортированный список модулей (без hidden).
--- Каждый элемент: { key, label, tooltip, order, hidden }.
+-- Каждый элемент: { key, label, tooltip, order, hidden, hasSettings }.
 -- Источник — NSQC4.ModuleMeta (заполняется автоматически в RegisterModule).
 function NSQC4.Settings.GetModules()
     local list = {}
     for _, m in pairs(NSQC4.ModuleMeta or {}) do
         if not m.hidden then
-            list[#list + 1] = m
+            list[#list + 1] = {
+                key         = m.key,
+                label       = m.label,
+                tooltip     = m.tooltip,
+                order       = m.order,
+                hidden      = m.hidden,
+                hasSettings = NSQC4.HasModuleSettings and NSQC4.HasModuleSettings(m.key) or false,
+            }
         end
     end
     table.sort(list, function(a, b)

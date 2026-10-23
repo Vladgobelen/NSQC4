@@ -13,6 +13,9 @@
 --         hidden  = true, -- если нужно скрыть из UI
 --     })
 --
+-- Панель настроек модуля (опционально):
+--     NSQC4.RegisterModuleSettings("ui_mail", function() ... end)
+--
 -- Порядок запуска функций для одного ключа = порядок регистрации = порядок .toc.
 -- Если ключ выключен в настройках — ни одна функция не вызывается.
 -- Порядок запуска МЕЖДУ ключами — по meta.order (если задан), иначе по имени ключа.
@@ -21,6 +24,7 @@
 NSQC4 = NSQC4 or {}
 NSQC4.Modules = NSQC4.Modules or {}       -- { [key] = { fn1, fn2, ... } }
 NSQC4.ModuleMeta = NSQC4.ModuleMeta or {}  -- { [key] = { key, label, tooltip, order, hidden } }
+NSQC4.ModuleSettings = NSQC4.ModuleSettings or {}  -- { [key] = opener }
 
 -- ============================================================================
 -- Регистрация
@@ -62,6 +66,30 @@ function NSQC4.SetModuleMeta(key, meta)
     cur.order   = meta.order   or cur.order   or 1000
     cur.hidden  = (meta.hidden ~= nil) and meta.hidden or (cur.hidden or false)
     NSQC4.ModuleMeta[key] = cur
+end
+
+-- ============================================================================
+-- Панели настроек модулей
+--   NSQC4.RegisterModuleSettings(key, opener)
+--   opener() -- функция, которая открывает окно настроек модуля
+-- ============================================================================
+function NSQC4.RegisterModuleSettings(key, opener)
+    if not key or type(opener) ~= "function" then return end
+    NSQC4.ModuleSettings[key] = opener
+end
+
+function NSQC4.HasModuleSettings(key)
+    return NSQC4.ModuleSettings[key] ~= nil
+end
+
+function NSQC4.OpenModuleSettings(key)
+    local opener = NSQC4.ModuleSettings[key]
+    if opener then
+        local ok, err = pcall(opener)
+        if not ok then
+            print("|cffff0000[NSQC4]|r Ошибка открытия настроек '"..key.."': "..tostring(err))
+        end
+    end
 end
 
 -- ============================================================================

@@ -53,11 +53,14 @@ local COL_LEFT_X   = 10       -- отступ первой колонки
 local COL_RIGHT_X  = 250      -- отступ второй колонки
 local ROW_HEIGHT   = 30       -- высота строки (чекбокс + отступ)
 local TOP_OFFSET   = -10      -- стартовый отступ сверху
+local GEAR_SIZE    = 18       -- размер кнопки "*"
+local GEAR_GAP     = 4        -- зазор между "*" и чекбоксом
 
 -- ============================================================================
 -- Состояние
 -- ============================================================================
 local checkboxes = {}
+local gears = {}      -- [key] = кнопка "*"
 local built = false
 
 -- ============================================================================
@@ -75,14 +78,41 @@ local function BuildCheckboxes()
         local xPos = (col == 1) and COL_LEFT_X or COL_RIGHT_X
         local yPos = TOP_OFFSET - row * ROW_HEIGHT
 
+        -- Кнопка "*" — СЛЕВА от чекбокса, на всю высоту строки.
+        -- Создаётся всегда, видимость синхронизируется в UpdateCheckboxes.
+        local gear = CreateFrame("Button", "NSQC4ModuleGear_" .. mod.key, content, "UIPanelButtonTemplate")
+        gear:SetSize(GEAR_SIZE, GEAR_SIZE)
+        gear:SetPoint("TOPLEFT", xPos, yPos - (24 - GEAR_SIZE) / 2)
+        gear:SetText("*")
+        gear.moduleKey = mod.key
+        gear:Hide()
+
+        local gfs = gear:GetFontString()
+        if gfs then gfs:SetFont("Fonts\\FRIZQT__.TTF", 14, "OUTLINE") end
+
+        gear:SetScript("OnClick", function(self)
+            NSQC4.OpenModuleSettings(self.moduleKey)
+        end)
+
+        gear:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText("Настройки модуля", 1, 0.82, 0)
+            GameTooltip:AddLine(mod.label, 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        gear:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+        gears[mod.key] = gear
+
+        -- Чекбокс — СПРАВА от кнопки "*"
         local cb = CreateFrame("CheckButton", "NSQC4Module_" .. mod.key, content, "UICheckButtonTemplate")
-        cb:SetPoint("TOPLEFT", xPos, yPos)
+        cb:SetPoint("TOPLEFT", gear, "TOPRIGHT", GEAR_GAP, (24 - GEAR_SIZE) / 2)
         cb:SetSize(24, 24)
 
         local label = _G[cb:GetName() .. "Text"]
         if label then
             label:SetText(mod.label)
-            label:SetWidth(200)
+            label:SetWidth(190)
             label:SetJustifyH("LEFT")
         end
 
@@ -110,7 +140,6 @@ local function BuildCheckboxes()
 
         checkboxes[mod.key] = cb
 
-        -- переход на следующую позицию
         if col == 1 then
             col = 2
         else
@@ -119,22 +148,30 @@ local function BuildCheckboxes()
         end
     end
 
-    -- Если последний ряд был неполным — увеличим row для правильной высоты
     local totalRows = row + ((col == 2) and 1 or 0)
     content:SetHeight(math.abs(TOP_OFFSET) + totalRows * ROW_HEIGHT + 20)
 end
 
 -- ============================================================================
--- Обновление состояния галочек (для уже созданных чекбоксов)
+-- Обновление состояния галочек и видимости кнопок "*"
 -- ============================================================================
 local function UpdateCheckboxes()
     for key, cb in pairs(checkboxes) do
         cb:SetChecked(NSQC4.Settings.IsModuleEnabled(key))
+
+        local gear = gears[key]
+        if gear then
+            if NSQC4.HasModuleSettings and NSQC4.HasModuleSettings(key) then
+                gear:Show()
+            else
+                gear:Hide()
+            end
+        end
     end
 end
 
 -- ============================================================================
--- OnShow: первый раз строим, всегда синхронизируем галочки
+-- OnShow: первый раз строим, всегда синхронизируем галочки и кнопки
 -- ============================================================================
 panel:SetScript("OnShow", function()
     BuildCheckboxes()

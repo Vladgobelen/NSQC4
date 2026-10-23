@@ -7,6 +7,8 @@
 
 Core\Settings\Settings.lua
 Core\ModuleRegistry.lua
+Core\Settings\Modifiers.lua
+Core\Settings\Gestures.lua
 Core\ChatHandler.lua
 Core\ChatCatcher.lua
 Core\Compat.lua
@@ -65,3 +67,5 @@ Course\CodeShare.lua
 Course\Triggers.lua
 Course\Init.lua
 VERSION.lua
+Quests\Field\Init.lua
+Quests\Field\UI.lua
