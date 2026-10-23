@@ -1,6 +1,6 @@
 -- ============================================================================
 -- NSQC4 / Core / ChatCatcher
--- Слушает CHAT_MSG_GUILD и вызывает все зарегистрированные функции.
+-- Слушает CHAT_MSG_GUILD, CHAT_MSG_OFFICER и вызывает все зарегистрированные функции.
 -- Каждая функция сама решает, её это сообщение или нет.
 -- ============================================================================
 
@@ -22,6 +22,7 @@ end
 -- ============================================================================
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("CHAT_MSG_GUILD")
+frame:RegisterEvent("CHAT_MSG_OFFICER")
 frame:SetScript("OnEvent", function(self, event, text, sender)
     if not text or text == "" then return end
 
@@ -34,10 +35,13 @@ frame:SetScript("OnEvent", function(self, event, text, sender)
     -- Общая проверка на "-" — это команды, их обрабатывает ChatHandler
     if text:sub(1, 1) == "-" then return end
 
+    -- Определяем реальный канал (GUILD или OFFICER)
+    local channel = event:match("^CHAT_MSG_(.+)$")
+
     -- Вызываем всех подписчиков
     for _, entry in ipairs(handlers) do
         if not entry.module or NSQC4.Settings.IsModuleEnabled(entry.module) then
-            entry.func(words, sender, text, "GUILD", nil)
+            entry.func(words, sender, text, channel, nil)
         end
     end
 end)

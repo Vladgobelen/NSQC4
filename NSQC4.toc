@@ -35,6 +35,7 @@ Guild\r.lua
 RaidName.lua
 Interface\Mail.lua
 Interface\ChatButtons.lua
+Interface\AOReputation.lua
 Interface\AOClick.lua
 Interface\WorldMap.lua
 Interface\Calendar.lua

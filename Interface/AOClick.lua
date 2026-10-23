@@ -1,5 +1,6 @@
 -- ============================================================================
 -- NSQC4 / Interface / AOClick
+-- Кликабельные ники из канала АО + отображение уровень:ГП:репа для гильдейцев.
 -- ============================================================================
 
 NSQC4.RegisterModule("ui_ao", function()
@@ -25,15 +26,23 @@ NSQC4.RegisterModule("ui_ao", function()
     nsDbc4.settings.aoClick = nsDbc4.settings.aoClick or {
         hideLevel = false,
         hideGP    = false,
+        hideRep   = false,
     }
     local aoSettings = nsDbc4.settings.aoClick
+    if aoSettings.hideRep == nil then aoSettings.hideRep = false end
 
-    local aoNames   = {}
+    -- aoNames[name] = { faction = "Horde"/"Alliance" } — только для релея АО
+    local aoNames = {}
+
+    -- guildInfo[name] = { level, gp, classFile, onote }
     local guildInfo = {}
 
     local OFFICER_COLOR = "|cff00a000"
     local OFFICER_R, OFFICER_G, OFFICER_B = 0.00, 0.63, 0.00
 
+    -- ========================================================================
+    -- Гильд-ростер
+    -- ========================================================================
     local function mysplit(inputstr, sep)
         if sep == nil then sep = "%s" end
         local t = {}
@@ -49,7 +58,7 @@ NSQC4.RegisterModule("ui_ao", function()
         local n = GetNumGuildMembers(true)
         if not n or n == 0 then return end
         for i = 1, n do
-            local name, _, _, level, _, _, note, officerNote, _, _, classFile = GetGuildRosterInfo(i)
+            local name, _, _, level, _, _, _, officerNote, _, _, classFile = GetGuildRosterInfo(i)
             if name then
                 local cleanName = name:match("^([^%-]+)") or name
                 local words = mysplit(officerNote or "")
@@ -57,7 +66,6 @@ NSQC4.RegisterModule("ui_ao", function()
                     level     = level,
                     gp        = words[3],
                     classFile = classFile,
-                    note      = note,
                     onote     = officerNote,
                 }
             end
@@ -75,6 +83,9 @@ NSQC4.RegisterModule("ui_ao", function()
         return guildInfo[cleanName]
     end
 
+    -- ========================================================================
+    -- Каналы
+    -- ========================================================================
     local function GuildRGB()
         local t = ChatTypeInfo and ChatTypeInfo["GUILD"]
         if t then return t.r or 0.25, t.g or 0.75, t.b or 0.25 end
@@ -102,65 +113,120 @@ NSQC4.RegisterModule("ui_ao", function()
         local oldSetItemRef = SetItemRef
         SetItemRef = function(link, text, button, chatFrame)
             local raw = link or ""
-            if raw == "nsqcofficer" or raw:match("^nsqcofficer:") or raw:match("^nsqcofficer$") then
-                if button == "LeftButton" or button == nil then OpenOfficerChat() end
+            if raw == "nsqcofficer"
+               or raw:match("^nsqcofficer:")
+               or raw:match("^nsqcofficer$") then
+                if button == "LeftButton" or button == nil then
+                    OpenOfficerChat()
+                end
                 return
             end
             return oldSetItemRef(link, text, button, chatFrame)
         end
     end
 
-    local function ParseMeta(meta)
-        if not meta or meta == "" then return nil, nil end
-        local parts = {}
-        for p in meta:gmatch("[^:]+") do
-            parts[#parts + 1] = p
-        end
-        if #parts == 1 then
-            return nil, parts[1]
-        elseif #parts >= 2 then
-            return parts[1], parts[2]
-        end
-        return nil, nil
+    -- ========================================================================
+    -- Меню по нику (для АО)
+    -- ========================================================================
+    local menuFrame
+
+    local function EnsureMenu()
+        if menuFrame then return menuFrame end
+        local m = CreateFrame("Frame", "NSQC4AOClickMenu", UIParent, "UIDropDownMenuTemplate")
+        menuFrame = m
+        return m
     end
 
-    -- Сборка ника для релея (сохраняем старую логику)
-    local function BuildReplacement(code, nick, meta, faction)
+    local function GetEditBoxForFrame(frame)
+        if not frame then return ChatFrame1EditBox end
+        local name = frame:GetName()
+        if name then
+            local eb = _G[name .. "EditBox"]
+            if eb then return eb end
+        end
+        return ChatFrame1EditBox
+    end
+
+    local function InsertNickToChat(name, frame)
+        local eb = GetEditBoxForFrame(frame)
+        if not eb then return end
+        if not eb:IsShown() then eb:Show() end
+        eb:Insert(name .. ", ")
+        eb:SetFocus()
+    end
+
+    local function GetFaction(name)
+        local data = aoNames[name]
+        if type(data) == "table" then return data.faction end
+        return nil
+    end
+
+    local function MyFaction()
+        return UnitFactionGroup("player")
+    end
+
+    local function Menu_Info(name)
+        SendAddonMessage(PREFIX_Q, name, "GUILD")
+    end
+
+    local function Menu_Invite(name)
+        local theirFaction = GetFaction(name)
+        local mine = MyFaction()
+        if theirFaction and mine and theirFaction ~= mine then
+            print("|cffff0000[AOClick]|r " .. name .. " — другая фракция, приглашение невозможно.")
+            return
+        end
+        InviteUnit(name)
+    end
+
+    local function ShowNickMenu(name)
+        local m = EnsureMenu()
+        m.name = name
+
+        UIDropDownMenu_Initialize(m, function(self, level)
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = "Инфо"
+            info.notCheckable = true
+            info.func = function() Menu_Info(self.name) end
+            UIDropDownMenu_AddButton(info)
+
+            local theirFaction = GetFaction(self.name)
+            local mine = MyFaction()
+            local sameFaction = (not theirFaction) or (not mine) or (theirFaction == mine)
+
+            info = UIDropDownMenu_CreateInfo()
+            if sameFaction then
+                info.text = "Принять в пати"
+                info.notCheckable = true
+                info.func = function() Menu_Invite(self.name) end
+            else
+                info.text = "Принять в пати (другая фракция)"
+                info.notCheckable = true
+                info.disabled = true
+            end
+            UIDropDownMenu_AddButton(info)
+        end, "MENU")
+
+        ToggleDropDownMenu(1, nil, m, "cursor", 0, 0)
+    end
+
+    -- ========================================================================
+    -- Релей АО
+    -- ========================================================================
+    local function BuildRelayReplacement(code, nick, meta, faction)
         local cleanName = nick:gsub(":+$", "")
         local color = CLASS_COLORS[code] or DEFAULT_COLOR
+        aoNames[cleanName] = { faction = faction }
 
-        if faction then
-            aoNames[cleanName] = { faction = faction }
+        local nickDisplay = cleanName
+        if meta and meta ~= "" then
+            nickDisplay = cleanName .. meta
         end
 
-        local level, rep = ParseMeta(meta)
+        local nickLink = "|Hplayer:" .. cleanName .. "|h" ..
+            color .. "[" .. nickDisplay .. "]" .. NICK_COLOR_RESET .. "|h"
 
-        if not level and not rep then
-            local gd = GetGuildData(cleanName)
-            if gd then
-                level = gd.level
-                rep   = gd.gp
-            end
-        end
-
-        if level == 80 or level == "80" then level = nil end
-        if aoSettings.hideLevel then level = nil end
-        if aoSettings.hideGP    then rep   = nil end
-
-        if level ~= nil then level = tostring(level); if level == "" then level = nil end end
-        if rep   ~= nil then rep   = tostring(rep);   if rep   == "" then rep   = nil end end
-
-        local display = cleanName
-        if level and rep then
-            display = cleanName .. ":" .. level .. ":" .. rep
-        elseif rep then
-            display = cleanName .. ":" .. rep
-        elseif level then
-            display = cleanName .. ":" .. level
-        end
-
-        return "|Hplayer:" .. cleanName .. "|h" ..
-               color .. "[" .. display .. "]" .. NICK_COLOR_RESET .. "|h" .. ": "
+        return nickLink .. ": "
     end
 
     local function ReplaceAll(msg)
@@ -168,65 +234,65 @@ NSQC4.RegisterModule("ui_ao", function()
             "%[\208\158(%d):(%-?%d+):(%-?%d+)%]%s+(%S+):%s*",
             function(code, level, rep, nick)
                 if tonumber(level) == 80 then
-                    return BuildReplacement(code, nick, ":" .. rep, "Horde")
+                    return BuildRelayReplacement(code, nick, ":" .. rep, "Horde")
                 else
-                    return BuildReplacement(code, nick, ":" .. level .. ":" .. rep, "Horde")
+                    return BuildRelayReplacement(code, nick, ":" .. level .. ":" .. rep, "Horde")
                 end
             end)
         msg = msg:gsub(
             "%[\208\158(%d):(%-?%d+)%]%s+(%S+):%s*",
-            function(code, rep, nick) return BuildReplacement(code, nick, ":" .. rep, "Horde") end)
+            function(code, rep, nick) return BuildRelayReplacement(code, nick, ":" .. rep, "Horde") end)
         msg = msg:gsub(
             "%[\208\158(%d)%]%s+(%S+):%s*",
-            function(code, nick) return BuildReplacement(code, nick, nil, "Horde") end)
+            function(code, nick) return BuildRelayReplacement(code, nick, nil, "Horde") end)
 
         msg = msg:gsub(
             "%[\208\144(%d):(%-?%d+):(%-?%d+)%]%s+(%S+):%s*",
             function(code, level, rep, nick)
                 if tonumber(level) == 80 then
-                    return BuildReplacement(code, nick, ":" .. rep, "Alliance")
+                    return BuildRelayReplacement(code, nick, ":" .. rep, "Alliance")
                 else
-                    return BuildReplacement(code, nick, ":" .. level .. ":" .. rep, "Alliance")
+                    return BuildRelayReplacement(code, nick, ":" .. level .. ":" .. rep, "Alliance")
                 end
             end)
         msg = msg:gsub(
             "%[\208\144(%d):(%-?%d+)%]%s+(%S+):%s*",
-            function(code, rep, nick) return BuildReplacement(code, nick, ":" .. rep, "Alliance") end)
+            function(code, rep, nick) return BuildRelayReplacement(code, nick, ":" .. rep, "Alliance") end)
         msg = msg:gsub(
             "%[\208\144(%d)%]%s+(%S+):%s*",
-            function(code, nick) return BuildReplacement(code, nick, nil, "Alliance") end)
+            function(code, nick) return BuildRelayReplacement(code, nick, nil, "Alliance") end)
 
         msg = msg:gsub(
             "%[O(%d):(%-?%d+):(%-?%d+)%]%s+(%S+):%s*",
             function(code, level, rep, nick)
                 if tonumber(level) == 80 then
-                    return BuildReplacement(code, nick, ":" .. rep, "Horde")
+                    return BuildRelayReplacement(code, nick, ":" .. rep, "Horde")
                 else
-                    return BuildReplacement(code, nick, ":" .. level .. ":" .. rep, "Horde")
+                    return BuildRelayReplacement(code, nick, ":" .. level .. ":" .. rep, "Horde")
                 end
             end)
         msg = msg:gsub(
             "%[O(%d):(%-?%d+)%]%s+(%S+):%s*",
-            function(code, rep, nick) return BuildReplacement(code, nick, ":" .. rep, "Horde") end)
+            function(code, rep, nick) return BuildRelayReplacement(code, nick, ":" .. rep, "Horde") end)
         msg = msg:gsub(
             "%[O(%d)%]%s+(%S+):%s*",
-            function(code, nick) return BuildReplacement(code, nick, nil, "Horde") end)
+            function(code, nick) return BuildRelayReplacement(code, nick, nil, "Horde") end)
 
         msg = msg:gsub(
             "%[A(%d):(%-?%d+):(%-?%d+)%]%s+(%S+):%s*",
             function(code, level, rep, nick)
                 if tonumber(level) == 80 then
-                    return BuildReplacement(code, nick, ":" .. rep, "Alliance")
+                    return BuildRelayReplacement(code, nick, ":" .. rep, "Alliance")
                 else
-                    return BuildReplacement(code, nick, ":" .. level .. ":" .. rep, "Alliance")
+                    return BuildRelayReplacement(code, nick, ":" .. level .. ":" .. rep, "Alliance")
                 end
             end)
         msg = msg:gsub(
             "%[A(%d):(%-?%d+)%]%s+(%S+):%s*",
-            function(code, rep, nick) return BuildReplacement(code, nick, ":" .. rep, "Alliance") end)
+            function(code, rep, nick) return BuildRelayReplacement(code, nick, ":" .. rep, "Alliance") end)
         msg = msg:gsub(
             "%[A(%d)%]%s+(%S+):%s*",
-            function(code, nick) return BuildReplacement(code, nick, nil, "Alliance") end)
+            function(code, nick) return BuildRelayReplacement(code, nick, nil, "Alliance") end)
 
         return msg
     end
@@ -248,36 +314,46 @@ NSQC4.RegisterModule("ui_ao", function()
         return ""
     end
 
-    local function ReplaceChannelPrefix(msg)
-        msg = msg:gsub("|Hchannel:GUILD|h%[\208\147\208\184\208\187\209\140\208\180\208\184\209\143%]|h%s*",   GuildTag())
-        msg = msg:gsub("|Hchannel:GUILD|h%[\195\232\235\252\228\232\255%]|h%s*",                                GuildTag())
-        msg = msg:gsub("|Hchannel:OFFICER|h%[\208\158\209\132\208\184\209\134\208\181\209\128%]|h%s*",         OfficerTag())
-        msg = msg:gsub("|Hchannel:OFFICER|h%[\206\244\232\246\229\240%]|h%s*",                                  OfficerTag())
-        return msg
-    end
+    -- ========================================================================
+    -- Гильдейцы: |Hplayer:Имя|h[Имя]|h → |Hplayer:Имя|h[Имя:lvl:gp:rep]|h
+    -- rep берётся из кэша nsDbc4.reputation (AOReputation.lua).
+    -- ========================================================================
+    local function BuildGuildDisplay(cleanName, displayName)
+        local gd = GetGuildData(cleanName)
 
-    -- ========================================================================
-    -- Подмена строки гильдейца в AddMessage (как в Chatter)
-    -- ========================================================================
-    local function ChangeGuildName(msgHeader, name, extra, msgCnt, displayName, msgBody)
-        local gd = guildInfo[name]
-        local suffix = ""
-        
-        if gd then
-            local level = gd.level
-            local gp = gd.gp
-            
-            if level == 80 or level == "80" then level = nil end
-            if aoSettings.hideLevel then level = nil end
-            if aoSettings.hideGP then gp = nil end
-            
-            if level and gp then
-                suffix = ":" .. level .. ":" .. gp
-            elseif gp then
-                suffix = ":" .. gp
-            elseif level then
-                suffix = ":" .. level
-            end
+        local level = gd and gd.level
+        local gp    = gd and gd.gp
+        local rep   = nil
+
+        -- Репутация — из кэша AOReputation
+        if nsDbc4 and nsDbc4.reputation then
+            rep = nsDbc4.reputation[cleanName]
+        end
+
+        -- Скрыть 80-й уровень
+        if level == 80 or level == "80" then level = nil end
+
+        -- Скрыть нулевые значения (как будто галочка снята)
+        if level == 0 or level == "0" then level = nil end
+        if gp    == 0 or gp    == "0" then gp    = nil end
+        if rep   == 0 or rep   == "0" then rep   = nil end
+
+        -- Пользовательские галочки
+        if aoSettings.hideLevel then level = nil end
+        if aoSettings.hideGP    then gp    = nil end
+        if aoSettings.hideRep   then rep   = nil end
+
+        if level ~= nil then level = tostring(level); if level == "" then level = nil end end
+        if gp    ~= nil then gp    = tostring(gp);    if gp    == "" then gp    = nil end end
+        if rep   ~= nil then rep   = tostring(rep);   if rep   == "" then rep   = nil end end
+
+        local display = displayName
+        local parts = {}
+        if level then parts[#parts + 1] = level end
+        if gp    then parts[#parts + 1] = gp    end
+        if rep   then parts[#parts + 1] = rep   end
+        if #parts > 0 then
+            display = displayName .. ":" .. table.concat(parts, ":")
         end
 
         local color = "|cffffffff"
@@ -285,16 +361,11 @@ NSQC4.RegisterModule("ui_ao", function()
             color = CLASS_COLORS[gd.classFile]
         end
 
-        local newDisplay = displayName .. suffix
-        
-        -- ВСЕГДА возвращаем полную строку, даже если suffix пустой!
-        return ("|Hplayer:%s%s%s|h%s[%s]|r|h%s"):format(
-            name, extra, msgCnt, color, newDisplay, msgBody
-        )
+        return color, display
     end
 
     -- ========================================================================
-    -- Перехват сообщений
+    -- Перехват AddMessage
     -- ========================================================================
     local InitFrame = CreateFrame("Frame")
     InitFrame:RegisterEvent("PLAYER_LOGIN")
@@ -310,10 +381,18 @@ NSQC4.RegisterModule("ui_ao", function()
             local oldAddMessage = chatFrame.AddMessage
             chatFrame.AddMessage = function(self2, msg, ...)
                 if msg and type(msg) == "string" then
-                    msg = ReplaceChannelPrefix(msg)
-                    
-                    -- Подменяем ник гильдейца, если он есть в кэше
-                    msg = msg:gsub("(|Hplayer:([^|:]+)([:%d+]*)([^|]*)|h%[([^%]]+)%]|h)(.-)$", ChangeGuildName)
+                    -- Гильдейцы: |Hplayer:Имя|h[Имя]|h → с суффиксом
+                    if next(guildInfo) then
+                        msg = msg:gsub(
+                            "|Hplayer:([^|:]+)([:%d+]*)([^|]*)|h%[([^%]]+)%]|h",
+                            function(name, extra, msgCnt, displayName)
+                                local color, display = BuildGuildDisplay(name, displayName)
+                                -- Не тащим extra/msgCnt из оригинала: они могут
+                                -- содержать мусорные :0:0. Собираем заново.
+                                return "|Hplayer:" .. name .. "|h["
+                                            .. color .. display .. "]|r|h"
+                            end)
+                    end
                 end
                 return oldAddMessage(self2, msg, ...)
             end
@@ -326,13 +405,13 @@ NSQC4.RegisterModule("ui_ao", function()
             InstallAddMessageHook(DEFAULT_CHAT_FRAME)
         end
 
-        -- Перехват ТОЛЬКО для релея (чтобы отрендерить кастомную строку релея)
+        -- Релей АО: только для сообщений, начинающихся с [О/[А/[O/[A
         if type(ChatFrame_MessageEventHandler) == "function" then
             local oldMessageHandler = ChatFrame_MessageEventHandler
             ChatFrame_MessageEventHandler = function(self2, event, ...)
                 if event == "CHAT_MSG_GUILD" or event == "CHAT_MSG_OFFICER" then
                     local text = select(1, ...)
-                    if IsRelayText(text) then
+                    if text and IsRelayText(text) then
                         local letter = ExtractLetter(text)
                         local newText = ReplaceAll(text)
                         local tag, r, g, b
@@ -353,12 +432,35 @@ NSQC4.RegisterModule("ui_ao", function()
     end)
 
     -- ========================================================================
+    -- Клик по нику
+    -- ========================================================================
+    local oldOnHyperlinkShow = ChatFrame_OnHyperlinkShow
+    ChatFrame_OnHyperlinkShow = function(self, link, text, button)
+        local linkType, linkData = link:match("^(%a+):(.+)$")
+
+        if linkType == "player" and linkData then
+            local name = linkData:match("^([^:]+)")
+            if name and aoNames[name] then
+                if button == "LeftButton" then
+                    InsertNickToChat(name, self)
+                    return
+                elseif button == "RightButton" then
+                    ShowNickMenu(name)
+                    return
+                end
+            end
+        end
+
+        return oldOnHyperlinkShow(self, link, text, button)
+    end
+
+    -- ========================================================================
     -- Ростер
     -- ========================================================================
     local rosterFrame = CreateFrame("Frame")
     rosterFrame:RegisterEvent("GUILD_ROSTER_UPDATE")
     rosterFrame:RegisterEvent("PLAYER_GUILD_UPDATE")
-    rosterFrame:SetScript("OnEvent", function(self, event)
+    rosterFrame:SetScript("OnEvent", function(_, event)
         if event == "GUILD_ROSTER_UPDATE" then
             RebuildGuildInfo()
         elseif event == "PLAYER_GUILD_UPDATE" then
@@ -376,60 +478,48 @@ NSQC4.RegisterModule("ui_ao", function()
     end
 
     -- ========================================================================
-    -- Настройки модуля
+    -- Настройки
     -- ========================================================================
     local settingsFrame
 
     local function OpenAOClickSettings()
         if not settingsFrame then
             local f = CreateFrame("Frame", "NSQC4AOClickSettings", UIParent)
-            f:SetSize(380, 220)
+            f:SetSize(400, 260)
             f:SetPoint("CENTER")
-            f:SetFrameStrata("DIALOG")
+            f:SetFrameStrata("TOOLTIP")
+            f:SetToplevel(true)
+            f:SetFrameLevel(100)
             f:SetBackdrop({
-                bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
+                bgFile   = "Interface\\Buttons\\WHITE8x8",
                 edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-                tile = true, tileSize = 16, edgeSize = 12,
+                tile = true, tileSize = 8, edgeSize = 12,
                 insets = { left = 3, right = 3, top = 3, bottom = 3 },
             })
-            f:SetBackdropColor(0, 0, 0, 0.9)
+            f:SetBackdropColor(0, 0, 0, 1)
             f:SetBackdropBorderColor(0.5, 0.5, 0.5, 1)
 
             local t = f:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
             t:SetPoint("TOPLEFT", 12, -12)
             t:SetText("Настройки: Ссылки АО")
 
-            local cbLevel = CreateFrame("CheckButton", "NSQC4AOClickHideLevel", f, "UICheckButtonTemplate")
-            cbLevel:SetPoint("TOPLEFT", t, "BOTTOMLEFT", 0, -16)
-            cbLevel:SetSize(24, 24)
-            local l1 = _G[cbLevel:GetName() .. "Text"]
-            if l1 then
-                l1:SetText("Отключить отображение лвла")
-                l1:SetWidth(320)
-                l1:SetJustifyH("LEFT")
+            local function mkCB(y, key, text)
+                local cb = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
+                cb:SetPoint("TOPLEFT", 12, y)
+                cb:SetSize(24, 24)
+                local fs = cb:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                fs:SetPoint("LEFT", cb, "RIGHT", 4, 0)
+                fs:SetText(text)
+                cb:SetChecked(aoSettings[key] and true or false)
+                cb:SetScript("OnClick", function(self)
+                    aoSettings[key] = self:GetChecked() and true or false
+                end)
+                return cb
             end
-            cbLevel:SetChecked(aoSettings.hideLevel and true or false)
-            cbLevel:SetScript("OnClick", function(self)
-                aoSettings.hideLevel = self:GetChecked() and true or false
-                print("|cff00ff00[NSQC4]|r AOClick: отображение лвла " ..
-                    (aoSettings.hideLevel and "выключено" or "включено"))
-            end)
 
-            local cbGP = CreateFrame("CheckButton", "NSQC4AOClickHideGP", f, "UICheckButtonTemplate")
-            cbGP:SetPoint("TOPLEFT", cbLevel, "BOTTOMLEFT", 0, -6)
-            cbGP:SetSize(24, 24)
-            local l2 = _G[cbGP:GetName() .. "Text"]
-            if l2 then
-                l2:SetText("Отключить отображение ГП")
-                l2:SetWidth(320)
-                l2:SetJustifyH("LEFT")
-            end
-            cbGP:SetChecked(aoSettings.hideGP and true or false)
-            cbGP:SetScript("OnClick", function(self)
-                aoSettings.hideGP = self:GetChecked() and true or false
-                print("|cff00ff00[NSQC4]|r AOClick: отображение ГП " ..
-                    (aoSettings.hideGP and "выключено" or "включено"))
-            end)
+            mkCB(-42,  "hideLevel", "Скрыть уровень")
+            mkCB(-70,  "hideGP",    "Скрыть ГП")
+            mkCB(-98,  "hideRep",   "Скрыть репу")
 
             local close = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
             close:SetSize(100, 24)
@@ -445,21 +535,18 @@ NSQC4.RegisterModule("ui_ao", function()
 
             settingsFrame = f
         end
-
-        local cbLevel = _G["NSQC4AOClickHideLevel"]
-        local cbGP    = _G["NSQC4AOClickHideGP"]
-        if cbLevel then cbLevel:SetChecked(aoSettings.hideLevel and true or false) end
-        if cbGP    then cbGP:SetChecked(aoSettings.hideGP and true or false) end
-
+        settingsFrame:SetFrameStrata("TOOLTIP")
         settingsFrame:Show()
         settingsFrame:Raise()
     end
 
-    NSQC4.RegisterModuleSettings("ui_ao", OpenAOClickSettings)
+    if NSQC4.RegisterModuleSettings then
+        NSQC4.RegisterModuleSettings("ui_ao", OpenAOClickSettings)
+    end
 
     NSQC4.SetModuleMeta("ui_ao", {
         label   = "Ссылки АО",
-        tooltip = "Кликабельные ники из канала АО и своей гильдии. ЛКМ — вставить ник, ПКМ — меню.",
+        tooltip = "Кликабельные ники из канала АО; у гильдейцев отображается уровень:ГП:репа.",
         order   = 190,
     })
 

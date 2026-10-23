@@ -19,6 +19,8 @@ NSQC4.Settings = NSQC4.Settings or {}
 -- ============================================================================
 local panel = CreateFrame("Frame", "NSQC4OptionsPanel", InterfaceOptionsFrame)
 panel.name = "NSQC4"
+panel:SetFrameStrata("DIALOG")
+panel:SetFrameLevel(50)
 
 -- ============================================================================
 -- Заголовок и предупреждение (вне скролла, всегда видны)
@@ -49,23 +51,22 @@ scrollFrame:SetScrollChild(content)
 -- ============================================================================
 -- Параметры раскладки
 -- ============================================================================
-local COL_LEFT_X   = 10       -- отступ первой колонки
-local COL_RIGHT_X  = 250      -- отступ второй колонки
-local ROW_HEIGHT   = 30       -- высота строки (чекбокс + отступ)
-local TOP_OFFSET   = -10      -- стартовый отступ сверху
-local GEAR_SIZE    = 18       -- размер кнопки "*"
-local GEAR_GAP     = 4        -- зазор между "*" и чекбоксом
+local COL_LEFT_X   = 10
+local COL_RIGHT_X  = 250
+local ROW_HEIGHT   = 30
+local TOP_OFFSET   = -10
+local GEAR_SIZE    = 18
+local GEAR_GAP     = 4
 
 -- ============================================================================
 -- Состояние
 -- ============================================================================
 local checkboxes = {}
-local gears = {}      -- [key] = кнопка "*"
+local gears = {}
 local built = false
 
 -- ============================================================================
 -- Ленивая сборка чекбоксов
--- Вызывается один раз при первом показе панели.
 -- ============================================================================
 local function BuildCheckboxes()
     if built then return end
@@ -78,8 +79,6 @@ local function BuildCheckboxes()
         local xPos = (col == 1) and COL_LEFT_X or COL_RIGHT_X
         local yPos = TOP_OFFSET - row * ROW_HEIGHT
 
-        -- Кнопка "*" — СЛЕВА от чекбокса, на всю высоту строки.
-        -- Создаётся всегда, видимость синхронизируется в UpdateCheckboxes.
         local gear = CreateFrame("Button", "NSQC4ModuleGear_" .. mod.key, content, "UIPanelButtonTemplate")
         gear:SetSize(GEAR_SIZE, GEAR_SIZE)
         gear:SetPoint("TOPLEFT", xPos, yPos - (24 - GEAR_SIZE) / 2)
@@ -104,7 +103,6 @@ local function BuildCheckboxes()
 
         gears[mod.key] = gear
 
-        -- Чекбокс — СПРАВА от кнопки "*"
         local cb = CreateFrame("CheckButton", "NSQC4Module_" .. mod.key, content, "UICheckButtonTemplate")
         cb:SetPoint("TOPLEFT", gear, "TOPRIGHT", GEAR_GAP, (24 - GEAR_SIZE) / 2)
         cb:SetSize(24, 24)
@@ -118,7 +116,6 @@ local function BuildCheckboxes()
 
         cb.moduleKey = mod.key
 
-        -- Тултип на чекбокс
         if mod.tooltip and mod.tooltip ~= "" then
             cb:SetScript("OnEnter", function(self)
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -188,5 +185,5 @@ InterfaceOptions_AddCategory(panel)
 -- ============================================================================
 function NSQC4.Settings.OpenPanel()
     InterfaceOptionsFrame_OpenToCategory("NSQC4")
-    InterfaceOptionsFrame_OpenToCategory("NSQC4")   -- второй раз — фикс Blizzard UI
+    InterfaceOptionsFrame_OpenToCategory("NSQC4")
 end
