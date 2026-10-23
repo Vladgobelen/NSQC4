@@ -28,7 +28,7 @@ NSQC4.RegisterModule("ui_ao", function()
     frame:RegisterEvent("CHAT_MSG_ADDON")
     frame:SetScript("OnEvent", function(self, event, prefix, message, channel, sender)
         if prefix ~= P_RESP then return end
-        
+
         local nick, repStr = message:match("^([^|]+)|(%-?%d+)$")
         if nick and repStr then
             local cleanName = nick:match("^([^%-]+)") or nick
@@ -41,6 +41,7 @@ NSQC4.RegisterModule("ui_ao", function()
     local function HandleReputationUpdate(words, sender, text, channel, prefix)
         if not text or text == "" then return end
 
+        -- "ник: репутация N >> M"
         local nick, newRep = text:match("([^%s:]+): репутация %-?%d+%s*>>%s*(%-?%d+)")
         if nick and newRep then
             local cleanName = nick:match("^([^%-]+)") or nick
@@ -49,7 +50,8 @@ NSQC4.RegisterModule("ui_ao", function()
             return
         end
 
-        local nick2, newRep2 = text:match("([^%s:]+): отношение с гильдией %-?(%d+)")
+        -- "ник: отношение с гильдией -320/-1000"  (минус сохраняем)
+        local nick2, newRep2 = text:match("([^%s:]+): отношение с гильдией (%-?%d+)")
         if nick2 and newRep2 then
             local cleanName = nick2:match("^([^%-]+)") or nick2
             nsDbc4.reputation[cleanName] = tonumber(newRep2) or 0
@@ -64,20 +66,6 @@ NSQC4.RegisterModule("ui_ao", function()
     -- ========================================================================
     -- Хук на AddMessage: ловим ники в любом сообщении и запрашиваем репутацию
     -- ========================================================================
-    local oldAddMessage = ChatFrame1.AddMessage
-    local function HookAddMessage(self, msg, ...)
-        if msg and type(msg) == "string" then
-            -- Ищем ники в ссылках |Hplayer:Ник|h
-            for nick in msg:gmatch("|Hplayer:([^|]+)|h") do
-                local cleanName = nick:match("^([^%-]+)") or nick
-                if NSQC4.RequestReputation and nsDbc4.reputation[cleanName] == nil then
-                    NSQC4.RequestReputation(cleanName)
-                end
-            end
-        end
-        return oldAddMessage(self, msg, ...)
-    end
-
     for i = 1, NUM_CHAT_WINDOWS do
         local cf = _G["ChatFrame"..i]
         if cf then

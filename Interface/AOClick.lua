@@ -1,6 +1,6 @@
 -- ============================================================================
 -- NSQC4 / Interface / AOClick
--- Кликабельные ники из канала АО + отображение уровень:ГП:репа для гильдейцев.
+-- Кликабельные ники из канала АО + отображение уровень:ГП:репа.
 -- ============================================================================
 
 NSQC4.RegisterModule("ui_ao", function()
@@ -31,10 +31,7 @@ NSQC4.RegisterModule("ui_ao", function()
     local aoSettings = nsDbc4.settings.aoClick
     if aoSettings.hideRep == nil then aoSettings.hideRep = false end
 
-    -- aoNames[name] = { faction = "Horde"/"Alliance" } — только для релея АО
     local aoNames = {}
-
-    -- guildInfo[name] = { level, gp, classFile, onote }
     local guildInfo = {}
 
     local OFFICER_COLOR = "|cff00a000"
@@ -211,7 +208,7 @@ NSQC4.RegisterModule("ui_ao", function()
     end
 
     -- ========================================================================
-    -- Релей АО
+    -- Релей АО (входящий)
     -- ========================================================================
     local function BuildRelayReplacement(code, nick, meta, faction)
         local cleanName = nick:gsub(":+$", "")
@@ -315,56 +312,6 @@ NSQC4.RegisterModule("ui_ao", function()
     end
 
     -- ========================================================================
-    -- Гильдейцы: |Hplayer:Имя|h[Имя]|h → |Hplayer:Имя|h[Имя:lvl:gp:rep]|h
-    -- rep берётся из кэша nsDbc4.reputation (AOReputation.lua).
-    -- ========================================================================
-    local function BuildGuildDisplay(cleanName, displayName)
-        local gd = GetGuildData(cleanName)
-
-        local level = gd and gd.level
-        local gp    = gd and gd.gp
-        local rep   = nil
-
-        -- Репутация — из кэша AOReputation
-        if nsDbc4 and nsDbc4.reputation then
-            rep = nsDbc4.reputation[cleanName]
-        end
-
-        -- Скрыть 80-й уровень
-        if level == 80 or level == "80" then level = nil end
-
-        -- Скрыть нулевые значения (как будто галочка снята)
-        if level == 0 or level == "0" then level = nil end
-        if gp    == 0 or gp    == "0" then gp    = nil end
-        if rep   == 0 or rep   == "0" then rep   = nil end
-
-        -- Пользовательские галочки
-        if aoSettings.hideLevel then level = nil end
-        if aoSettings.hideGP    then gp    = nil end
-        if aoSettings.hideRep   then rep   = nil end
-
-        if level ~= nil then level = tostring(level); if level == "" then level = nil end end
-        if gp    ~= nil then gp    = tostring(gp);    if gp    == "" then gp    = nil end end
-        if rep   ~= nil then rep   = tostring(rep);   if rep   == "" then rep   = nil end end
-
-        local display = displayName
-        local parts = {}
-        if level then parts[#parts + 1] = level end
-        if gp    then parts[#parts + 1] = gp    end
-        if rep   then parts[#parts + 1] = rep   end
-        if #parts > 0 then
-            display = displayName .. ":" .. table.concat(parts, ":")
-        end
-
-        local color = "|cffffffff"
-        if gd and gd.classFile and CLASS_COLORS[gd.classFile] then
-            color = CLASS_COLORS[gd.classFile]
-        end
-
-        return color, display
-    end
-
-    -- ========================================================================
     -- Перехват AddMessage
     -- ========================================================================
     local InitFrame = CreateFrame("Frame")
@@ -381,18 +328,63 @@ NSQC4.RegisterModule("ui_ao", function()
             local oldAddMessage = chatFrame.AddMessage
             chatFrame.AddMessage = function(self2, msg, ...)
                 if msg and type(msg) == "string" then
-                    -- Гильдейцы: |Hplayer:Имя|h[Имя]|h → с суффиксом
-                    if next(guildInfo) then
-                        msg = msg:gsub(
-                            "|Hplayer:([^|:]+)([:%d+]*)([^|]*)|h%[([^%]]+)%]|h",
-                            function(name, extra, msgCnt, displayName)
-                                local color, display = BuildGuildDisplay(name, displayName)
-                                -- Не тащим extra/msgCnt из оригинала: они могут
-                                -- содержать мусорные :0:0. Собираем заново.
-                                return "|Hplayer:" .. name .. "|h["
-                                            .. color .. display .. "]|r|h"
-                            end)
-                    end
+                    -- (A) [Имя:lvl:gp] без |Hplayer: → добавляем репу в конец
+                    --     (для не-гильдейских, у кого нет guildInfo,
+                    --      но есть репа в кэше AOReputation)
+                    msg = msg:gsub(
+                        "%[([^%[%]:]+):(%d%d?):(%-?%d+)%]",
+                        function(name, level, gp)
+                            local lv = tonumber(level)
+                            if not lv or lv < 1 or lv > 80 then
+                                return "[" .. name .. ":" .. level .. ":" .. gp .. "]"
+                            end
+                            local cleanName = name:match("^([^%-]+)") or name
+                            local repNum = nsDbc4 and nsDbc4.reputation and nsDbc4.reputation[cleanName]
+                            if repNum and tonumber(repNum) ~= 0 and not aoSettings.hideRep then
+                                return "[" .. name .. ":" .. level .. ":" .. gp
+                                    .. ":" .. tostring(repNum) .. "]"
+                            end
+                            return "[" .. name .. ":" .. level .. ":" .. gp .. "]"
+                        end)
+
+                    -- (B) |Hplayer:Имя|h[Имя]|h — стандартный ник (гильдейские)
+                    msg = msg:gsub(
+                        "|Hplayer:([^|:]+)([:%d+]*)([^|]*)|h%[([^%]]+)%]|h",
+                        function(name, extra, msgCnt, displayName)
+                            local gd = GetGuildData(name)
+                            local repNum = nsDbc4 and nsDbc4.reputation and nsDbc4.reputation[name]
+
+                            local color = "|cffffffff"
+                            if gd and gd.classFile and CLASS_COLORS[gd.classFile] then
+                                color = CLASS_COLORS[gd.classFile]
+                            end
+
+                            local level = gd and gd.level
+                            local gp    = gd and gd.gp
+
+                            if level == 80 or level == "80" then level = nil end
+                            if level == 0 or level == "0" then level = nil end
+                            if gp == 0 or gp == "0" then gp = nil end
+
+                            if aoSettings.hideLevel then level = nil end
+                            if aoSettings.hideGP    then gp    = nil end
+                            if aoSettings.hideRep   then repNum = nil end
+
+                            local parts = {}
+                            if level then parts[#parts + 1] = tostring(level) end
+                            if gp    then parts[#parts + 1] = tostring(gp)    end
+                            if repNum and tonumber(repNum) ~= 0 then
+                                parts[#parts + 1] = tostring(repNum)
+                            end
+
+                            local display = displayName
+                            if #parts > 0 then
+                                display = displayName .. ":" .. table.concat(parts, ":")
+                            end
+
+                            return "|Hplayer:" .. name .. "|h["
+                                .. color .. display .. "]|r|h"
+                        end)
                 end
                 return oldAddMessage(self2, msg, ...)
             end
@@ -405,7 +397,6 @@ NSQC4.RegisterModule("ui_ao", function()
             InstallAddMessageHook(DEFAULT_CHAT_FRAME)
         end
 
-        -- Релей АО: только для сообщений, начинающихся с [О/[А/[O/[A
         if type(ChatFrame_MessageEventHandler) == "function" then
             local oldMessageHandler = ChatFrame_MessageEventHandler
             ChatFrame_MessageEventHandler = function(self2, event, ...)
