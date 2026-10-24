@@ -16736,282 +16736,719 @@ end
 }
 
 ns_llua['lua'][143] = {
-type = "info",
-title = "Направление и зоны",
-helpModules = {137, 10, 14},
-content = [=[
+    type = "info",
+    title = "Направление и зоны",
+    helpModules = {137, 113},
+    content = [=[
 <h>Направление и зоны</h>
-<t>Кроме координат, можно получить направление взгляда игрока и название зоны.</t>
-<h>GetPlayerFacing</h>
+<t>WoW API позволяет узнать, куда смотрит игрок, где он находится и как быстро движется.</t>
+<h>Направление игрока</h>
+<t>Возвращает направление в радианах от 0 до 2π (≈6.28). WoW использует навигационную систему:</t>
 <code>
 /run print(GetPlayerFacing())
 </code>
-<t>Функция возвращает направление в радианах.</t>
-<t>Чтобы перевести радианы в градусы, используй формулу:</t>
+<c>0 или 2π</c> — север (North).
+<c>π/2 ≈ 1.57</c> — запад (West).
+<c>π ≈ 3.14</c> — юг (South).
+<c>3π/2 ≈ 4.71</c> — восток (East).
+<t>Отсчёт идёт по часовой стрелке от севера.</t>
+<h>Конвертация в градусы</h>
 <code>
-градусы = радианы * 180 / math.pi
+/run local f = GetPlayerFacing(); print(math.deg(f), "градусов")
 </code>
-<h>Пример перевода</h>
+<t>0° — север, 90° — запад, 180° — юг, 270° — восток.</t>
+<h>Зоны</h>
 <code>
-/run local facing = GetPlayerFacing() or 0; local degrees = math.floor(facing * 180 / math.pi + 0.5); print(degrees)
+/run print(GetZoneText())           -- основная зона
+/run print(GetSubZoneText())        -- подзона (может быть пустой)
+/run print(GetRealZoneText())       -- реальная зона (в инстансах — название)
+/run print(GetMinimapZoneText())    -- зона на миникарте
 </code>
-<t>Результат будет примерно от 0 до 360.</t>
-<h>Названия зон</h>
+<w>Важно:</w> <k>GetSubZoneText()</k> возвращает пустую строку в открытых зонах без подзон.
+<h>ID карты</h>
 <code>
-/run print(GetZoneText())
-/run print(GetRealZoneText())
-/run print(GetMinimapZoneText())
-/run print(GetSubZoneText())
+/run local areaID, zoneID = GetCurrentMapAreaID(), GetCurrentMapZone(); print(areaID, zoneID)
 </code>
-<t>Разница:</t>
-<c>GetZoneText</c> — основная зона.
-<c>GetRealZoneText</c> — реальная зона, часто используется для континентов и крупных областей.
-<c>GetMinimapZoneText</c> — текст миникарты.
-<c>GetSubZoneText</c> — подзона, например конкретная улица, пещера или здание.
-<h>Пример отчёта</h>
+<t>Числовые идентификаторы текущей зоны. Используются для точного сравнения зон независимо от локализации.</t>
+<h>PvP статус зоны</h>
 <code>
-/run local zone = GetZoneText() or "Неизвестно"; local sub = GetSubZoneText() or ""; print(string.format("Зона: %s, подзона: %s", zone, sub))
+/run local pvpType = GetZonePVPInfo(); print(pvpType or "безопасная")
 </code>
-<h>Безопасный шаблон</h>
+<t>Возвращает строку или <k>nil</k>:</t>
+<c>"contested"</c> — спорная территория.
+<c>"hostile"</c> — враждебная зона.
+<c>"friendly"</c> — дружественная зона.
+<c>"sanctuary"</c> — убежище.
+<c>nil</c> — безопасная зона (стартовая или столица).
+<h>Скорость движения</h>
 <code>
-/run local facing = GetPlayerFacing() or 0; if facing >= 0 then print("Направление доступно") else print("Направление недоступно") end
+/run print(GetUnitSpeed("player"))
+</code>
+<t>Скорость в ярдах в секунду:</t>
+<c>0</c> — игрок стоит.
+<c>~2.5</c> — шаг (ходьба).
+<c>~7</c> — обычный бег.
+<c>~14</c> — верховая езда 100%.
+<c>~15</c> — летный маунт.
+<h>Смена карты</h>
+<code>
+/run SetMapToCurrentZone()
+</code>
+<t>Переключает окно карты на текущую зону игрока. Полезно перед вызовом координатных функций.</t>
+<h>Комбинированный пример</h>
+<code>
+/run local f = GetPlayerFacing(); local deg = math.floor(math.deg(f)); print("Направление:", deg, "градусов | Зона:", GetZoneText(), "| Скорость:", GetUnitSpeed("player"))
 </code>
 ]=],
 }
-
 ns_llua['lua'][144] = {
-type = "vartest",
-title = "Тест 143-1: направление игрока",
-helpModules = {143, 65, 10},
-tasks = {
-{
-var = "playerFacing",
-desc = 'Создай глобальную переменную playerFacing = GetPlayerFacing() or 0',
-check = function(value)
-return type(value) == "number" and value >= 0
-end,
-},
-{
-var = "playerFacingDegrees",
-desc = 'Создай глобальную переменную playerFacingDegrees = math.floor((GetPlayerFacing() or 0) * 180 / math.pi + 0.5)',
-check = function(value)
-return type(value) == "number" and value >= 0 and value <= 360
-end,
-},
-},
+    type = "commenttest",
+    title = "Тест 143-1: функция GetPlayerFacingDegrees",
+    helpModules = {143, 45, 10, 14},
+    preloadVars = {
+        {var = "GetPlayerFacingDegrees", desc = "GetPlayerFacingDegrees очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "test1", desc = "test1 очищается перед проверкой"},
+        {var = "test2", desc = "test2 очищается перед проверкой"},
+        {var = "test3", desc = "test3 очищается перед проверкой"},
+        {var = "test4", desc = "test4 очищается перед проверкой"},
+        {var = "test5", desc = "test5 очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "test1", "test2", "test3", "test4", "test5"},
+    instruction = [=[
+<h>Тест 143-1: функция GetPlayerFacingDegrees</h>
+<t>Создай глобальную функцию <k>GetPlayerFacingDegrees()</k>.</t>
+<t>Функция должна вернуть направление игрока в градусах, округлённое до целого числа через <k>math.floor</k>.</t>
+<t>Возвращаемое значение должно быть в диапазоне от 0 до 359.</t>
+<w>Во время проверки система прогонит функцию через 5 разных направлений.</w>
+]=],
+    initialCode = [=[
+function GetPlayerFacingDegrees()
+    
+end
+]=],
+    requireKeywords = {
+        "GetPlayerFacingDegrees",
+        "function",
+        "GetPlayerFacing",
+        "return",
+    },
+
+    mockGlobals = {
+        GetPlayerFacing = function()
+            local s = _G._currentScenario or 1
+            local facings = {
+                0,                        -- север (0°)
+                math.pi / 2,              -- запад (90°)
+                math.pi,                  -- юг (180°)
+                3 * math.pi / 2,          -- восток (270°)
+                1.4474589824677,          -- реальное значение с сервера
+            }
+            return facings[s]
+        end,
+    },
+
+    checkCode = function(env)
+        _G.checkError = nil
+        for i = 1, 5 do _G["test" .. i] = nil end
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(env) ~= "table" then
+            return fail("Внутренняя ошибка: окружение не передано")
+        end
+
+        local fn = env.GetPlayerFacingDegrees
+        if type(fn) ~= "function" then
+            return fail("GetPlayerFacingDegrees не является глобальной функцией")
+        end
+
+        local scenarios = {
+            {name = "Север (0 рад)",      radians = 0,               exp = 0},
+            {name = "Запад (π/2 рад)",   radians = math.pi / 2,     exp = 90},
+            {name = "Юг (π рад)",        radians = math.pi,         exp = 180},
+            {name = "Восток (3π/2 рад)", radians = 3 * math.pi / 2, exp = 270},
+            {name = "Реальное (1.45 рад)", radians = 1.4474589824677, exp = 82},
+        }
+
+        for i, test in ipairs(scenarios) do
+            _G._currentScenario = i
+            local ok, result = pcall(fn)
+
+            if not ok then
+                _G["test" .. i] = test.name .. " | ОШИБКА: " .. tostring(result)
+                _G._currentScenario = nil
+                return fail("Тест " .. i .. ": ошибка вызова: " .. tostring(result))
+            end
+
+            if type(result) ~= "number" then
+                _G["test" .. i] = test.name .. " | вернула " .. type(result)
+                _G._currentScenario = nil
+                return fail("Тест " .. i .. ": функция должна вернуть число")
+            end
+
+            if result < 0 or result > 359 then
+                _G["test" .. i] = test.name .. " | " .. result .. " (вне диапазона 0-359)"
+                _G._currentScenario = nil
+                return fail("Тест " .. i .. ": результат вне диапазона 0-359")
+            end
+
+            if result ~= math.floor(result) then
+                _G["test" .. i] = test.name .. " | не целое: " .. result
+                _G._currentScenario = nil
+                return fail("Тест " .. i .. ": должно быть целое число (math.floor)")
+            end
+
+            if result ~= test.exp then
+                _G["test" .. i] = test.name .. " | Получено: " .. result .. " | Ожидалось: " .. test.exp
+                _G._currentScenario = nil
+                return fail("Тест " .. i .. " не пройден: значение не совпадает")
+            end
+
+            _G["test" .. i] = test.name .. " | " .. string.format("%.4f рад -> %d°", test.radians, result) .. " | ОК"
+        end
+
+        _G._currentScenario = nil
+        return true
+    end,
 }
 
 ns_llua['lua'][145] = {
-type = "vartest",
-title = "Тест 143-2: зоны игрока",
-helpModules = {143, 65},
-tasks = {
-{
-var = "zoneText",
-desc = 'Создай глобальную переменную zoneText = GetZoneText() or "Неизвестно"',
-check = function(value)
-return type(value) == "string"
-end,
-},
-{
-var = "minimapZoneText",
-desc = 'Создай глобальную переменную minimapZoneText = GetMinimapZoneText() or ""',
-check = function(value)
-return type(value) == "string"
-end,
-},
-},
+    type = "commenttest",
+    title = "Тест 143-2: функция GetPlayerFacingCompass",
+    helpModules = {143, 45, 10, 14},
+    preloadVars = {
+        {var = "GetPlayerFacingCompass", desc = "GetPlayerFacingCompass очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "test1", desc = "test1 очищается перед проверкой"},
+        {var = "test2", desc = "test2 очищается перед проверкой"},
+        {var = "test3", desc = "test3 очищается перед проверкой"},
+        {var = "test4", desc = "test4 очищается перед проверкой"},
+        {var = "test5", desc = "test5 очищается перед проверкой"},
+        {var = "test6", desc = "test6 очищается перед проверкой"},
+        {var = "test7", desc = "test7 очищается перед проверкой"},
+        {var = "test8", desc = "test8 очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "test1", "test2", "test3", "test4", "test5", "test6", "test7", "test8"},
+    instruction = [=[
+<h>Тест 143-2: функция GetPlayerFacingCompass</h>
+<t>Создай глобальную функцию <k>GetPlayerFacingCompass()</k>.</t>
+<t>Функция должна вернуть строку с направлением игрока в виде стороны света.</t>
+<t>WoW использует навигационную систему (отсчёт против часовой стрелки от севера):</t>
+<c>"N"</c> — север (338-22°)
+<c>"NW"</c> — северо-запад (23-67°)
+<c>"W"</c> — запад (68-112°)
+<c>"SW"</c> — юго-запад (113-157°)
+<c>"S"</c> — юг (158-202°)
+<c>"SE"</c> — юго-восток (203-247°)
+<c>"E"</c> — восток (248-292°)
+<c>"NE"</c> — северо-восток (293-337°)
+<t>Каждый сектор имеет ширину 45°.</t>
+<t>Используй:</t>
+<c>GetPlayerFacing()</c>
+<c>math.deg</c>
+<c>math.floor</c>
+<w>Во время проверки система прогонит функцию через 8 разных направлений.</w>
+]=],
+    initialCode = [=[
+function GetPlayerFacingCompass()
+    
+end
+]=],
+    requireKeywords = {
+        "GetPlayerFacingCompass",
+        "function",
+        "GetPlayerFacing",
+        "math.deg",
+        "return",
+    },
+
+    mockGlobals = {
+        GetPlayerFacing = function()
+            local s = _G._currentScenario or 1
+            local facings = {
+                math.rad(0),      -- N
+                math.rad(45),     -- NW
+                math.rad(90),     -- W
+                math.rad(135),    -- SW
+                math.rad(180),    -- S
+                math.rad(225),    -- SE
+                math.rad(270),    -- E
+                math.rad(315),    -- NE
+            }
+            return facings[s]
+        end,
+    },
+
+    checkCode = function(env)
+        _G.checkError = nil
+        for i = 1, 8 do _G["test" .. i] = nil end
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(env) ~= "table" then
+            return fail("Внутренняя ошибка: окружение не передано")
+        end
+
+        local fn = env.GetPlayerFacingCompass
+        if type(fn) ~= "function" then
+            return fail("GetPlayerFacingCompass не является глобальной функцией")
+        end
+
+        local scenarios = {
+            {name = "0° — Север",           exp = "N"},
+            {name = "45° — Северо-запад",   exp = "NW"},
+            {name = "90° — Запад",          exp = "W"},
+            {name = "135° — Юго-запад",     exp = "SW"},
+            {name = "180° — Юг",            exp = "S"},
+            {name = "225° — Юго-восток",    exp = "SE"},
+            {name = "270° — Восток",        exp = "E"},
+            {name = "315° — Северо-восток", exp = "NE"},
+        }
+
+        for i, test in ipairs(scenarios) do
+            _G._currentScenario = i
+            local ok, result = pcall(fn)
+
+            if not ok then
+                _G["test" .. i] = test.name .. " | ОШИБКА: " .. tostring(result)
+                _G._currentScenario = nil
+                return fail("Тест " .. i .. ": ошибка вызова")
+            end
+
+            if type(result) ~= "string" then
+                _G["test" .. i] = test.name .. " | вернула " .. type(result)
+                _G._currentScenario = nil
+                return fail("Тест " .. i .. ": функция должна вернуть строку")
+            end
+
+            if result ~= test.exp then
+                _G["test" .. i] = test.name .. " | Получено: '" .. result .. "' | Ожидалось: '" .. test.exp .. "'"
+                _G._currentScenario = nil
+                return fail("Тест " .. i .. " не пройден")
+            end
+
+            _G["test" .. i] = test.name .. " -> " .. result .. " | ОК"
+        end
+
+        _G._currentScenario = nil
+        return true
+    end,
 }
 
 ns_llua['lua'][146] = {
-type = "commenttest",
-title = "Тест 143-3: функция GetFacingDegrees",
-helpModules = {143, 45, 10},
-preloadVars = {
-{var = "GetFacingDegrees", desc = "GetFacingDegrees очищается перед проверкой"},
-{var = "checkError", desc = "checkError очищается перед проверкой"},
-},
-reportVars = {
-"checkError",
-},
-instruction = [=[
-<h>Тест 143-3: функция GetFacingDegrees</h>
-<t>Создай глобальную функцию <k>GetFacingDegrees()</k>.</t>
-<t>Функция должна вернуть направление игрока в градусах.</t>
-<t>Используй:</t>
-<c>GetPlayerFacing()</c>
-<c>or 0</c>
-<c>math.floor</c>
-<c>math.pi</c>
-<t>Если направление недоступно, функция должна вернуть <n>0</n>.</t>
-<t>Ничего выводить не нужно.</t>
+    type = "commenttest",
+    title = "Тест 143-3: функция GetZoneInfo",
+    helpModules = {143, 45, 44},
+    preloadVars = {
+        {var = "GetZoneInfo", desc = "GetZoneInfo очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "test1", desc = "test1 очищается перед проверкой"},
+        {var = "test2", desc = "test2 очищается перед проверкой"},
+        {var = "test3", desc = "test3 очищается перед проверкой"},
+        {var = "test4", desc = "test4 очищается перед проверкой"},
+        {var = "test5", desc = "test5 очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "test1", "test2", "test3", "test4", "test5"},
+    instruction = [=[
+<h>Тест 143-3: функция GetZoneInfo</h>
+<t>Создай глобальную функцию <k>GetZoneInfo()</k>.</t>
+<t>Функция должна вернуть таблицу с информацией о текущей зоне:</t>
+<c>zone</c> — основная зона (<k>GetZoneText</k>).
+<c>subZone</c> — подзона (<k>GetSubZoneText</k>), или <k>nil</k> если пустая.
+<c>realZone</c> — реальная зона (<k>GetRealZoneText</k>).
+<c>pvpType</c> — PvP статус (<k>GetZonePVPInfo</k>), или <s>"safe"</s> если вернёт nil.
+<c>areaID</c> — ID карты (<k>GetCurrentMapAreaID</k>).
+<t>Если <k>GetSubZoneText()</k> вернёт пустую строку, поле <c>subZone</c> должно быть <k>nil</k>.</t>
+<w>Во время проверки система прогонит функцию через 5 разных зон.</w>
 ]=],
-initialCode = [=[
--- Создай глобальную функцию GetFacingDegrees()
+    initialCode = [=[
+function GetZoneInfo()
+    
+end
 ]=],
-requireKeywords = {
-"GetFacingDegrees",
-"function",
-"GetPlayerFacing",
-"math.floor",
-"return",
-},
-checkCode = function()
-_G.checkError = nil
-if type(_G.GetFacingDegrees) ~= "function" then
-_G.checkError = "GetFacingDegrees не является глобальной функцией"
-return false
-end
-local ok, degrees = pcall(_G.GetFacingDegrees)
-if not ok then
-_G.checkError = "Ошибка вызова GetFacingDegrees: " .. tostring(degrees)
-return false
-end
-if type(degrees) ~= "number" then
-_G.checkError = "Функция должна вернуть число"
-return false
-end
-if degrees < 0 or degrees > 360 then
-_G.checkError = "Направление в градусах должно быть от 0 до 360"
-return false
-end
-return true
-end,
+    requireKeywords = {
+        "GetZoneInfo",
+        "function",
+        "GetZoneText",
+        "GetSubZoneText",
+        "GetRealZoneText",
+        "GetZonePVPInfo",
+        "GetCurrentMapAreaID",
+        "return",
+    },
+
+    mockGlobals = {
+        GetZoneText = function()
+            local s = _G._currentScenario or 1
+            local data = {
+                "Штормград",
+                "Мулгор",
+                "Мёртвые копи",
+                "Элвиннский лес",
+                "Тернистая долина",
+            }
+            return data[s]
+        end,
+        GetSubZoneText = function()
+            local s = _G._currentScenario or 1
+            local data = {
+                "Торговый район",
+                "",
+                "",
+                "Северное аббатство",
+                "",
+            }
+            return data[s]
+        end,
+        GetRealZoneText = function()
+            local s = _G._currentScenario or 1
+            local data = {
+                "Штормград",
+                "Мулгор",
+                "Мёртвые копи",
+                "Элвиннский лес",
+                "Тернистая долина",
+            }
+            return data[s]
+        end,
+        GetZonePVPInfo = function()
+            local s = _G._currentScenario or 1
+            local data = {
+                nil,
+                nil,
+                nil,
+                "contested",
+                "hostile",
+            }
+            return data[s]
+        end,
+        GetCurrentMapAreaID = function()
+            local s = _G._currentScenario or 1
+            local data = {15, 10, 34, 37, 33}
+            return data[s]
+        end,
+    },
+
+    checkCode = function(env)
+        _G.checkError = nil
+        for i = 1, 5 do _G["test" .. i] = nil end
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(env) ~= "table" then
+            return fail("Внутренняя ошибка: окружение не передано")
+        end
+
+        local fn = env.GetZoneInfo
+        if type(fn) ~= "function" then
+            return fail("GetZoneInfo не является глобальной функцией")
+        end
+
+        local scenarios = {
+            {name = "Столица (безопасная)", zone = "Штормград", subZone = "Торговый район", realZone = "Штормград", pvpType = "safe", areaID = 15},
+            {name = "Стартовая (без подзоны)", zone = "Мулгор", subZone = nil, realZone = "Мулгор", pvpType = "safe", areaID = 10},
+            {name = "Подземелье", zone = "Мёртвые копи", subZone = nil, realZone = "Мёртвые копи", pvpType = "safe", areaID = 34},
+            {name = "Спорная зона", zone = "Элвиннский лес", subZone = "Северное аббатство", realZone = "Элвиннский лес", pvpType = "contested", areaID = 37},
+            {name = "Враждебная зона", zone = "Тернистая долина", subZone = nil, realZone = "Тернистая долина", pvpType = "hostile", areaID = 33},
+        }
+
+        for i, test in ipairs(scenarios) do
+            _G._currentScenario = i
+            local ok, result = pcall(fn)
+
+            if not ok then
+                _G["test" .. i] = test.name .. " | ОШИБКА: " .. tostring(result)
+                _G._currentScenario = nil
+                return fail("Тест " .. i .. ": ошибка вызова")
+            end
+
+            if type(result) ~= "table" then
+                _G["test" .. i] = test.name .. " | вернула " .. type(result)
+                _G._currentScenario = nil
+                return fail("Тест " .. i .. ": функция должна вернуть таблицу")
+            end
+
+            local errors = {}
+            if result.zone ~= test.zone then
+                table.insert(errors, "zone: '" .. tostring(result.zone) .. "' ≠ '" .. test.zone .. "'")
+            end
+            if result.subZone ~= test.subZone then
+                table.insert(errors, "subZone: " .. tostring(result.subZone) .. " ≠ " .. tostring(test.subZone))
+            end
+            if result.realZone ~= test.realZone then
+                table.insert(errors, "realZone: '" .. tostring(result.realZone) .. "' ≠ '" .. test.realZone .. "'")
+            end
+            if result.pvpType ~= test.pvpType then
+                table.insert(errors, "pvpType: '" .. tostring(result.pvpType) .. "' ≠ '" .. test.pvpType .. "'")
+            end
+            if result.areaID ~= test.areaID then
+                table.insert(errors, "areaID: " .. tostring(result.areaID) .. " ≠ " .. tostring(test.areaID))
+            end
+
+            if #errors > 0 then
+                _G["test" .. i] = test.name .. " | ОШИБКИ: " .. table.concat(errors, "; ")
+                _G._currentScenario = nil
+                return fail("Тест " .. i .. " (" .. test.name .. ") не пройден")
+            end
+
+            _G["test" .. i] = test.name .. " | " .. test.zone .. " (" .. test.pvpType .. ") | ОК"
+        end
+
+        _G._currentScenario = nil
+        return true
+    end,
 }
 
 ns_llua['lua'][147] = {
-type = "commenttest",
-title = "Тест 143-4: функция GetZoneReport",
-helpModules = {143, 45, 7},
-preloadVars = {
-{var = "GetZoneReport", desc = "GetZoneReport очищается перед проверкой"},
-{var = "checkError", desc = "checkError очищается перед проверкой"},
-},
-reportVars = {
-"checkError",
-},
-instruction = [=[
-<h>Тест 143-4: функция GetZoneReport</h>
-<t>Создай глобальную функцию <k>GetZoneReport()</k>.</t>
-<t>Функция должна вернуть строку:</t>
-<s>"Зона: название"</s>
-<t>Если <k>GetZoneText()</k> вернул <k>nil</k>, используй строку:</t>
-<s>"Неизвестно"</s>
+    type = "commenttest",
+    title = "Тест 143-4: функция IsMoving",
+    helpModules = {143, 45, 31, 29},
+    preloadVars = {
+        {var = "IsMoving", desc = "IsMoving очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "test1", desc = "test1 очищается перед проверкой"},
+        {var = "test2", desc = "test2 очищается перед проверкой"},
+        {var = "test3", desc = "test3 очищается перед проверкой"},
+        {var = "test4", desc = "test4 очищается перед проверкой"},
+        {var = "test5", desc = "test5 очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "test1", "test2", "test3", "test4", "test5"},
+    instruction = [=[
+<h>Тест 143-4: функция IsMoving</h>
+<t>Создай глобальную функцию <k>IsMoving()</k>.</t>
+<t>Функция должна вернуть <k>true</k>, если игрок движется, и <k>false</k>, если стоит.</t>
+<t>Игрок считается движущимся, если его скорость больше 0.</t>
 <t>Используй:</t>
-<c>GetZoneText</c>
-<c>or</c>
-<c>конкатенацию</c>
-<t>Ничего выводить не нужно.</t>
+<c>GetUnitSpeed("player")</c>
+<t>Если скорость не удалось получить (nil), верни <k>false</k>.</t>
+<w>Во время проверки система прогонит функцию через 5 разных состояний движения.</w>
 ]=],
-initialCode = [=[
--- Создай глобальную функцию GetZoneReport()
+    initialCode = [=[
+function IsMoving()
+    
+end
 ]=],
-requireKeywords = {
-"GetZoneReport",
-"function",
-"GetZoneText",
-"return",
-},
-checkCode = function()
-_G.checkError = nil
-if type(_G.GetZoneReport) ~= "function" then
-_G.checkError = "GetZoneReport не является глобальной функцией"
-return false
-end
-local ok, text = pcall(_G.GetZoneReport)
-if not ok then
-_G.checkError = "Ошибка вызова GetZoneReport: " .. tostring(text)
-return false
-end
-if type(text) ~= "string" or text == "" then
-_G.checkError = "Функция должна вернуть строку"
-return false
-end
-if not text:find("Зона: ", 1, true) then
-_G.checkError = "Строка должна начинаться с 'Зона: '"
-return false
-end
-return true
-end,
+    requireKeywords = {
+        "IsMoving",
+        "function",
+        "GetUnitSpeed",
+        "return",
+    },
+
+    mockGlobals = {
+        GetUnitSpeed = function(unit)
+            local s = _G._currentScenario or 1
+            local speeds = {
+                0,
+                2.5,
+                7,
+                14,
+                nil,
+            }
+            return speeds[s]
+        end,
+    },
+
+    checkCode = function(env)
+        _G.checkError = nil
+        for i = 1, 5 do _G["test" .. i] = nil end
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(env) ~= "table" then
+            return fail("Внутренняя ошибка: окружение не передано")
+        end
+
+        local fn = env.IsMoving
+        if type(fn) ~= "function" then
+            return fail("IsMoving не является глобальной функцией")
+        end
+
+        local scenarios = {
+            {name = "Игрок стоит",            speed = 0,    exp = false},
+            {name = "Игрок идёт (шаг)",       speed = 2.5,  exp = true},
+            {name = "Игрок бежит",            speed = 7,    exp = true},
+            {name = "Игрок на маунте (100%)", speed = 14,   exp = true},
+            {name = "Скорость недоступна",    speed = nil,  exp = false},
+        }
+
+        for i, test in ipairs(scenarios) do
+            _G._currentScenario = i
+            local ok, result = pcall(fn)
+
+            if not ok then
+                _G["test" .. i] = test.name .. " | ОШИБКА: " .. tostring(result)
+                _G._currentScenario = nil
+                return fail("Тест " .. i .. ": ошибка вызова")
+            end
+
+            if type(result) ~= "boolean" then
+                _G["test" .. i] = test.name .. " | вернула " .. type(result)
+                _G._currentScenario = nil
+                return fail("Тест " .. i .. ": функция должна вернуть boolean")
+            end
+
+            if result ~= test.exp then
+                _G["test" .. i] = test.name .. " | Получено: " .. tostring(result) .. " | Ожидалось: " .. tostring(test.exp)
+                _G._currentScenario = nil
+                return fail("Тест " .. i .. " не пройден")
+            end
+
+            _G["test" .. i] = test.name .. " | Скорость: " .. tostring(test.speed) .. " -> " .. tostring(result) .. " | ОК"
+        end
+
+        _G._currentScenario = nil
+        return true
+    end,
 }
 
 ns_llua['lua'][148] = {
-type = "commenttest",
-title = "Тест 143-5: функция GetCardinalDirection",
-helpModules = {143, 45, 17, 19},
-preloadVars = {
-{var = "GetCardinalDirection", desc = "GetCardinalDirection очищается перед проверкой"},
-{var = "checkError", desc = "checkError очищается перед проверкой"},
-},
-reportVars = {
-"checkError",
-},
-instruction = [=[
-<h>Тест 143-5: функция GetCardinalDirection</h>
-<t>Создай глобальную функцию <k>GetCardinalDirection(degrees)</k>.</t>
-<t>Функция должна вернуть сторону света по градусам.</t>
+    type = "commenttest",
+    title = "Тест 143-5: функция GetZoneReport",
+    helpModules = {143, 45, 14, 7},
+    preloadVars = {
+        {var = "GetZoneReport", desc = "GetZoneReport очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "test1", desc = "test1 очищается перед проверкой"},
+        {var = "test2", desc = "test2 очищается перед проверкой"},
+        {var = "test3", desc = "test3 очищается перед проверкой"},
+        {var = "test4", desc = "test4 очищается перед проверкой"},
+        {var = "test5", desc = "test5 очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "test1", "test2", "test3", "test4", "test5"},
+    instruction = [=[
+<h>Тест 143-5: функция GetZoneReport</h>
+<t>Создай глобальную функцию <k>GetZoneReport()</k>.</t>
+<t>Функция должна вернуть строку с информацией о зоне, направлении и скорости игрока.</t>
+<t>Формат строки (разделитель — запятая с пробелом):</t>
+<s>"Zone: Elwynn, Direction: 141 (SE), Speed: 7"</s>
 <t>Правила:</t>
-<c>0-44</c> — <s>"Север"</s>
-<c>45-134</c> — <s>"Восток"</s>
-<c>135-224</c> — <s>"Юг"</s>
-<c>225-314</c> — <s>"Запад"</s>
-<c>315-359</c> — <s>"Север"</s>
-<t>Если <k>degrees</k> не число, меньше 0 или больше либо равно 360, функция должна вернуть:</t>
-<s>"Неизвестно"</s>
-<t>Используй:</t>
-<c>type</c>
-<c>if</c>
-<c>elseif</c>
-<c>else</c>
-<c>return</c>
-<t>Ничего выводить не нужно.</t>
+<c>Zone</c> — <k>GetZoneText</k>.
+<c>Direction</c> — градусы (0-359) и сторона света (N/NW/W/SW/S/SE/E/NE по WoW навигационной системе).
+<c>Speed</c> — <k>GetUnitSpeed("player")</k>, округлённая до целого через <k>math.floor</k>.
+<t>Если <k>GetPlayerFacing()</k> вернёт nil, использовать 0.</t>
+<t>Если <k>GetUnitSpeed("player")</k> вернёт nil, использовать 0.</t>
+<w>Во время проверки система прогонит функцию через 5 разных состояний.</w>
 ]=],
-initialCode = [=[
--- Создай глобальную функцию GetCardinalDirection(degrees)
+    initialCode = [=[
+function GetZoneReport()
+    
+end
 ]=],
-requireKeywords = {
-"GetCardinalDirection",
-"function",
-"type",
-"if",
-"then",
-"elseif",
-"else",
-"return",
-},
-checkCode = function()
-_G.checkError = nil
-if type(_G.GetCardinalDirection) ~= "function" then
-_G.checkError = "GetCardinalDirection не является глобальной функцией"
-return false
-end
-local tests = {
-{input = 0, expected = "Север"},
-{input = 44, expected = "Север"},
-{input = 45, expected = "Восток"},
-{input = 90, expected = "Восток"},
-{input = 134, expected = "Восток"},
-{input = 135, expected = "Юг"},
-{input = 180, expected = "Юг"},
-{input = 224, expected = "Юг"},
-{input = 225, expected = "Запад"},
-{input = 270, expected = "Запад"},
-{input = 314, expected = "Запад"},
-{input = 315, expected = "Север"},
-{input = 359, expected = "Север"},
-{input = -1, expected = "Неизвестно"},
-{input = 360, expected = "Неизвестно"},
-{input = "bad", expected = "Неизвестно"},
-}
-for i, test in ipairs(tests) do
-local ok, result = pcall(_G.GetCardinalDirection, test.input)
-if not ok or result ~= test.expected then
-_G.checkError = "Тест " .. i .. " функции GetCardinalDirection не пройден"
-return false
-end
-end
-return true
-end,
+    requireKeywords = {
+        "GetZoneReport",
+        "function",
+        "GetZoneText",
+        "GetPlayerFacing",
+        "GetUnitSpeed",
+        "return",
+    },
+
+    mockGlobals = {
+        GetZoneText = function()
+            local s = _G._currentScenario or 1
+            local data = {
+                "Stormwind",
+                "Mulgore",
+                "Elwynn",
+                "Stranglethorn",
+                "Orgrimmar",
+            }
+            return data[s]
+        end,
+        GetPlayerFacing = function()
+            local s = _G._currentScenario or 1
+            local data = {
+                math.rad(0),
+                math.rad(90),
+                math.rad(203),
+                math.rad(225),
+                nil,
+            }
+            return data[s]
+        end,
+        GetUnitSpeed = function(unit)
+            local s = _G._currentScenario or 1
+            local data = {
+                0,
+                3.5,
+                7,
+                14,
+                nil,
+            }
+            return data[s]
+        end,
+    },
+
+    checkCode = function(env)
+        _G.checkError = nil
+        for i = 1, 5 do _G["test" .. i] = nil end
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(env) ~= "table" then
+            return fail("internal error")
+        end
+
+        local fn = env.GetZoneReport
+        if type(fn) ~= "function" then
+            return fail("GetZoneReport is not a function")
+        end
+
+        local scenarios = {
+            {name = "Stormwind north", zone = "Stormwind", deg = 0, compass = "N", speed = 0},
+            {name = "Mulgore west", zone = "Mulgore", deg = 90, compass = "W", speed = 3},
+            {name = "Elwynn southeast", zone = "Elwynn", deg = 203, compass = "SE", speed = 7},
+            {name = "Stranglethorn southeast", zone = "Stranglethorn", deg = 225, compass = "SE", speed = 14},
+            {name = "defaults", zone = "Orgrimmar", deg = 0, compass = "N", speed = 0},
+        }
+
+        for i, test in ipairs(scenarios) do
+            _G._currentScenario = i
+            local ok, result = pcall(fn)
+
+            if not ok then
+                _G["test" .. i] = test.name .. " ERROR: " .. tostring(result)
+                _G._currentScenario = nil
+                return fail("test " .. i .. " error: " .. tostring(result))
+            end
+
+            if type(result) ~= "string" then
+                _G["test" .. i] = test.name .. " returned " .. type(result)
+                _G._currentScenario = nil
+                return fail("test " .. i .. ": must return string")
+            end
+
+            local expected = "Zone: " .. test.zone .. ", Direction: " .. test.deg .. " (" .. test.compass .. "), Speed: " .. test.speed
+
+            if result ~= expected then
+                _G["test" .. i] = test.name .. " got '" .. result .. "' expected '" .. expected .. "'"
+                _G._currentScenario = nil
+                return fail("test " .. i .. " failed")
+            end
+
+            _G["test" .. i] = test.name .. " OK: " .. result
+        end
+
+        _G._currentScenario = nil
+        return true
+    end,
 }
 
 ns_llua['lua'][149] = {
