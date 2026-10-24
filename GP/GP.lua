@@ -670,34 +670,80 @@ NSQC4.RegisterModule("gp", function()
             row.lastClickTime = 0
 
             row:SetScript("OnClick", function(_, button, down)
+                dbgGp("CLICK-ENTER",
+                    "row=", tostring(i),
+                    "button=", tostring(button),
+                    "down=", tostring(down),
+                    "shift=", tostring(IsShiftKeyDown()),
+                    "ctrl=", tostring(IsControlKeyDown())
+                )
+
                 local offset = FauxScrollFrame_GetOffset(self.window.scrollFrame)
                 local dataIndex = i + offset
+                dbgGp("CLICK-INDEX",
+                    "offset=", tostring(offset),
+                    "dataIndex=", tostring(dataIndex),
+                    "hasEntry=", tostring(self.gp_data ~= nil
+                        and self.gp_data[dataIndex] ~= nil)
+                )
                 if not self.gp_data or not self.gp_data[dataIndex] then
+                    dbgGp("CLICK-ABORT", "нет данных по индексу")
                     return
                 end
 
                 local currentTime = GetTime()
+                local dt = currentTime - row.lastClickTime
+                dbgGp("CLICK-TIMING",
+                    "currentTime=", tostring(currentTime),
+                    "lastClickTime=", tostring(row.lastClickTime),
+                    "delta=", tostring(dt),
+                    "isDouble=", tostring(IsInRaid() and dt < 0.5)
+                )
+
+                local beforeSel = {}
+                for k in pairs(self.selected_indices) do
+                    beforeSel[#beforeSel + 1] = tostring(k)
+                end
+                dbgGp("CLICK-SEL-BEFORE",
+                    "count=", tostring(#beforeSel),
+                    "indices=[", table.concat(beforeSel, ","), "]",
+                    "windowShown=", tostring(
+                        self.raidWindow and self.raidWindow:IsShown()
+                    )
+                )
+
                 SendAddonMessage(
                     "NSShowMeZametki",
                     self.gp_data[dataIndex].original_nick,
                     "GUILD"
                 )
+                dbgGp("CLICK-SENT-ZAMETKI",
+                    "nick=", self.gp_data[dataIndex].original_nick
+                )
 
+                -- Двойной клик — выделить всё
                 if button == "LeftButton"
                 and IsInRaid()
-                and (currentTime - row.lastClickTime) < 0.5 then
+                and dt < 0.5 then
+                    dbgGp("CLICK-DOUBLE", "двойной клик — выделяем ВСЕХ")
                     self:ClearSelection()
                     for idx = 1, #self.gp_data do
                         self.selected_indices[idx] = true
                     end
                     self.last_selected_index = dataIndex
+                    row.lastClickTime = 0
+
                     self:_UpdateSelectionCount()
                     self:RefreshRowHighlights()
                     self:UpdateRaidWindowVisibility()
                     if self.raidWindow and self.raidWindow:IsShown() then
                         self:_UpdateSelectedPlayersText()
                     end
-                    row.lastClickTime = 0
+                    dbgGp("CLICK-DOUBLE-DONE",
+                        "windowShown=", tostring(
+                            self.raidWindow and self.raidWindow:IsShown()
+                        )
+                    )
                     return
                 end
 
@@ -705,10 +751,15 @@ NSQC4.RegisterModule("gp", function()
 
                 if button == "LeftButton" then
                     local wasSelected = self.selected_indices[dataIndex]
+                    dbgGp("CLICK-BRANCH",
+                        "wasSelected=", tostring(wasSelected)
+                    )
 
                     if IsShiftKeyDown() then
+                        dbgGp("CLICK-BRANCH-SHIFT",
+                            "lastSelected=", tostring(self.last_selected_index)
+                        )
                         if not self.last_selected_index then
-                            self:ClearSelection()
                             self.selected_indices[dataIndex] = true
                             self.last_selected_index = dataIndex
                         else
@@ -719,15 +770,24 @@ NSQC4.RegisterModule("gp", function()
                                 self.last_selected_index, dataIndex
                             )
                             if not IsControlKeyDown() then
-                                self:ClearSelection()
+                                for k in pairs(self.selected_indices) do
+                                    self.selected_indices[k] = nil
+                                end
                             end
                             for idx = startIdx, endIdx do
                                 if self.gp_data[idx] then
                                     self.selected_indices[idx] = true
                                 end
                             end
+                            dbgGp("CLICK-BRANCH-SHIFT-RANGE",
+                                "startIdx=", tostring(startIdx),
+                                "endIdx=", tostring(endIdx)
+                            )
                         end
                     elseif IsControlKeyDown() then
+                        dbgGp("CLICK-BRANCH-CTRL",
+                            "toggle to=", tostring(not wasSelected)
+                        )
                         self.selected_indices[dataIndex] = not wasSelected
                         for idx in pairs(self.selected_indices) do
                             if not self.gp_data[idx] then
@@ -746,35 +806,94 @@ NSQC4.RegisterModule("gp", function()
                             end
                         end
                     else
+                        dbgGp("CLICK-BRANCH-PLAIN")
                         if wasSelected then
-                            self:ClearSelection()
+                            dbgGp("CLICK-PLAIN-DESELECT")
+                            self.selected_indices[dataIndex] = nil
+                            self.last_selected_index = nil
+                            for idx in pairs(self.selected_indices) do
+                                if self.selected_indices[idx] then
+                                    self.last_selected_index = idx
+                                    break
+                                end
+                            end
                         else
-                            self:ClearSelection()
+                            dbgGp("CLICK-PLAIN-SELECT")
+                            for k in pairs(self.selected_indices) do
+                                self.selected_indices[k] = nil
+                            end
                             self.selected_indices[dataIndex] = true
                             self.last_selected_index = dataIndex
                         end
                     end
 
+                    local afterSel = {}
+                    for k in pairs(self.selected_indices) do
+                        afterSel[#afterSel + 1] = tostring(k)
+                    end
+                    dbgGp("CLICK-SEL-AFTER",
+                        "count=", tostring(#afterSel),
+                        "indices=[", table.concat(afterSel, ","), "]"
+                    )
+
                     self:_UpdateSelectionCount()
+                    dbgGp("CLICK-AFTER-COUNT")
                     self:RefreshRowHighlights()
+                    dbgGp("CLICK-AFTER-REFRESH")
+                    dbgGp("CLICK-BEFORE-VIS",
+                        "windowShown=", tostring(
+                            self.raidWindow and self.raidWindow:IsShown()
+                        ),
+                        "hasSel=", tostring(
+                            next(self.selected_indices) ~= nil
+                        )
+                    )
                     self:UpdateRaidWindowVisibility()
+                    dbgGp("CLICK-AFTER-VIS",
+                        "windowShown=", tostring(
+                            self.raidWindow and self.raidWindow:IsShown()
+                        )
+                    )
                     if self.raidWindow and self.raidWindow:IsShown() then
                         self:_UpdateSelectedPlayersText()
+                        dbgGp("CLICK-AFTER-TEXT")
                     end
                 end
+
+                dbgGp("CLICK-EXIT",
+                    "windowShown=", tostring(
+                        self.raidWindow and self.raidWindow:IsShown()
+                    )
+                )
             end)
             self.rows[i] = row
         end
 
         self.window:SetScript("OnHide", function()
             self:ClearSelection()
-            if self.raidWindow and self.raidWindow:IsShown() then
-                self.raidWindow:Hide()
-            end
             if self.logWindow and self.logWindow:IsShown() then
                 self.logWindow:Hide()
             end
         end)
+
+        -- ========================================================================
+        -- ОТЛАДКА OnShow/OnHide самого raidWindow
+        -- ========================================================================
+        if self.raidWindow then
+            self.raidWindow:SetScript("OnShow", function()
+                dbgGp("RAID-WINDOW-ONSHOW",
+                    "stack=", tostring(debugstack(2, 5, 5))
+                )
+            end)
+            self.raidWindow:SetScript("OnHide", function()
+                dbgGp("RAID-WINDOW-ONHIDE",
+                    "stack=", tostring(debugstack(2, 5, 5))
+                )
+                if self.logWindow and self.logWindow:IsShown() then
+                    self.logWindow:SetHeight(self.window:GetHeight())
+                end
+            end)
+        end
     end
 
     function GpDb:ToggleLogWindow()
@@ -908,6 +1027,7 @@ NSQC4.RegisterModule("gp", function()
     end
 
     function GpDb:RefreshRowHighlights()
+        if not self.window or not self.window.scrollFrame then return end
         local offset = FauxScrollFrame_GetOffset(self.window.scrollFrame)
         for i, row in ipairs(self.rows) do
             local dataIndex = i + offset
@@ -921,13 +1041,7 @@ NSQC4.RegisterModule("gp", function()
                 end
             end
         end
-        local selectedCount = 0
-        for _ in pairs(self.selected_indices) do
-            selectedCount = selectedCount + 1
-        end
-        self.window.countText:SetText(
-            string.format("Выделено: %d", selectedCount)
-        )
+        -- Не вызываем _UpdateSelectionCount здесь — её вызывает вызывающий код
     end
 
     function GpDb:ClearSelection()
@@ -1068,9 +1182,6 @@ NSQC4.RegisterModule("gp", function()
         self.window:Hide()
     end
 
-    -- ========================================================================
-    -- _UpdateFromGuild — обновление списка из ростера гильдии/рейда
-    -- ========================================================================
     function GpDb:_UpdateFromGuild()
         dbgGp("UPDATE-FROM-GUILD", "начало обновления списка")
         self.gp_data = {}
@@ -1136,9 +1247,6 @@ NSQC4.RegisterModule("gp", function()
                     local guildInfo = guildRosterInfo[plainName]
 
                     if guildInfo then
-                        -- ====================================================
-                        -- Игрок В ГИЛЬДИИ — берём ГП из ростера
-                        -- ====================================================
                         local gp = guildInfo.gp or 0
                         local publicNote = guildInfo.publicNote or ""
 
@@ -1170,9 +1278,6 @@ NSQC4.RegisterModule("gp", function()
                             "isGuildMember=", "true"
                         )
                     else
-                        -- ====================================================
-                        -- Игрок НЕ В ГИЛЬДИИ — берём из кеша + запрос
-                        -- ====================================================
                         local cachedGp =
                             db.external_gp_cache[plainName] or 0
 
@@ -1297,10 +1402,50 @@ NSQC4.RegisterModule("gp", function()
             end
         end
 
+        -- ====================================================================
+        -- ИСПРАВЛЕНИЕ: сохраняем выделение по никам, если окно начисления
+        -- открыто. Иначе ответ сервера (SetExternalGp) через ~1 сек после
+        -- клика сбрасывал выделение и окно закрывалось.
+        -- ====================================================================
         if db.window and db.window.scrollFrame then
-            db:ClearSelection()
+            local keepSelection = db.raidWindow and db.raidWindow:IsShown()
+
+            local selectedNicks = {}
+            if keepSelection then
+                for idx in pairs(db.selected_indices) do
+                    if db.gp_data[idx] then
+                        selectedNicks[db.gp_data[idx].original_nick] = true
+                    end
+                end
+            end
+
+            if not keepSelection then
+                db:ClearSelection()
+            end
+
             db:SortData()
-            db:UpdateWindow()
+
+            if keepSelection and next(selectedNicks) ~= nil then
+                db.selected_indices = {}
+                db.last_selected_index = nil
+                for idx, entry in ipairs(db.gp_data) do
+                    if selectedNicks[entry.original_nick] then
+                        db.selected_indices[idx] = true
+                        if not db.last_selected_index then
+                            db.last_selected_index = idx
+                        end
+                    end
+                end
+                db:UpdateWindow()
+                db:_UpdateSelectionCount()
+                db:RefreshRowHighlights()
+                db:UpdateRaidWindowVisibility()
+                if db.raidWindow and db.raidWindow:IsShown() then
+                    db:_UpdateSelectedPlayersText()
+                end
+            else
+                db:UpdateWindow()
+            end
         end
     end
 
@@ -1314,7 +1459,6 @@ NSQC4.RegisterModule("gp", function()
         end
         self.external_gp_cache[cleanNick] = gpNumber
 
-        -- ответ пришёл — снимаем «ожидание»
         if self.pending_gp then
             self.pending_gp[cleanNick] = nil
         end
@@ -1325,8 +1469,24 @@ NSQC4.RegisterModule("gp", function()
             "получен внешний ГП (ответ от сервера)"
         )
 
+        -- ИСПРАВЛЕНИЕ: обновляем окно только если оно реально открыто
+        -- и НЕ открыто окно начисления (иначе фоновое обновление
+        -- пересортирует список и сбросит выделение).
         if self.window and self.window:IsShown() then
-            self:_UpdateFromGuild()
+            if self.raidWindow and self.raidWindow:IsShown() then
+                -- Обновляем только GP у существующей записи, без
+                -- перестройки списка и без ClearSelection.
+                for _, entry in ipairs(self.gp_data) do
+                    if entry.original_nick == cleanNick then
+                        entry.gp = gpNumber
+                        break
+                    end
+                end
+                self:UpdateWindow()
+                self:RefreshRowHighlights()
+            else
+                self:_UpdateFromGuild()
+            end
         end
     end
 
@@ -1508,7 +1668,12 @@ NSQC4.RegisterModule("gp", function()
             return
         end
 
-        self:ClearSelection()
+        -- ИСПРАВЛЕНИЕ: не сбрасываем выделение, если окно начисления открыто.
+        -- Иначе фоновое обновление от сервера (SetExternalGp -> _UpdateFromGuild
+        -- -> SortData) закрывало окно через ~1 сек после клика.
+        if not (self.raidWindow and self.raidWindow:IsShown()) then
+            self:ClearSelection()
+        end
         self:UpdateWindow()
     end
 
@@ -1566,15 +1731,9 @@ NSQC4.RegisterModule("gp", function()
         self:UpdateWindow()
     end
 
-    -- ========================================================================
-    -- Окно выбора рейда / начисления (кнопка «Начислить»)
-    -- ВАЖНО: правильный формат SendAddonMessage(prefix, message, channel)
-    --        prefix = "nsGP1" / "nsGP1A"
-    --        message = "<delta> <nick>"
-    -- ========================================================================
     function GpDb:_CreateRaidSelectionWindow()
         self.raidWindow = CreateFrame(
-            "Frame", "GpDbRaidWindow", self.window
+            "Frame", "GpDbRaidWindow", UIParent
         )
         self.raidWindow:SetFrameStrata("DIALOG")
         self.raidWindow:SetSize(500, self.window:GetHeight() * 0.5)
@@ -1853,9 +2012,6 @@ NSQC4.RegisterModule("gp", function()
             function() self.raidWindow.gpEditBox:ClearFocus() end
         )
 
-        -- ====================================================================
-        -- КНОПКА «НАЧИСЛИТЬ» — главный обработчик
-        -- ====================================================================
         self.raidWindow.awardButton = CreateFrame(
             "Button", nil, self.raidWindow, "UIPanelButtonTemplate"
         )
@@ -1913,7 +2069,6 @@ NSQC4.RegisterModule("gp", function()
                 self.lastGPValue = gpValue
             end
 
-            -- Формируем строку лога
             local logStr
             if self.raidWindow.selectedRaidId then
                 local cleanRaidName = (
@@ -1942,9 +2097,6 @@ NSQC4.RegisterModule("gp", function()
                     tostring(#self:GetSelectedEntries())
             )
 
-            -- ================================================================
-            -- Цикл по выделенным игрокам: отправка addon-сообщений
-            -- ================================================================
             local nonGuildNicks = {}
             local guildNicks = {}
 
@@ -1954,7 +2106,6 @@ NSQC4.RegisterModule("gp", function()
                     local nick = entry.original_nick
                     local isGuild = entry.isGuildMember
 
-                    -- Определяем prefix и channel
                     local prefix, channel
                     if isGuild then
                         prefix  = "nsGP1"
@@ -1977,11 +2128,6 @@ NSQC4.RegisterModule("gp", function()
                         "message=", message
                     )
 
-                    -- ========================================================
-                    -- ОТПРАВКА: SendAddonMessage
-                    --   свой гильдеец: prefix="nsGP1",  channel="GUILD"
-                    --   чужой гильдеец: prefix="nsGP1A", channel="RAID"
-                    -- ========================================================
                     SendAddonMessage(prefix, message, channel)
 
                     dbgGp("AWARD-SENT",
@@ -2004,14 +2150,12 @@ NSQC4.RegisterModule("gp", function()
                 end
             end
 
-            -- Отправка лога в GUILD
             dbgGp("AWARD-LOG",
                 "отправляем nsGPlog в GUILD:",
                 logStr
             )
             SendAddonMessage("nsGPlog", logStr, "GUILD")
 
-            -- Обновляем локальные данные
             for _, entry in ipairs(self:GetSelectedEntries()) do
                 entry.gp = (entry.gp or 0) + gpValue
             end
@@ -2025,9 +2169,6 @@ NSQC4.RegisterModule("gp", function()
                     tostring(#guildNicks + #nonGuildNicks)
             )
 
-            -- ================================================================
-            -- Запрос ГП для не-гильдейцев (с задержкой)
-            -- ================================================================
             if #nonGuildNicks > 0 and NSQC4.RequestGp then
                 dbgGp("AWARD-REQUEST-NON-GUILD",
                     "запрашиваем ГП для",
@@ -2087,7 +2228,15 @@ NSQC4.RegisterModule("gp", function()
             dbgGp("AWARD-CLICK", "=== КОНЕЦ ОБРАБОТКИ КНОПКИ ===")
         end)
 
+        self.raidWindow:SetScript("OnShow", function()
+            dbgGp("RAID-WINDOW-ONSHOW",
+                "stack=", tostring(debugstack(2, 5, 5))
+            )
+        end)
         self.raidWindow:SetScript("OnHide", function()
+            dbgGp("RAID-WINDOW-ONHIDE",
+                "stack=", tostring(debugstack(2, 5, 5))
+            )
             if self.logWindow and self.logWindow:IsShown() then
                 self.logWindow:SetHeight(self.window:GetHeight())
             end
@@ -2179,6 +2328,7 @@ NSQC4.RegisterModule("gp", function()
                 "ns_get_rl", myName .. " " .. nick, "GUILD"
             )
         end
+        -- Повторно не шлём, пока выделение не сменится на другого игрока
 
         if not self.raidWindow.playerInfoContainer then
             self.raidWindow.playerInfoContainer = CreateFrame(
