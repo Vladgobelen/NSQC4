@@ -1,6 +1,16 @@
 -- ============================================================================
--- NSQC4 / Interface / AOClick
--- Кликабельные ники из канала АО + отображение уровень:ГП:репа.
+-- NSQC4 / Interface / AOClick  [ФИНАЛ: ленивая подгрузка ростера]
+-- ----------------------------------------------------------------------------
+-- Архитектура кэша ростера:
+--   * FullRebuild()  — ОДИН синхронный GetNumGuildMembers(true) за сессию.
+--                      Вызывается на PLAYER_ENTERING_WORLD и на
+--                      GUILD_ROSTER_UPDATE с isFullUpdate==1.
+--   * GetGuildData() — сначала guildInfo; если нет — лениво ищет по
+--                      клиентскому кэшу через GetNumGuildMembers() БЕЗ true
+--                      (не блокирует), кэширует и возвращает.
+--   * GUILD_ROSTER_UPDATE без isFullUpdate (инкрементальные обновления
+--     онлайн-статуса) — игнорируются. Кэш не трогаем.
+--   * PLAYER_GUILD_UPDATE — только сброс кэша. Без GuildRoster().
 -- ============================================================================
 
 NSQC4.RegisterModule("ui_ao", function()
@@ -32,13 +42,14 @@ NSQC4.RegisterModule("ui_ao", function()
     if aoSettings.hideRep == nil then aoSettings.hideRep = false end
 
     local aoNames = {}
-    local guildInfo = {}
+    local guildInfo = {}       -- кэш: [cleanName] = { level, gp, classFile, onote }
+    local guildIndex = {}      -- кэш: [cleanName] = rosterIndex (для ленивого поиска)
 
     local OFFICER_COLOR = "|cff00a000"
     local OFFICER_R, OFFICER_G, OFFICER_B = 0.00, 0.63, 0.00
 
     -- ========================================================================
-    -- Гильд-ростер
+    -- Ростер: утилиты
     -- ========================================================================
     local function mysplit(inputstr, sep)
         if sep == nil then sep = "%s" end
@@ -49,15 +60,26 @@ NSQC4.RegisterModule("ui_ao", function()
         return t
     end
 
-    local function RebuildGuildInfo()
+    local function CleanName(name)
+        if not name then return nil end
+        return name:match("^([^%-]+)") or name
+    end
+
+    -- ========================================================================
+    -- Ростер: ОДИН полный пересбор за сессию (синхронный GetNumGuildMembers(true))
+    -- ========================================================================
+    local function FullRebuild()
         guildInfo = {}
+        guildIndex = {}
         if not IsInGuild() then return end
-        local n = GetNumGuildMembers(true)
+
+        local n = GetNumGuildMembers(true)   -- ОДИН раз за сессию
         if not n or n == 0 then return end
+
         for i = 1, n do
             local name, _, _, level, _, _, _, officerNote, _, _, classFile = GetGuildRosterInfo(i)
             if name then
-                local cleanName = name:match("^([^%-]+)") or name
+                local cleanName = CleanName(name)
                 local words = mysplit(officerNote or "")
                 guildInfo[cleanName] = {
                     level     = level,
@@ -65,19 +87,66 @@ NSQC4.RegisterModule("ui_ao", function()
                     classFile = classFile,
                     onote     = officerNote,
                 }
+                guildIndex[cleanName] = i
             end
         end
     end
 
-    local function RequestGuildRoster()
-        if not IsInGuild() then return end
-        GuildRoster()
+    -- ========================================================================
+    -- Ростер: ленивая подгрузка ОДНОГО юзера (НЕ блокирует)
+    --   GetNumGuildMembers() БЕЗ true — читает клиентский кэш
+    -- ========================================================================
+    local function LazyLoadOne(cleanName)
+        if not cleanName then return nil end
+        if guildInfo[cleanName] then return guildInfo[cleanName] end
+        if not IsInGuild() then return nil end
+
+        -- Быстрый путь: если индекс уже знаем — читаем напрямую
+        local idx = guildIndex[cleanName]
+        if idx then
+            local name, _, _, level, _, _, _, officerNote, _, _, classFile = GetGuildRosterInfo(idx)
+            if name and CleanName(name) == cleanName then
+                local words = mysplit(officerNote or "")
+                guildInfo[cleanName] = {
+                    level     = level,
+                    gp        = words[3],
+                    classFile = classFile,
+                    onote     = officerNote,
+                }
+                return guildInfo[cleanName]
+            end
+            guildIndex[cleanName] = nil
+        end
+
+        -- Медленный путь: обход клиентского кэша (без true — не блокирует)
+        local n = GetNumGuildMembers()       -- БЕЗ true
+        if not n or n == 0 then return nil end
+
+        for i = 1, n do
+            local name, _, _, level, _, _, _, officerNote, _, _, classFile = GetGuildRosterInfo(i)
+            if name then
+                local cn = CleanName(name)
+                if cn == cleanName then
+                    local words = mysplit(officerNote or "")
+                    guildInfo[cleanName] = {
+                        level     = level,
+                        gp        = words[3],
+                        classFile = classFile,
+                        onote     = officerNote,
+                    }
+                    guildIndex[cleanName] = i
+                    return guildInfo[cleanName]
+                end
+            end
+        end
+
+        return nil
     end
 
     local function GetGuildData(name)
-        if not name then return nil end
-        local cleanName = name:match("^([^%-]+)") or name
-        return guildInfo[cleanName]
+        local cleanName = CleanName(name)
+        if not cleanName then return nil end
+        return guildInfo[cleanName] or LazyLoadOne(cleanName)
     end
 
     -- ========================================================================
@@ -312,7 +381,7 @@ NSQC4.RegisterModule("ui_ao", function()
     end
 
     -- ========================================================================
-    -- Перехват AddMessage
+    -- Перехват AddMessage (как в оригинале)
     -- ========================================================================
     local InitFrame = CreateFrame("Frame")
     InitFrame:RegisterEvent("PLAYER_LOGIN")
@@ -328,7 +397,6 @@ NSQC4.RegisterModule("ui_ao", function()
             local oldAddMessage = chatFrame.AddMessage
             chatFrame.AddMessage = function(self2, msg, ...)
                 if msg and type(msg) == "string" then
-                    -- (A) [Имя:числа] — пересобираем из чисел (2 или 3)
                     msg = msg:gsub(
                         "%[([^%[%]:]+):([%d%-:]+)%]",
                         function(name, inner)
@@ -372,7 +440,6 @@ NSQC4.RegisterModule("ui_ao", function()
                             return "[" .. name .. ":" .. table.concat(parts, ":") .. "]"
                         end)
 
-                    -- (A2) [Имя:gp] — одно число, добавить репу из кэша
                     msg = msg:gsub(
                         "%[([^%[%]:]+):(%d+)%]",
                         function(name, gp)
@@ -384,7 +451,6 @@ NSQC4.RegisterModule("ui_ao", function()
                             return "[" .. name .. ":" .. gp .. "]"
                         end)
 
-                    -- (B) |Hplayer:Имя|h[Имя]|h — стандартный ник (гильдейские)
                     msg = msg:gsub(
                         "|Hplayer:([^|:]+)([:%d+]*)([^|]*)|h%[([^%]]+)%]|h",
                         function(name, extra, msgCnt, displayName)
@@ -464,7 +530,7 @@ NSQC4.RegisterModule("ui_ao", function()
     end)
 
     -- ========================================================================
-    -- Клик по нику
+    -- Клик по нику (как в оригинале)
     -- ========================================================================
     local oldOnHyperlinkShow = ChatFrame_OnHyperlinkShow
     ChatFrame_OnHyperlinkShow = function(self, link, text, button)
@@ -487,30 +553,51 @@ NSQC4.RegisterModule("ui_ao", function()
     end
 
     -- ========================================================================
-    -- Ростер
+    -- [ФИКС] Ростер с ленивой подгрузкой
+    -- ------------------------------------------------------------------------
+    -- FullRebuild()          — ОДИН GetNumGuildMembers(true) за сессию.
+    --                          Вызов: PLAYER_ENTERING_WORLD (первый вход)
+    --                          + GUILD_ROSTER_UPDATE с isFullUpdate==1.
+    -- GetGuildData()         — если нет в guildInfo → LazyLoadOne()
+    --                          через GetNumGuildMembers() БЕЗ true.
+    -- GUILD_ROSTER_UPDATE    — если isFullUpdate==1 → FullRebuild(),
+    --                          иначе — ничего (инкрементальные обновления).
+    -- PLAYER_GUILD_UPDATE    — только сброс кэша, без GuildRoster().
     -- ========================================================================
     local rosterFrame = CreateFrame("Frame")
+    rosterFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     rosterFrame:RegisterEvent("GUILD_ROSTER_UPDATE")
     rosterFrame:RegisterEvent("PLAYER_GUILD_UPDATE")
-    rosterFrame:SetScript("OnEvent", function(_, event)
-        if event == "GUILD_ROSTER_UPDATE" then
-            RebuildGuildInfo()
-        elseif event == "PLAYER_GUILD_UPDATE" then
-            guildInfo = {}
-            if IsInGuild() then
-                RebuildGuildInfo()
-                RequestGuildRoster()
+
+    local enteredWorldOnce = false
+
+    rosterFrame:SetScript("OnEvent", function(_, event, arg1)
+        if event == "PLAYER_ENTERING_WORLD" then
+            if enteredWorldOnce then return end
+            enteredWorldOnce = true
+            -- [ФИКС] ОДИН синхронный вызов за сессию
+            FullRebuild()
+        elseif event == "GUILD_ROSTER_UPDATE" then
+            -- arg1 == isFullUpdate (1 = полный ростер пришёл с сервера)
+            local isFullUpdate = arg1
+            if isFullUpdate == 1 or isFullUpdate == true then
+                -- [ФИКС] Полный ростер пришёл сам → пересобираем кэш
+                FullRebuild()
             end
+            -- иначе — инкрементальное обновление онлайн-статуса, игнорируем
+        elseif event == "PLAYER_GUILD_UPDATE" then
+            -- [ФИКС] Только сброс. GuildRoster() НЕ зовём — петля.
+            guildInfo = {}
+            guildIndex = {}
+            -- Полный ростер придёт сам через GUILD_ROSTER_UPDATE (isFullUpdate=1)
         end
     end)
 
-    if IsInGuild() then
-        RebuildGuildInfo()
-        RequestGuildRoster()
-    end
+    -- [ФИКС] Убран вызов RebuildGuildInfo() / RequestGuildRoster() при загрузке.
+    -- Всё делает PLAYER_ENTERING_WORLD → FullRebuild().
 
     -- ========================================================================
-    -- Настройки
+    -- Настройки (как в оригинале)
     -- ========================================================================
     local settingsFrame
 
