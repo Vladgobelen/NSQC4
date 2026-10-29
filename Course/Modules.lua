@@ -17501,226 +17501,558 @@ content = [=[
 }
 
 ns_llua['lua'][150] = {
-type = "vartest",
-title = "Тест 149-1: состояния движения",
-helpModules = {149, 15},
-tasks = {
-{
-var = "isMounted",
-desc = 'Создай глобальную переменную isMounted = not not IsMounted()',
-check = function(value)
-return type(value) == "boolean"
-end,
-},
-{
-var = "isFlying",
-desc = 'Создай глобальную переменную isFlying = not not IsFlying()',
-check = function(value)
-return type(value) == "boolean"
-end,
-},
-{
-var = "isSwimming",
-desc = 'Создай глобальную переменную isSwimming = not not IsSwimming()',
-check = function(value)
-return type(value) == "boolean"
-end,
-},
-},
+    type = "commenttest",
+    title = "Тест 149-1: функция GetMovementStates",
+    helpModules = {149, 45, 44},
+    preloadVars = {
+        {var = "GetMovementStates", desc = "GetMovementStates очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "test1", desc = "test1 очищается перед проверкой"},
+        {var = "test2", desc = "test2 очищается перед проверкой"},
+        {var = "test3", desc = "test3 очищается перед проверкой"},
+        {var = "test4", desc = "test4 очищается перед проверкой"},
+        {var = "test5", desc = "test5 очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "test1", "test2", "test3", "test4", "test5"},
+    instruction = [=[
+<h>Тест 149-1: функция GetMovementStates</h>
+<t>Создай глобальную функцию <k>GetMovementStates()</k>.</t>
+<t>Функция должна вернуть таблицу с boolean значениями:</t>
+<c>isMounted</c> — <k>IsMounted()</k> приведённое к boolean через <k>not not</k>.
+<c>isFlying</c> — <k>IsFlying()</k> приведённое к boolean.
+<c>isSwimming</c> — <k>IsSwimming()</k> приведённое к boolean.
+<c>isIndoors</c> — <k>IsIndoors()</k> приведённое к boolean.
+<c>isOutdoors</c> — <k>IsOutdoors()</k> приведённое к boolean.
+<w>Во время проверки система прогонит функцию через 5 разных состояний.</w>
+]=],
+    initialCode = [=[
+function GetMovementStates()
+    
+end
+]=],
+    requireKeywords = {
+        "GetMovementStates",
+        "function",
+        "IsMounted",
+        "IsFlying",
+        "IsSwimming",
+        "IsIndoors",
+        "IsOutdoors",
+        "return",
+    },
+
+    mockGlobals = {
+        IsMounted = function()
+            local s = _G._currentScenario or 1
+            local data = {nil, 1, nil, 1, nil}
+            return data[s]
+        end,
+        IsFlying = function()
+            local s = _G._currentScenario or 1
+            local data = {nil, nil, 1, nil, nil}
+            return data[s]
+        end,
+        IsSwimming = function()
+            local s = _G._currentScenario or 1
+            local data = {nil, nil, nil, nil, 1}
+            return data[s]
+        end,
+        IsIndoors = function()
+            local s = _G._currentScenario or 1
+            local data = {1, nil, nil, 1, nil}
+            return data[s]
+        end,
+        IsOutdoors = function()
+            local s = _G._currentScenario or 1
+            local data = {nil, 1, 1, nil, 1}
+            return data[s]
+        end,
+    },
+
+    checkCode = function(env)
+        _G.checkError = nil
+        for i = 1, 5 do _G["test" .. i] = nil end
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(env) ~= "table" then
+            return fail("internal error")
+        end
+
+        local fn = env.GetMovementStates
+        if type(fn) ~= "function" then
+            return fail("GetMovementStates is not a function")
+        end
+
+        local scenarios = {
+            {name = "Indoors only", mounted=false, flying=false, swimming=false, indoors=true, outdoors=false},
+            {name = "Mounted outdoors", mounted=true, flying=false, swimming=false, indoors=false, outdoors=true},
+            {name = "Flying outdoors", mounted=false, flying=true, swimming=false, indoors=false, outdoors=true},
+            {name = "Mounted indoors", mounted=true, flying=false, swimming=false, indoors=true, outdoors=false},
+            {name = "Swimming outdoors", mounted=false, flying=false, swimming=true, indoors=false, outdoors=true},
+        }
+
+        for i, test in ipairs(scenarios) do
+            _G._currentScenario = i
+            local ok, result = pcall(fn)
+
+            if not ok then
+                _G["test" .. i] = test.name .. " ERROR: " .. tostring(result)
+                _G._currentScenario = nil
+                return fail("test " .. i .. " error")
+            end
+
+            if type(result) ~= "table" then
+                _G["test" .. i] = test.name .. " returned " .. type(result)
+                _G._currentScenario = nil
+                return fail("test " .. i .. ": must return table")
+            end
+
+            local errors = {}
+            if result.isMounted ~= test.mounted then
+                table.insert(errors, "isMounted=" .. tostring(result.isMounted))
+            end
+            if result.isFlying ~= test.flying then
+                table.insert(errors, "isFlying=" .. tostring(result.isFlying))
+            end
+            if result.isSwimming ~= test.swimming then
+                table.insert(errors, "isSwimming=" .. tostring(result.isSwimming))
+            end
+            if result.isIndoors ~= test.indoors then
+                table.insert(errors, "isIndoors=" .. tostring(result.isIndoors))
+            end
+            if result.isOutdoors ~= test.outdoors then
+                table.insert(errors, "isOutdoors=" .. tostring(result.isOutdoors))
+            end
+
+            if #errors > 0 then
+                _G["test" .. i] = test.name .. " ERRORS: " .. table.concat(errors, ", ")
+                _G._currentScenario = nil
+                return fail("test " .. i .. " failed")
+            end
+
+            _G["test" .. i] = test.name .. " OK"
+        end
+
+        _G._currentScenario = nil
+        return true
+    end,
 }
 
 ns_llua['lua'][151] = {
-type = "vartest",
-title = "Тест 149-2: скорость игрока",
-helpModules = {149, 65},
-tasks = {
-{
-var = "runSpeed",
-desc = 'Создай глобальную переменную runSpeed: если GetPlayerSpeed существует, используй её результат, иначе 0',
-check = function(value)
-return type(value) == "number" and value >= 0
-end,
-},
-{
-var = "flightSpeed",
-desc = 'Создай глобальную переменную flightSpeed: если GetPlayerSpeed существует, используй второй результат через select(2, ...), иначе 0',
-check = function(value)
-return type(value) == "number" and value >= 0
-end,
-},
-},
+    type = "commenttest",
+    title = "Тест 149-2: функция GetPlayerSpeedValues",
+    helpModules = {149, 45, 65},
+    preloadVars = {
+        {var = "GetPlayerSpeedValues", desc = "GetPlayerSpeedValues очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "test1", desc = "test1 очищается перед проверкой"},
+        {var = "test2", desc = "test2 очищается перед проверкой"},
+        {var = "test3", desc = "test3 очищается перед проверкой"},
+        {var = "test4", desc = "test4 очищается перед проверкой"},
+        {var = "test5", desc = "test5 очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "test1", "test2", "test3", "test4", "test5"},
+    instruction = [=[
+<h>Тест 149-2: функция GetPlayerSpeedValues</h>
+<t>Создай глобальную функцию <k>GetPlayerSpeedValues()</k>.</t>
+<t>Функция должна вернуть два значения: скорость бега и скорость полёта.</t>
+<t>Используй:</t>
+<c>GetPlayerSpeed()</c> — возвращает два числа.
+<c>or 0</c> — для защиты от nil.
+<t>Если <k>GetPlayerSpeed</k> недоступна, верни <n>0, 0</n>.</t>
+<w>Во время проверки система прогонит функцию через 5 разных состояний.</w>
+]=],
+    initialCode = [=[
+function GetPlayerSpeedValues()
+    
+end
+]=],
+    requireKeywords = {
+        "GetPlayerSpeedValues",
+        "function",
+        "GetPlayerSpeed",
+        "return",
+    },
+
+    mockGlobals = {
+        GetPlayerSpeed = function()
+            local s = _G._currentScenario or 1
+            local runData = {7, 14, 0, 100, nil}
+            local flyData = {0, 280, 0, 310, nil}
+            return runData[s], flyData[s]
+        end,
+    },
+
+    checkCode = function(env)
+        _G.checkError = nil
+        for i = 1, 5 do _G["test" .. i] = nil end
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(env) ~= "table" then
+            return fail("internal error")
+        end
+
+        local fn = env.GetPlayerSpeedValues
+        if type(fn) ~= "function" then
+            return fail("GetPlayerSpeedValues is not a function")
+        end
+
+        local scenarios = {
+            {name = "Walking", runExp = 7, flyExp = 0},
+            {name = "Epic mount", runExp = 14, flyExp = 280},
+            {name = "Standing", runExp = 0, flyExp = 0},
+            {name = "Fast mount", runExp = 100, flyExp = 310},
+            {name = "Unavailable", runExp = 0, flyExp = 0},
+        }
+
+        for i, test in ipairs(scenarios) do
+            _G._currentScenario = i
+            local ok, runSpeed, flySpeed = pcall(fn)
+
+            if not ok then
+                _G["test" .. i] = test.name .. " ERROR: " .. tostring(runSpeed)
+                _G._currentScenario = nil
+                return fail("test " .. i .. " error")
+            end
+
+            if type(runSpeed) ~= "number" or type(flySpeed) ~= "number" then
+                _G["test" .. i] = test.name .. " types: run=" .. type(runSpeed) .. " fly=" .. type(flySpeed)
+                _G._currentScenario = nil
+                return fail("test " .. i .. ": must return two numbers")
+            end
+
+            if runSpeed ~= test.runExp or flySpeed ~= test.flyExp then
+                _G["test" .. i] = test.name .. " got (" .. runSpeed .. "," .. flySpeed .. ") expected (" .. test.runExp .. "," .. test.flyExp .. ")"
+                _G._currentScenario = nil
+                return fail("test " .. i .. " failed")
+            end
+
+            _G["test" .. i] = test.name .. " OK: run=" .. runSpeed .. " fly=" .. flySpeed
+        end
+
+        _G._currentScenario = nil
+        return true
+    end,
 }
 
 ns_llua['lua'][152] = {
-type = "commenttest",
-title = "Тест 149-3: функция GetMovementState",
-helpModules = {149, 45, 17, 19},
-preloadVars = {
-{var = "GetMovementState", desc = "GetMovementState очищается перед проверкой"},
-{var = "checkError", desc = "checkError очищается перед проверкой"},
-},
-reportVars = {
-"checkError",
-},
-instruction = [=[
+    type = "commenttest",
+    title = "Тест 149-3: функция GetMovementState",
+    helpModules = {149, 45, 17, 19},
+    preloadVars = {
+        {var = "GetMovementState", desc = "GetMovementState очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "test1", desc = "test1 очищается перед проверкой"},
+        {var = "test2", desc = "test2 очищается перед проверкой"},
+        {var = "test3", desc = "test3 очищается перед проверкой"},
+        {var = "test4", desc = "test4 очищается перед проверкой"},
+        {var = "test5", desc = "test5 очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "test1", "test2", "test3", "test4", "test5"},
+    instruction = [=[
 <h>Тест 149-3: функция GetMovementState</h>
 <t>Создай глобальную функцию <k>GetMovementState()</k>.</t>
-<t>Функция должна вернуть одно из значений:</t>
+<t>Функция должна вернуть одно из четырёх значений (в порядке приоритета):</t>
 <c>"flying"</c> — если <k>IsFlying()</k> истинно.
-<c>"mounted"</c> — если игрок не летит, но <k>IsMounted()</k> истинно.
-<c>"swimming"</c> — если игрок не летит, не верхом, но <k>IsSwimming()</k> истинно.
+<c>"mounted"</c> — если не летит, но <k>IsMounted()</k> истинно.
+<c>"swimming"</c> — если не летит и не верхом, но <k>IsSwimming()</k> истинно.
 <c>"normal"</c> — во всех остальных случаях.
-<t>Используй:</t>
-<c>IsFlying</c>
-<c>IsMounted</c>
-<c>IsSwimming</c>
-<c>if / elseif / else</c>
-<t>Ничего выводить не нужно.</t>
+<w>Во время проверки система прогонит функцию через 5 разных состояний.</w>
 ]=],
-initialCode = [=[
--- Создай глобальную функцию GetMovementState()
+    initialCode = [=[
+function GetMovementState()
+    
+end
 ]=],
-requireKeywords = {
-"GetMovementState",
-"function",
-"IsFlying",
-"IsMounted",
-"IsSwimming",
-"return",
-},
-checkCode = function()
-_G.checkError = nil
-if type(_G.GetMovementState) ~= "function" then
-_G.checkError = "GetMovementState не является глобальной функцией"
-return false
-end
-local ok, state = pcall(_G.GetMovementState)
-if not ok then
-_G.checkError = "Ошибка вызова GetMovementState: " .. tostring(state)
-return false
-end
-local valid = {
-flying = true,
-mounted = true,
-swimming = true,
-normal = true,
-}
-if type(state) ~= "string" or not valid[state] then
-_G.checkError = "Функция должна вернуть flying, mounted, swimming или normal"
-return false
-end
-return true
-end,
+    requireKeywords = {
+        "GetMovementState",
+        "function",
+        "IsFlying",
+        "IsMounted",
+        "IsSwimming",
+        "return",
+    },
+
+    mockGlobals = {
+        IsMounted = function()
+            local s = _G._currentScenario or 1
+            local data = {nil, 1, nil, nil, 1}
+            return data[s]
+        end,
+        IsFlying = function()
+            local s = _G._currentScenario or 1
+            local data = {nil, nil, 1, nil, nil}
+            return data[s]
+        end,
+        IsSwimming = function()
+            local s = _G._currentScenario or 1
+            local data = {nil, nil, nil, 1, nil}
+            return data[s]
+        end,
+    },
+
+    checkCode = function(env)
+        _G.checkError = nil
+        for i = 1, 5 do _G["test" .. i] = nil end
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(env) ~= "table" then
+            return fail("internal error")
+        end
+
+        local fn = env.GetMovementState
+        if type(fn) ~= "function" then
+            return fail("GetMovementState is not a function")
+        end
+
+        local scenarios = {
+            {name = "Normal walking", exp = "normal"},
+            {name = "Mounted", exp = "mounted"},
+            {name = "Flying", exp = "flying"},
+            {name = "Swimming", exp = "swimming"},
+            {name = "Mounted only (not flying)", exp = "mounted"},
+        }
+
+        for i, test in ipairs(scenarios) do
+            _G._currentScenario = i
+            local ok, result = pcall(fn)
+
+            if not ok then
+                _G["test" .. i] = test.name .. " ERROR: " .. tostring(result)
+                _G._currentScenario = nil
+                return fail("test " .. i .. " error")
+            end
+
+            if type(result) ~= "string" then
+                _G["test" .. i] = test.name .. " returned " .. type(result)
+                _G._currentScenario = nil
+                return fail("test " .. i .. ": must return string")
+            end
+
+            if result ~= test.exp then
+                _G["test" .. i] = test.name .. " got '" .. result .. "' expected '" .. test.exp .. "'"
+                _G._currentScenario = nil
+                return fail("test " .. i .. " failed")
+            end
+
+            _G["test" .. i] = test.name .. " OK: " .. result
+        end
+
+        _G._currentScenario = nil
+        return true
+    end,
 }
 
 ns_llua['lua'][153] = {
-type = "commenttest",
-title = "Тест 149-4: функция GetSpeedReport",
-helpModules = {149, 45, 7, 65},
-preloadVars = {
-{var = "GetSpeedReport", desc = "GetSpeedReport очищается перед проверкой"},
-{var = "checkError", desc = "checkError очищается перед проверкой"},
-},
-reportVars = {
-"checkError",
-},
-instruction = [=[
+    type = "commenttest",
+    title = "Тест 149-4: функция GetSpeedReport",
+    helpModules = {149, 45, 7, 65},
+    preloadVars = {
+        {var = "GetSpeedReport", desc = "GetSpeedReport очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "test1", desc = "test1 очищается перед проверкой"},
+        {var = "test2", desc = "test2 очищается перед проверкой"},
+        {var = "test3", desc = "test3 очищается перед проверкой"},
+        {var = "test4", desc = "test4 очищается перед проверкой"},
+        {var = "test5", desc = "test5 очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "test1", "test2", "test3", "test4", "test5"},
+    instruction = [=[
 <h>Тест 149-4: функция GetSpeedReport</h>
 <t>Создай глобальную функцию <k>GetSpeedReport()</k>.</t>
-<t>Функция должна вернуть строку:</t>
-<s>"Скорость: значение"</s>
-<t>Если функция <k>GetPlayerSpeed</k> недоступна, используй значение <n>0</n>.</t>
-<t>Используй:</t>
-<c>GetPlayerSpeed</c>
-<c>tostring</c>
-<c>конкатенацию</c>
-<t>Ничего выводить не нужно.</t>
+<t>Функция должна вернуть строку формата:</t>
+<s>Speed: 14</s>
+<w>Во время проверки система прогонит функцию через 5 разных состояний.</w>
 ]=],
-initialCode = [=[
--- Создай глобальную функцию GetSpeedReport()
+    initialCode = [=[
+function GetSpeedReport()
+    
+end
 ]=],
-requireKeywords = {
-"GetSpeedReport",
-"function",
-"GetPlayerSpeed",
-"tostring",
-"return",
-},
-checkCode = function()
-_G.checkError = nil
-if type(_G.GetSpeedReport) ~= "function" then
-_G.checkError = "GetSpeedReport не является глобальной функцией"
-return false
-end
-local ok, text = pcall(_G.GetSpeedReport)
-if not ok then
-_G.checkError = "Ошибка вызова GetSpeedReport: " .. tostring(text)
-return false
-end
-if type(text) ~= "string" or text == "" then
-_G.checkError = "Функция должна вернуть строку"
-return false
-end
-if not text:find("Скорость: ", 1, true) then
-_G.checkError = "Строка должна начинаться с 'Скорость: '"
-return false
-end
-return true
-end,
+    requireKeywords = {
+        "GetSpeedReport",
+        "function",
+        "GetPlayerSpeed",
+        "return",
+    },
+
+    mockGlobals = {
+        GetPlayerSpeed = function()
+            local s = _G._currentScenario or 1
+            local data = {7.5, 14.2, 0, 100.9, nil}
+            return data[s]
+        end,
+    },
+
+    checkCode = function(env)
+        _G.checkError = nil
+        for i = 1, 5 do _G["test" .. i] = nil end
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(env) ~= "table" then
+            return fail("internal error")
+        end
+
+        local fn = env.GetSpeedReport
+        if type(fn) ~= "function" then
+            return fail("GetSpeedReport is not a function")
+        end
+
+        local scenarios = {
+            {name = "Walking", exp = "Speed: 7"},
+            {name = "Epic mount", exp = "Speed: 14"},
+            {name = "Standing", exp = "Speed: 0"},
+            {name = "Fast mount", exp = "Speed: 100"},
+            {name = "Unavailable", exp = "Speed: 0"},
+        }
+
+        for i, test in ipairs(scenarios) do
+            _G._currentScenario = i
+            local ok, result = pcall(fn)
+
+            if not ok then
+                _G["test" .. i] = test.name .. " ERROR: " .. tostring(result)
+                _G._currentScenario = nil
+                return fail("test " .. i .. " error")
+            end
+
+            if type(result) ~= "string" then
+                _G["test" .. i] = test.name .. " returned " .. type(result)
+                _G._currentScenario = nil
+                return fail("test " .. i .. ": must return string")
+            end
+
+            if result ~= test.exp then
+                _G["test" .. i] = test.name .. " got '" .. result .. "' expected '" .. test.exp .. "'"
+                _G._currentScenario = nil
+                return fail("test " .. i .. " failed")
+            end
+
+            _G["test" .. i] = test.name .. " OK: " .. result
+        end
+
+        _G._currentScenario = nil
+        return true
+    end,
 }
 
 ns_llua['lua'][154] = {
-type = "commenttest",
-title = "Тест 149-5: функция IsMountedOrFlying",
-helpModules = {149, 45, 21},
-preloadVars = {
-{var = "IsMountedOrFlying", desc = "IsMountedOrFlying очищается перед проверкой"},
-{var = "checkError", desc = "checkError очищается перед проверкой"},
-},
-reportVars = {
-"checkError",
-},
-instruction = [=[
+    type = "commenttest",
+    title = "Тест 149-5: функция IsMountedOrFlying",
+    helpModules = {149, 45, 21},
+    preloadVars = {
+        {var = "IsMountedOrFlying", desc = "IsMountedOrFlying очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "test1", desc = "test1 очищается перед проверкой"},
+        {var = "test2", desc = "test2 очищается перед проверкой"},
+        {var = "test3", desc = "test3 очищается перед проверкой"},
+        {var = "test4", desc = "test4 очищается перед проверкой"},
+        {var = "test5", desc = "test5 очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "test1", "test2", "test3", "test4", "test5"},
+    instruction = [=[
 <h>Тест 149-5: функция IsMountedOrFlying</h>
 <t>Создай глобальную функцию <k>IsMountedOrFlying()</k>.</t>
-<t>Функция должна вернуть <k>true</k>, если игрок верхом или летит.</t>
+<t>Функция должна вернуть <k>true</k>, если игрок верхом ИЛИ летит.</t>
 <t>Иначе функция должна вернуть <k>false</k>.</t>
-<t>Используй:</t>
-<c>IsMounted()</c>
-<c>IsFlying()</c>
-<c>or</c>
-<c>and true or false</c>
-<t>Ничего выводить не нужно.</t>
+<w>Во время проверки система прогонит функцию через 5 разных состояний.</w>
 ]=],
-initialCode = [=[
--- Создай глобальную функцию IsMountedOrFlying()
+    initialCode = [=[
+function IsMountedOrFlying()
+    
+end
 ]=],
-requireKeywords = {
-"IsMountedOrFlying",
-"function",
-"IsMounted",
-"IsFlying",
-"and",
-"or",
-"return",
-},
-checkCode = function()
-_G.checkError = nil
-if type(_G.IsMountedOrFlying) ~= "function" then
-_G.checkError = "IsMountedOrFlying не является глобальной функцией"
-return false
-end
-local ok, result = pcall(_G.IsMountedOrFlying)
-if not ok then
-_G.checkError = "Ошибка вызова IsMountedOrFlying: " .. tostring(result)
-return false
-end
-if type(result) ~= "boolean" then
-_G.checkError = "Функция должна вернуть boolean"
-return false
-end
-return true
-end,
+    requireKeywords = {
+        "IsMountedOrFlying",
+        "function",
+        "IsMounted",
+        "IsFlying",
+        "return",
+    },
+
+    mockGlobals = {
+        IsMounted = function()
+            local s = _G._currentScenario or 1
+            local data = {nil, 1, nil, 1, nil}
+            return data[s]
+        end,
+        IsFlying = function()
+            local s = _G._currentScenario or 1
+            local data = {nil, nil, 1, 1, nil}
+            return data[s]
+        end,
+    },
+
+    checkCode = function(env)
+        _G.checkError = nil
+        for i = 1, 5 do _G["test" .. i] = nil end
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(env) ~= "table" then
+            return fail("internal error")
+        end
+
+        local fn = env.IsMountedOrFlying
+        if type(fn) ~= "function" then
+            return fail("IsMountedOrFlying is not a function")
+        end
+
+        local scenarios = {
+            {name = "Walking", exp = false},
+            {name = "Mounted only", exp = true},
+            {name = "Flying only", exp = true},
+            {name = "Mounted and flying", exp = true},
+            {name = "Neither", exp = false},
+        }
+
+        for i, test in ipairs(scenarios) do
+            _G._currentScenario = i
+            local ok, result = pcall(fn)
+
+            if not ok then
+                _G["test" .. i] = test.name .. " ERROR: " .. tostring(result)
+                _G._currentScenario = nil
+                return fail("test " .. i .. " error")
+            end
+
+            if type(result) ~= "boolean" then
+                _G["test" .. i] = test.name .. " returned " .. type(result)
+                _G._currentScenario = nil
+                return fail("test " .. i .. ": must return boolean")
+            end
+
+            if result ~= test.exp then
+                _G["test" .. i] = test.name .. " got " .. tostring(result) .. " expected " .. tostring(test.exp)
+                _G._currentScenario = nil
+                return fail("test " .. i .. " failed")
+            end
+
+            _G["test" .. i] = test.name .. " OK: " .. tostring(result)
+        end
+
+        _G._currentScenario = nil
+        return true
+    end,
 }
 
 ns_llua['lua'][155] = {
@@ -17771,217 +18103,489 @@ content = [=[
 }
 
 ns_llua['lua'][156] = {
-type = "vartest",
-title = "Тест 155-1: время сессии",
-helpModules = {155, 65, 10},
-tasks = {
-{
-var = "gameTimeSeconds",
-desc = 'Создай глобальную переменную gameTimeSeconds = GetTime() or 0',
-check = function(value)
-return type(value) == "number" and value >= 0
-end,
-},
-{
-var = "gameTimeMinutes",
-desc = 'Создай глобальную переменную gameTimeMinutes = math.floor((GetTime() or 0) / 60)',
-check = function(value)
-return type(value) == "number" and value >= 0
-end,
-},
-},
+    type = "commenttest",
+    title = "Тест 155-1: функция GetSessionTimes",
+    helpModules = {155, 45, 10},
+    preloadVars = {
+        {var = "GetSessionTimes", desc = "GetSessionTimes очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "test1", desc = "test1 очищается перед проверкой"},
+        {var = "test2", desc = "test2 очищается перед проверкой"},
+        {var = "test3", desc = "test3 очищается перед проверкой"},
+        {var = "test4", desc = "test4 очищается перед проверкой"},
+        {var = "test5", desc = "test5 очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "test1", "test2", "test3", "test4", "test5"},
+    instruction = [=[
+<h>Тест 155-1: функция GetSessionTimes</h>
+<t>Создай глобальную функцию <k>GetSessionTimes()</k>.</t>
+<t>Функция должна вернуть два числа: полные секунды сессии и полные минуты.</t>
+<w>Во время проверки система прогонит функцию через 5 разных значений времени.</w>
+]=],
+    initialCode = [=[
+function GetSessionTimes()
+    
+end
+]=],
+    requireKeywords = {
+        "GetSessionTimes",
+        "function",
+        "GetTime",
+        "math.floor",
+        "return",
+    },
+
+    mockGlobals = {
+        GetTime = function()
+            local s = _G._currentScenario or 1
+            local data = {45.7, 125.3, 3600.0, 7200.5, nil}
+            return data[s]
+        end,
+    },
+
+    checkCode = function(env)
+        _G.checkError = nil
+        for i = 1, 5 do _G["test" .. i] = nil end
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(env) ~= "table" then
+            return fail("internal error")
+        end
+
+        local fn = env.GetSessionTimes
+        if type(fn) ~= "function" then
+            return fail("GetSessionTimes is not a function")
+        end
+
+        local scenarios = {
+            {name = "45 seconds", seconds = 45, minutes = 0},
+            {name = "2 min 5 sec", seconds = 125, minutes = 2},
+            {name = "1 hour", seconds = 3600, minutes = 60},
+            {name = "2 hours", seconds = 7200, minutes = 120},
+            {name = "Unavailable", seconds = 0, minutes = 0},
+        }
+
+        for i, test in ipairs(scenarios) do
+            _G._currentScenario = i
+            local ok, seconds, minutes = pcall(fn)
+
+            if not ok then
+                _G["test" .. i] = test.name .. " ERROR: " .. tostring(seconds)
+                _G._currentScenario = nil
+                return fail("test " .. i .. " error")
+            end
+
+            if type(seconds) ~= "number" or type(minutes) ~= "number" then
+                _G["test" .. i] = test.name .. " types: s=" .. type(seconds) .. " m=" .. type(minutes)
+                _G._currentScenario = nil
+                return fail("test " .. i .. ": must return two numbers")
+            end
+
+            if seconds ~= test.seconds or minutes ~= test.minutes then
+                _G["test" .. i] = test.name .. " got (" .. seconds .. "," .. minutes .. ") expected (" .. test.seconds .. "," .. test.minutes .. ")"
+                _G._currentScenario = nil
+                return fail("test " .. i .. " failed")
+            end
+
+            _G["test" .. i] = test.name .. " OK: " .. seconds .. "s = " .. minutes .. "m"
+        end
+
+        _G._currentScenario = nil
+        return true
+    end,
 }
 
 ns_llua['lua'][157] = {
-type = "vartest",
-title = "Тест 155-2: игровое время",
-helpModules = {155, 65},
-tasks = {
-{
-var = "gameHour",
-desc = 'Создай глобальную переменную gameHour = GetGameTime() or 0',
-check = function(value)
-return type(value) == "number" and value >= 0 and value <= 23
-end,
-},
-{
-var = "gameMinute",
-desc = 'Создай глобальную переменную gameMinute = select(2, GetGameTime()) or 0',
-check = function(value)
-return type(value) == "number" and value >= 0 and value <= 59
-end,
-},
-},
+    type = "commenttest",
+    title = "Тест 155-2: функция GetGameTimeValues",
+    helpModules = {155, 45, 65},
+    preloadVars = {
+        {var = "GetGameTimeValues", desc = "GetGameTimeValues очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "test1", desc = "test1 очищается перед проверкой"},
+        {var = "test2", desc = "test2 очищается перед проверкой"},
+        {var = "test3", desc = "test3 очищается перед проверкой"},
+        {var = "test4", desc = "test4 очищается перед проверкой"},
+        {var = "test5", desc = "test5 очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "test1", "test2", "test3", "test4", "test5"},
+    instruction = [=[
+<h>Тест 155-2: функция GetGameTimeValues</h>
+<t>Создай глобальную функцию <k>GetGameTimeValues()</k>.</t>
+<t>Функция должна вернуть два числа: час (0-23) и минуту (0-59) игрового времени.</t>
+<w>Во время проверки система прогонит функцию через 5 разных значений времени.</w>
+]=],
+    initialCode = [=[
+function GetGameTimeValues()
+    
+end
+]=],
+    requireKeywords = {
+        "GetGameTimeValues",
+        "function",
+        "GetGameTime",
+        "return",
+    },
+
+    mockGlobals = {
+        GetGameTime = function()
+            local s = _G._currentScenario or 1
+            local hours = {0, 12, 23, 6, nil}
+            local minutes = {0, 30, 59, 45, nil}
+            return hours[s], minutes[s]
+        end,
+    },
+
+    checkCode = function(env)
+        _G.checkError = nil
+        for i = 1, 5 do _G["test" .. i] = nil end
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(env) ~= "table" then
+            return fail("internal error")
+        end
+
+        local fn = env.GetGameTimeValues
+        if type(fn) ~= "function" then
+            return fail("GetGameTimeValues is not a function")
+        end
+
+        local scenarios = {
+            {name = "Midnight", hour = 0, minute = 0},
+            {name = "Noon", hour = 12, minute = 30},
+            {name = "Late night", hour = 23, minute = 59},
+            {name = "Early morning", hour = 6, minute = 45},
+            {name = "Unavailable", hour = 0, minute = 0},
+        }
+
+        for i, test in ipairs(scenarios) do
+            _G._currentScenario = i
+            local ok, hour, minute = pcall(fn)
+
+            if not ok then
+                _G["test" .. i] = test.name .. " ERROR: " .. tostring(hour)
+                _G._currentScenario = nil
+                return fail("test " .. i .. " error")
+            end
+
+            if type(hour) ~= "number" or type(minute) ~= "number" then
+                _G["test" .. i] = test.name .. " types: h=" .. type(hour) .. " m=" .. type(minute)
+                _G._currentScenario = nil
+                return fail("test " .. i .. ": must return two numbers")
+            end
+
+            if hour ~= test.hour or minute ~= test.minute then
+                _G["test" .. i] = test.name .. " got (" .. hour .. "," .. minute .. ") expected (" .. test.hour .. "," .. test.minute .. ")"
+                _G._currentScenario = nil
+                return fail("test " .. i .. " failed")
+            end
+
+            _G["test" .. i] = test.name .. " OK: " .. hour .. ":" .. minute
+        end
+
+        _G._currentScenario = nil
+        return true
+    end,
 }
 
 ns_llua['lua'][158] = {
-type = "commenttest",
-title = "Тест 155-3: функция GetSessionTimeText",
-helpModules = {155, 45, 14, 10},
-preloadVars = {
-{var = "GetSessionTimeText", desc = "GetSessionTimeText очищается перед проверкой"},
-{var = "checkError", desc = "checkError очищается перед проверкой"},
-},
-reportVars = {
-"checkError",
-},
-instruction = [=[
+    type = "commenttest",
+    title = "Тест 155-3: функция GetSessionTimeText",
+    helpModules = {155, 45, 14, 10},
+    preloadVars = {
+        {var = "GetSessionTimeText", desc = "GetSessionTimeText очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "test1", desc = "test1 очищается перед проверкой"},
+        {var = "test2", desc = "test2 очищается перед проверкой"},
+        {var = "test3", desc = "test3 очищается перед проверкой"},
+        {var = "test4", desc = "test4 очищается перед проверкой"},
+        {var = "test5", desc = "test5 очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "test1", "test2", "test3", "test4", "test5"},
+    instruction = [=[
 <h>Тест 155-3: функция GetSessionTimeText</h>
 <t>Создай глобальную функцию <k>GetSessionTimeText()</k>.</t>
-<t>Функция должна вернуть строку с временем сессии.</t>
-<t>Формат строки:</t>
-<s>"Минут: X, Секунд: Y"</s>
-<t>Используй:</t>
-<c>GetTime()</c>
-<c>math.floor</c>
-<c>остаток от деления %</c>
-<c>string.format</c>
-<t>Ничего выводить не нужно.</t>
+<t>Функция должна вернуть строку формата:</t>
+<s>Minutes: 2, Seconds: 5</s>
+<w>Во время проверки система прогонит функцию через 5 разных значений времени.</w>
 ]=],
-initialCode = [=[
--- Создай глобальную функцию GetSessionTimeText()
+    initialCode = [=[
+function GetSessionTimeText()
+    
+end
 ]=],
-requireKeywords = {
-"GetSessionTimeText",
-"function",
-"GetTime",
-"math.floor",
-"string.format",
-"return",
-},
-checkCode = function()
-_G.checkError = nil
-if type(_G.GetSessionTimeText) ~= "function" then
-_G.checkError = "GetSessionTimeText не является глобальной функцией"
-return false
-end
-local ok, text = pcall(_G.GetSessionTimeText)
-if not ok then
-_G.checkError = "Ошибка вызова GetSessionTimeText: " .. tostring(text)
-return false
-end
-if type(text) ~= "string" or text == "" then
-_G.checkError = "Функция должна вернуть строку"
-return false
-end
-if not text:find("Минут: ", 1, true) then
-_G.checkError = "Строка должна содержать 'Минут: '"
-return false
-end
-if not text:find(", Секунд: ", 1, true) then
-_G.checkError = "Строка должна содержать ', Секунд: '"
-return false
-end
-return true
-end,
+    requireKeywords = {
+        "GetSessionTimeText",
+        "function",
+        "GetTime",
+        "return",
+    },
+
+    mockGlobals = {
+        GetTime = function()
+            local s = _G._currentScenario or 1
+            local data = {45.7, 125.3, 3661.0, 7200.5, nil}
+            return data[s]
+        end,
+    },
+
+    checkCode = function(env)
+        _G.checkError = nil
+        for i = 1, 5 do _G["test" .. i] = nil end
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(env) ~= "table" then
+            return fail("internal error")
+        end
+
+        local fn = env.GetSessionTimeText
+        if type(fn) ~= "function" then
+            return fail("GetSessionTimeText is not a function")
+        end
+
+        local scenarios = {
+            {name = "45 seconds", exp = "Minutes: 0, Seconds: 45"},
+            {name = "2 min 5 sec", exp = "Minutes: 2, Seconds: 5"},
+            {name = "1 hour 1 min", exp = "Minutes: 61, Seconds: 1"},
+            {name = "2 hours", exp = "Minutes: 120, Seconds: 0"},
+            {name = "Unavailable", exp = "Minutes: 0, Seconds: 0"},
+        }
+
+        for i, test in ipairs(scenarios) do
+            _G._currentScenario = i
+            local ok, result = pcall(fn)
+
+            if not ok then
+                _G["test" .. i] = test.name .. " ERROR: " .. tostring(result)
+                _G._currentScenario = nil
+                return fail("test " .. i .. " error")
+            end
+
+            if type(result) ~= "string" then
+                _G["test" .. i] = test.name .. " returned " .. type(result)
+                _G._currentScenario = nil
+                return fail("test " .. i .. ": must return string")
+            end
+
+            if result ~= test.exp then
+                _G["test" .. i] = test.name .. " got '" .. result .. "' expected '" .. test.exp .. "'"
+                _G._currentScenario = nil
+                return fail("test " .. i .. " failed")
+            end
+
+            _G["test" .. i] = test.name .. " OK: " .. result
+        end
+
+        _G._currentScenario = nil
+        return true
+    end,
 }
 
 ns_llua['lua'][159] = {
-type = "commenttest",
-title = "Тест 155-4: функция GetFramerateSafe",
-helpModules = {155, 45, 65},
-preloadVars = {
-{var = "GetFramerateSafe", desc = "GetFramerateSafe очищается перед проверкой"},
-{var = "checkError", desc = "checkError очищается перед проверкой"},
-},
-reportVars = {
-"checkError",
-},
-instruction = [=[
+    type = "commenttest",
+    title = "Тест 155-4: функция GetFramerateSafe",
+    helpModules = {155, 45, 65},
+    preloadVars = {
+        {var = "GetFramerateSafe", desc = "GetFramerateSafe очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "test1", desc = "test1 очищается перед проверкой"},
+        {var = "test2", desc = "test2 очищается перед проверкой"},
+        {var = "test3", desc = "test3 очищается перед проверкой"},
+        {var = "test4", desc = "test4 очищается перед проверкой"},
+        {var = "test5", desc = "test5 очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "test1", "test2", "test3", "test4", "test5"},
+    instruction = [=[
 <h>Тест 155-4: функция GetFramerateSafe</h>
 <t>Создай глобальную функцию <k>GetFramerateSafe()</k>.</t>
-<t>Функция должна вернуть FPS как число.</t>
-<t>Используй:</t>
-<c>GetFramerate()</c>
-<c>or 0</c>
-<t>Если FPS получить нельзя, функция должна вернуть <n>0</n>.</t>
-<t>Ничего выводить не нужно.</t>
+<t>Функция должна вернуть FPS как целое число (через <k>math.floor</k>).</t>
+<w>Во время проверки система прогонит функцию через 5 разных значений FPS.</w>
 ]=],
-initialCode = [=[
--- Создай глобальную функцию GetFramerateSafe()
+    initialCode = [=[
+function GetFramerateSafe()
+    
+end
 ]=],
-requireKeywords = {
-"GetFramerateSafe",
-"function",
-"GetFramerate",
-"return",
-},
-checkCode = function()
-_G.checkError = nil
-if type(_G.GetFramerateSafe) ~= "function" then
-_G.checkError = "GetFramerateSafe не является глобальной функцией"
-return false
-end
-local ok, fps = pcall(_G.GetFramerateSafe)
-if not ok then
-_G.checkError = "Ошибка вызова GetFramerateSafe: " .. tostring(fps)
-return false
-end
-if type(fps) ~= "number" then
-_G.checkError = "Функция должна вернуть число"
-return false
-end
-if fps < 0 then
-_G.checkError = "FPS не может быть отрицательным"
-return false
-end
-return true
-end,
+    requireKeywords = {
+        "GetFramerateSafe",
+        "function",
+        "GetFramerate",
+        "return",
+    },
+
+    mockGlobals = {
+        GetFramerate = function()
+            local s = _G._currentScenario or 1
+            local data = {60.5, 144.9, 29.1, 0, nil}
+            return data[s]
+        end,
+    },
+
+    checkCode = function(env)
+        _G.checkError = nil
+        for i = 1, 5 do _G["test" .. i] = nil end
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(env) ~= "table" then
+            return fail("internal error")
+        end
+
+        local fn = env.GetFramerateSafe
+        if type(fn) ~= "function" then
+            return fail("GetFramerateSafe is not a function")
+        end
+
+        local scenarios = {
+            {name = "60 FPS", exp = 60},
+            {name = "144 FPS", exp = 144},
+            {name = "29 FPS", exp = 29},
+            {name = "0 FPS", exp = 0},
+            {name = "Unavailable", exp = 0},
+        }
+
+        for i, test in ipairs(scenarios) do
+            _G._currentScenario = i
+            local ok, result = pcall(fn)
+
+            if not ok then
+                _G["test" .. i] = test.name .. " ERROR: " .. tostring(result)
+                _G._currentScenario = nil
+                return fail("test " .. i .. " error")
+            end
+
+            if type(result) ~= "number" then
+                _G["test" .. i] = test.name .. " returned " .. type(result)
+                _G._currentScenario = nil
+                return fail("test " .. i .. ": must return number")
+            end
+
+            if result ~= test.exp then
+                _G["test" .. i] = test.name .. " got " .. result .. " expected " .. test.exp
+                _G._currentScenario = nil
+                return fail("test " .. i .. " failed")
+            end
+
+            _G["test" .. i] = test.name .. " OK: " .. result .. " FPS"
+        end
+
+        _G._currentScenario = nil
+        return true
+    end,
 }
 
 ns_llua['lua'][160] = {
-type = "commenttest",
-title = "Тест 155-5: функция GetLatencySafe",
-helpModules = {155, 45, 65},
-preloadVars = {
-{var = "GetLatencySafe", desc = "GetLatencySafe очищается перед проверкой"},
-{var = "checkError", desc = "checkError очищается перед проверкой"},
-},
-reportVars = {
-"checkError",
-},
-instruction = [=[
+    type = "commenttest",
+    title = "Тест 155-5: функция GetLatencySafe",
+    helpModules = {155, 45, 65},
+    preloadVars = {
+        {var = "GetLatencySafe", desc = "GetLatencySafe очищается перед проверкой"},
+        {var = "checkError", desc = "checkError очищается перед проверкой"},
+        {var = "test1", desc = "test1 очищается перед проверкой"},
+        {var = "test2", desc = "test2 очищается перед проверкой"},
+        {var = "test3", desc = "test3 очищается перед проверкой"},
+        {var = "test4", desc = "test4 очищается перед проверкой"},
+        {var = "test5", desc = "test5 очищается перед проверкой"},
+    },
+    reportVars = {"checkError", "test1", "test2", "test3", "test4", "test5"},
+    instruction = [=[
 <h>Тест 155-5: функция GetLatencySafe</h>
 <t>Создай глобальную функцию <k>GetLatencySafe()</k>.</t>
-<t>Функция должна вернуть пинг как число.</t>
-<t>Используй:</t>
-<c>GetNetStats()</c>
-<c>select(3, ...)</c>
-<c>or 0</c>
-<t>Если пинг получить нельзя, функция должна вернуть <n>0</n>.</t>
-<t>Ничего выводить не нужно.</t>
+<t>Функция должна вернуть домашний пинг как целое число.</t>
+<w>Во время проверки система прогонит функцию через 5 разных значений пинга.</w>
 ]=],
-initialCode = [=[
--- Создай глобальную функцию GetLatencySafe()
+    initialCode = [=[
+function GetLatencySafe()
+    
+end
 ]=],
-requireKeywords = {
-"GetLatencySafe",
-"function",
-"GetNetStats",
-"select",
-"return",
-},
-checkCode = function()
-_G.checkError = nil
-if type(_G.GetLatencySafe) ~= "function" then
-_G.checkError = "GetLatencySafe не является глобальной функцией"
-return false
-end
-local ok, latency = pcall(_G.GetLatencySafe)
-if not ok then
-_G.checkError = "Ошибка вызова GetLatencySafe: " .. tostring(latency)
-return false
-end
-if type(latency) ~= "number" then
-_G.checkError = "Функция должна вернуть число"
-return false
-end
-if latency < 0 then
-_G.checkError = "Пинг не может быть отрицательным"
-return false
-end
-return true
-end,
+    requireKeywords = {
+        "GetLatencySafe",
+        "function",
+        "GetNetStats",
+        "return",
+    },
+
+    mockGlobals = {
+        GetNetStats = function()
+            local s = _G._currentScenario or 1
+            local bandwidthIn = {100, 200, 50, 0, 0}
+            local bandwidthOut = {50, 100, 25, 0, 0}
+            local latencyHome = {45, 120, 250, 0, nil}
+            local latencyWorld = {80, 200, 400, 0, nil}
+            return bandwidthIn[s], bandwidthOut[s], latencyHome[s], latencyWorld[s]
+        end,
+    },
+
+    checkCode = function(env)
+        _G.checkError = nil
+        for i = 1, 5 do _G["test" .. i] = nil end
+
+        local function fail(msg)
+            _G.checkError = msg
+            return msg
+        end
+
+        if type(env) ~= "table" then
+            return fail("internal error")
+        end
+
+        local fn = env.GetLatencySafe
+        if type(fn) ~= "function" then
+            return fail("GetLatencySafe is not a function")
+        end
+
+        local scenarios = {
+            {name = "Low ping", exp = 45},
+            {name = "Medium ping", exp = 120},
+            {name = "High ping", exp = 250},
+            {name = "Zero ping", exp = 0},
+            {name = "Unavailable", exp = 0},
+        }
+
+        for i, test in ipairs(scenarios) do
+            _G._currentScenario = i
+            local ok, result = pcall(fn)
+
+            if not ok then
+                _G["test" .. i] = test.name .. " ERROR: " .. tostring(result)
+                _G._currentScenario = nil
+                return fail("test " .. i .. " error")
+            end
+
+            if type(result) ~= "number" then
+                _G["test" .. i] = test.name .. " returned " .. type(result)
+                _G._currentScenario = nil
+                return fail("test " .. i .. ": must return number")
+            end
+
+            if result ~= test.exp then
+                _G["test" .. i] = test.name .. " got " .. result .. " expected " .. test.exp
+                _G._currentScenario = nil
+                return fail("test " .. i .. " failed")
+            end
+
+            _G["test" .. i] = test.name .. " OK: " .. result .. " ms"
+        end
+
+        _G._currentScenario = nil
+        return true
+    end,
 }
 
 ns_llua['lua'][161] = {
