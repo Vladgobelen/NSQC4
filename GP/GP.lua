@@ -1139,25 +1139,17 @@ NSQC4.RegisterModule("gp", function()
 
         if hasSelection then
             if not self.raidWindow:IsShown() then
-                if InCombatLockdown() then
-                    self.raidWindow:SetAlpha(1)
-                else
-                    self.raidWindow:Show()
-                    self:RestoreRaidWindowState()
-                    self:_UpdateSelectedPlayersText()
-                    if self.logWindow and self.logWindow:IsShown() then
-                        self.logWindow:SetHeight(self.window:GetHeight() / 2)
-                    end
+                self.raidWindow:Show()
+                self:RestoreRaidWindowState()
+                self:_UpdateSelectedPlayersText()
+                if self.logWindow and self.logWindow:IsShown() then
+                    self.logWindow:SetHeight(self.window:GetHeight() / 2)
                 end
             end
             self:_UpdatePlayerInfo()
         else
             if self.raidWindow:IsShown() then
-                if InCombatLockdown() then
-                    self.raidWindow:SetAlpha(0)
-                else
-                    self.raidWindow:Hide()
-                end
+                self.raidWindow:Hide()
             end
             if self.logWindow and self.logWindow:IsShown() then
                 self.logWindow:SetHeight(self.window:GetHeight())
