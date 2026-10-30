@@ -363,6 +363,8 @@ NSQC4.RegisterModule("ui_ao", function()
         return msg
     end
 
+    NSQC4.AOClick_ReplaceAll = ReplaceAll
+
     local function IsRelayText(text)
         if not text or text == "" then return false end
         if text:match("^%[\208\158") then return true end

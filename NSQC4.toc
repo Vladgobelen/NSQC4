@@ -51,6 +51,7 @@ Interface\ui_frames\Chat.lua
 Interface\ui_frames\Layers.lua
 Interface\ui_frames\Alpha.lua
 Interface\ui_frames\Move.lua
+Interface\WIMGuard.lua
 GP\GP.lua
 GP\ExternalGP.lua
 GP\AUK.lua
@@ -71,3 +72,28 @@ Course\Init.lua
 VERSION.lua
 Quests\Field\Init.lua
 Quests\Field\UI.lua
+
+# ==========================================
+# NOWIM (ЧАТ)
+# ==========================================
+Interface\nowim\Config.lua
+Interface\nowim\Utils.lua
+Interface\nowim\Aliases.lua
+Interface\nowim\Storage.lua
+Interface\nowim\Network.lua
+Interface\nowim\ChatHook.lua
+Interface\nowim\ChatEngine.lua
+
+Interface\nowim\UI\ChatView\ConfigUI.lua
+
+Interface\nowim\UI\ChatView\Window.lua
+Interface\nowim\UI\ChatView\Scroll.lua
+Interface\nowim\UI\ChatView\Chat.lua
+Interface\nowim\UI\ChatView\Input.lua
+
+Interface\nowim\UI\RightPanel.lua
+Interface\nowim\UI\LeftPanel.lua
+Interface\nowim\UI\Tabs.lua
+Interface\nowim\UI\ConstSettings.lua
+
+Interface\nowim\Init.lua
