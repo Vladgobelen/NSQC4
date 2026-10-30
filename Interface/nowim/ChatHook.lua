@@ -1,5 +1,5 @@
 -- ============================================================================
--- NSQC4 / nowim / ChatHook
+-- NSQC4 / nowim / ChatHook (ФИКС ОФИЦЕРСКОГО)
 -- ============================================================================
 
 NSQC4.RegisterModule("nowim", function()
@@ -32,32 +32,7 @@ NSQC4.RegisterModule("nowim", function()
     frame:RegisterEvent("CHAT_MSG_MONEY")
     frame:RegisterEvent("CHAT_MSG_SKILL")
 
-    -- Функция для подхвата каналов
-    local function UpdateChannels()
-        for i = 1, 20 do
-            local id, name = GetChannelName(i)
-            if id and id > 0 and name then
-                -- Добавляем канал в список channels, если его там нет
-                if not C.db.channels[tostring(id)] then
-                    C.db.channels[tostring(id)] = { type = "CHANNEL", name = name }
-                end
-                -- Включаем его в фильтр по умолчанию, если он не был выключен
-                if C.db.settings.filters and C.db.settings.filters[name] == nil then
-                    C.db.settings.filters[name] = true
-                end
-            end
-        end
-    end
-
-    frame:RegisterEvent("PLAYER_ENTERING_WORLD")
-    frame:RegisterEvent("CHANNEL_UI_UPDATE")
-
     frame:SetScript("OnEvent", function(self, event, text, sender)
-        if event == "PLAYER_ENTERING_WORLD" or event == "CHANNEL_UI_UPDATE" then
-            UpdateChannels()
-            return
-        end
-
         if not text or text == "" then return end
         if text:sub(1, 5) == "NSMSG" then return end 
 
@@ -66,36 +41,87 @@ NSQC4.RegisterModule("nowim", function()
 
         local chatType = event:match("^CHAT_MSG_(.+)$")
         local targetKey = "GENERAL"
-        
-        if sender == myName and NSQC4.Nowim._lastSentText == text and (GetTime() - (NSQC4.Nowim._lastSentTime or 0)) < 2 then
+        local isMine = (sender == myName)
+
+        local isAO = text:find("^%[O") or text:find("^%[A") or text:find("^%[О") or text:find("^%[А") or text:find("^|c%x%x%x%x%x%x%[O") or text:find("^|c%x%x%x%x%x%x%[A")
+
+        local charTag
+        if isAO then
+            isMine = false
+            charTag = nil
+            if sender and sender ~= "" then
+                text = text:gsub("^" .. sender .. ":%s*", "")
+            end
+        else
+            charTag = isMine and myName or sender
+        end
+
+        -- ОТЛАДКА
+        if chatType == "OFFICER" then
+            print("|cff00ff00[DEBUG OFFICER]|r Пришло: " .. tostring(text) .. " | От: " .. tostring(sender) .. " | isAO: " .. tostring(isAO))
+        end
+
+        if isMine and NSQC4.Nowim._lastSentText == text and (GetTime() - (NSQC4.Nowim._lastSentTime or 0)) < 2 then
             return
         end
 
-        -- Обработка каналов
         if chatType == "CHANNEL" then
             local _, channelName = GetChannelName(text)
             if channelName then
                 local filters = C.db.settings.filters or {}
-                if filters[channelName] == false then return end -- Фильтр выключен
+                if filters[channelName] == false then return end
             end
         end
 
-        -- Системные сообщения
+        local formattedText = text
+
         if chatType == "SYSTEM" or chatType == "LOOT" or chatType == "MONEY" or chatType == "SKILL" or not sender or sender == "" then
             local filters = C.db.settings.filters or {}
             if filters["SYSTEM"] == false then return end
-            S.AddMessage("GENERAL", text, false, nil)
+            S.AddMessage("GENERAL", formattedText, false, nil, chatType)
         else
-            -- Обычные сообщения
-            local cleanText = text:gsub("^" .. sender .. ":%s*", "")
-            local formattedText = cleanText
-            if NSQC4.AOClick_ReplaceAll then
-                formattedText = NSQC4.AOClick_ReplaceAll(cleanText)
+            if chatType == "OFFICER" then
+                print("|cff00ff00[DEBUG OFFICER]|r Сохраняем в OFFICER.")
+                S.AddMessage("OFFICER", formattedText, isMine, charTag, chatType)
+                
+                if C.db.settings.showOfficerInGuild then
+                    print("|cff00ff00[DEBUG OFFICER]|r Дублируем в GUILD.")
+                    S.AddMessage("GUILD", formattedText, isMine, charTag, chatType)
+                end
+                
+                local hasOfficerTab = false
+                for _, key in ipairs(C.db.openTabs) do
+                    if key == "OFFICER" then hasOfficerTab = true break end
+                end
+                if not hasOfficerTab then
+                    print("|cff00ff00[DEBUG OFFICER]|r Вкладки OFFICER нет, открываем.")
+                    E.OpenDialog("OFFICER", true)
+                else
+                    print("|cff00ff00[DEBUG OFFICER]|r Вкладка OFFICER уже открыта.")
+                end
+                
+                -- ПРИНУДИТЕЛЬНО ОБНОВЛЯЕМ ЧАТ, ЕСЛИ АКТИВНА ВКЛАДКА OFFICER
+                if C.db.activeTab == "OFFICER" then
+                    print("|cff00ff00[DEBUG OFFICER]|r Обновляем чат (активна вкладка OFFICER).")
+                    local UI = NSQC4.Nowim.UI
+                    if UI and UI.Chat and UI.Chat.Refresh then UI.Chat.Refresh() end
+                else
+                    -- Если вкладка не активна, обновляем, чтобы там были данные
+                    local UI = NSQC4.Nowim.UI
+                    if UI and UI.Chat and UI.Chat.Refresh then UI.Chat.Refresh() end
+                end
+                
+                E.UpdateUI()
+                return
             end
 
             if chatType == "WHISPER" then
                 targetKey = sender
-                E.OpenDialog(targetKey) 
+                E.OpenDialog(targetKey, true) 
+            elseif chatType == "GUILD" then
+                targetKey = "GUILD"
+                S.AddMessage("GUILD", formattedText, isMine, charTag, chatType)
+                S.AddMessage("GENERAL", formattedText, isMine, charTag, chatType)
             else
                 targetKey = "GENERAL"
             end
@@ -103,7 +129,14 @@ NSQC4.RegisterModule("nowim", function()
             local filters = C.db.settings.filters or {}
             if filters[chatType] == false then return end
 
-            S.AddMessage(targetKey, formattedText, false, sender)
+            if chatType ~= "GUILD" then
+                S.AddMessage(targetKey, formattedText, isMine, charTag, chatType)
+            end
+            
+            if C.db.activeTab == targetKey then
+                local UI = NSQC4.Nowim.UI
+                if UI and UI.Chat and UI.Chat.Refresh then UI.Chat.Refresh() end
+            end
         end
         
         if C.db.activeTab == targetKey then
@@ -111,8 +144,8 @@ NSQC4.RegisterModule("nowim", function()
         else
             C.db.unread[targetKey] = (C.db.unread[targetKey] or 0) + 1
             local UI = NSQC4.Nowim.UI
-            if UI and UI.ChatView and UI.ChatView.Refresh then
-                UI.ChatView.Refresh()
+            if UI and UI.Chat and UI.Chat.Refresh then
+                UI.Chat.Refresh()
             end
             E.UpdateUI()
         end

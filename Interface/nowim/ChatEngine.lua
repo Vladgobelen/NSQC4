@@ -16,7 +16,7 @@ NSQC4.RegisterModule("nowim", function()
     C.db.openTabs = C.db.openTabs or {}
     C.db.savedScroll = C.db.savedScroll or {}
 
-    function E.OpenDialog(key)
+    function E.OpenDialog(key, silent)
         if not key or key == "" then return end
         if type(key) ~= "string" then return end
 
@@ -36,8 +36,10 @@ NSQC4.RegisterModule("nowim", function()
             end
         end
 
-        C.db.activeTab = key
-        C.db.unread[key] = 0
+        if not silent then
+            C.db.activeTab = key
+            C.db.unread[key] = 0
+        end
 
         E.UpdateUI()
     end
@@ -58,42 +60,6 @@ NSQC4.RegisterModule("nowim", function()
     end
 
     function E.SendMessage(text)
-        if not text or text == "" then return end
-        
-        -- Если введена команда (начинается со слэша)
-        if text:sub(1, 1) == "/" then
-            local cmd, rest = text:match("^/(%S+)%s*(.*)$")
-            
-            if cmd == "run" or cmd == "script" then
-                -- Выполняем Lua-код напрямую
-                local ok, err = pcall(RunScript, rest)
-                if not ok then
-                    print("|cffff0000[Nowim]|r Ошибка: " .. tostring(err))
-                end
-            elseif cmd == "reload" then
-                -- Перезагрузка интерфейса
-                ReloadUI()
-            elseif cmd == "console" then
-                -- Установка CVar (например /console reloadui)
-                local cvar, val = rest:match("^(%S+)%s*(.*)$")
-                if cvar and val then
-                    SetCVar(cvar, val)
-                end
-            else
-                -- Для остальных команд (например /say) используем стандартный чат,
-                -- но с принудительным выполнением через RunScript (если это Lua-код).
-                -- Если это не Lua, RunScript просто проигнорирует или выдаст ошибку.
-                local ok = pcall(RunScript, text:sub(2))
-                if not ok then
-                    -- Если не сработало как код, пробуем выполнить как слэш-команду
-                    -- (это может не сработать без таймера, поэтому просто выводим ошибку)
-                    print("|cffff0000[Nowim]|r Неизвестная команда: " .. tostring(cmd))
-                end
-            end
-            return
-        end
-
-        -- Обычное сообщение в чат аддона
         local target = C.db.activeTab
         if not target then return end
         N.QueueMessage(target, text)
@@ -113,16 +79,17 @@ NSQC4.RegisterModule("nowim", function()
         if UI.Tabs and UI.Tabs.Refresh then
             UI.Tabs.Refresh()
         end
-
         if UI.Chat and UI.Chat.Refresh then
             UI.Chat.Refresh()
         end
-
         if UI.LeftPanel and UI.LeftPanel.Refresh then
             UI.LeftPanel.Refresh()
         end
     end
 
+    -- ========================================================================
+    -- КОМАНДЫ
+    -- ========================================================================
     SLASH_NOWIM_CHAT1 = "/nowim"
     SlashCmdList["NOWIM_CHAT"] = function(msg)
         msg = (msg or ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -131,6 +98,35 @@ NSQC4.RegisterModule("nowim", function()
         end
         if NSQC4.Nowim.UI and NSQC4.Nowim.UI.MainFrame then
             NSQC4.Nowim.UI.MainFrame:ShowFrame()
+        end
+    end
+
+    SLASH_NOWIM_ARCHIVE1 = "/nowim_archive"
+    SlashCmdList["NOWIM_ARCHIVE"] = function(msg)
+        msg = (msg or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if msg == "" then
+            print("|cffff0000[Nowim]|r Укажите ключ чата: /nowim_archive GUILD, GENERAL или ник")
+            return
+        end
+
+        local key = msg:upper()
+        -- Поиск по нику (если это не канал)
+        if not C.db.channels[key] then key = A.GetMainName(msg) end
+
+        local archive = C.db.archives[key]
+        
+        if not archive or not archive.messages or #archive.messages == 0 then
+            print("|cff00ff00[Nowim]|r Архив для " .. key .. " пуст.")
+            return
+        end
+
+        print("|cff00ff00[Nowim]|r Архив " .. key .. " (" .. #archive.messages .. " сообщений):")
+        
+        -- Выводим последние 15 сообщений в чат
+        local startIdx = math.max(1, #archive.messages - 15)
+        for i = startIdx, #archive.messages do
+            local m = archive.messages[i]
+            print(string.format("[%s] %s: %s", m.time or "??:??", m.char or "???", m.text or ""))
         end
     end
 

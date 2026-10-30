@@ -1,6 +1,5 @@
 -- ============================================================================
 -- NSQC4 / nowim / UI / ChatView
--- Совместимо с WoW 3.3.5 (CircleL)
 -- ============================================================================
 
 NSQC4.RegisterModule("nowim", function()
@@ -14,7 +13,6 @@ NSQC4.RegisterModule("nowim", function()
     UI.Chat = V
     local parent = UI.Content
 
-    -- ----- ScrollFrame + content -----
     local scroll = CreateFrame("ScrollFrame", "NSQC4_NowimChatScroll", parent)
     V.Scroll = scroll
 
@@ -23,12 +21,26 @@ NSQC4.RegisterModule("nowim", function()
     scroll:SetScrollChild(content)
     V.Content = content
 
+    -- ЛОВУШКА ДЛЯ КЛИКОВ: запоминает фокус на Nowim и открывает ввод
+    local clickCatcher = CreateFrame("Frame", nil, parent)
+    clickCatcher:SetAllPoints(scroll)
+    clickCatcher:EnableMouse(true)
+    clickCatcher:SetScript("OnMouseDown", function(self, button)
+        if button ~= "LeftButton" then return end
+        if NSQC4.Nowim.FocusNowimChat then
+            NSQC4.Nowim.FocusNowimChat()
+        end
+        if UI.Input and UI.Input.Open then
+            UI.Input.Open()
+        end
+    end)
+
     local scrollBar = CreateFrame("Slider", "NSQC4_NowimChatScrollBar", parent)
     scrollBar:SetWidth(8)
     scrollBar:SetMinMaxValues(0, 0)
     scrollBar:SetValueStep(1)
     scrollBar:SetAlpha(0.01)
-    
+
     local thumb = scrollBar:CreateTexture(nil, "ARTWORK")
     thumb:SetTexture("Interface\\Buttons\\WHITE8x8")
     thumb:SetSize(8, 30)
@@ -65,26 +77,12 @@ NSQC4.RegisterModule("nowim", function()
         scrollBar:SetMinMaxValues(0, maxScroll)
     end
 
-    -- ----- Рисование пузырей -----
     local myName = UnitName("player") or "Unknown"
 
     local measure = content:CreateFontString(nil, "OVERLAY")
     measure:SetJustifyH("LEFT")
     measure:SetWordWrap(true)
     measure:Hide()
-
-    -- Цвета для разных типов чата
-    local CHAT_COLORS = {
-        SYSTEM = "|cffffd100", -- Желтый
-        GUILD  = "|cff40ff40", -- Зеленый
-        OFFICER = "|cff40ff40",-- Зеленый
-        RAID   = "|cffff8000", -- Оранжевый
-        PARTY  = "|cffaaaaaa", -- Синий (или белый)
-        SAY    = "|cffffffff", -- Белый
-        YELL   = "|cffff0000", -- Красный
-        WHISPER = "|cffff80ff",-- Розовый
-        CHANNEL = "|cffaaaaaa",-- Серый
-    }
 
     function V.Refresh()
         local active = C.db.activeTab
@@ -108,16 +106,16 @@ NSQC4.RegisterModule("nowim", function()
         end
 
         local KK = UI.Const or K
-        local BUBBLE_PADDING = (KK.BUBBLE_PADDING or 6) + 2 
+        local BUBBLE_PADDING = (KK.BUBBLE_PADDING or 6) + 2
         local GAP            = KK.GAP or 6
         local PADDING_LEFT   = KK.CHAT_PADDING_L or 0
         local PADDING_RIGHT  = KK.CHAT_PADDING_R or 0
         local PADDING_TOP    = 8
 
-        local yOffset = PADDING_TOP 
+        local yOffset = PADDING_TOP
         local totalWidth = scroll:GetWidth()
         if totalWidth < 50 then totalWidth = 300 end
-        
+
         local maxBubbleWidth = totalWidth - PADDING_LEFT - PADDING_RIGHT
         content:SetWidth(totalWidth)
 
@@ -130,30 +128,55 @@ NSQC4.RegisterModule("nowim", function()
 
         for _, msg in ipairs(messages) do
             local timeStr = C.COLOR_TIME .. "[" .. msg.time .. "]|r "
-            
-            -- Определяем префикс отправителя
-            local senderPrefix = ""
-            local textColor = "|cffffffff" -- По умолчанию белый
-            
-            if msg.char then
-                local senderName = msg.isMine and myName or msg.char
-                -- Ищем цвет для этого типа чата в таблице
-                local color = CHAT_COLORS[msg.chatType] or (msg.isMine and C.COLOR_MY_MSG or C.COLOR_OTHER_MSG)
-                textColor = color
-                senderPrefix = color .. senderName .. ":|r "
+
+            local textColor = "|cffffffff"
+            if msg.chatType == "SYSTEM" or msg.chatType == "LOOT" or msg.chatType == "MONEY" or msg.chatType == "SKILL" then
+                textColor = "|cffffd100"
             elseif msg.isMine then
-                senderPrefix = C.COLOR_MY_MSG .. myName .. ":|r "
+                textColor = C.COLOR_MY_MSG
+            else
+                textColor = C.COLOR_OTHER_MSG
             end
 
-            -- Собираем финальный текст с цветом
-            local fullText = string.format("%s%s%s%s|r", timeStr, senderPrefix, textColor, msg.text)
-            
+            local isAO = msg.text and (msg.text:find("^%[О") or msg.text:find("^%[А") or msg.text:find("^%[O") or msg.text:find("^%[A") or msg.text:find("^|c%x%x%x%x%x%x%[О") or msg.text:find("^|c%x%x%x%x%x%x%[А") or msg.text:find("^|c%x%x%x%x%x%x%[O") or msg.text:find("^|c%x%x%x%x%x%x%[A"))
+
+            local senderPrefix = ""
+            if not isAO and not msg.isMine and msg.char then
+                senderPrefix = textColor .. msg.char .. ":|r "
+            end
+
+            local displayText = msg.text or ""
+
+            if isAO then
+                local factionLetter = ""
+                if displayText:find("^%[О") or displayText:find("^|c%x%x%x%x%x%x%[О") then factionLetter = "О"
+                elseif displayText:find("^%[А") or displayText:find("^|c%x%x%x%x%x%x%[А") then factionLetter = "А"
+                elseif displayText:find("^%[O") or displayText:find("^|c%x%x%x%x%x%x%[O") then factionLetter = "О"
+                elseif displayText:find("^%[A") or displayText:find("^|c%x%x%x%x%x%x%[A") then factionLetter = "А"
+                end
+
+                local channelLetter = (active == "OFFICER") and "O" or "G"
+                local prefix = "[" .. channelLetter .. factionLetter .. "] "
+
+                displayText = prefix .. displayText
+
+                if NSQC4.AOClick_ReplaceAll then
+                    displayText = NSQC4.AOClick_ReplaceAll(displayText)
+                end
+
+                displayText = textColor .. displayText .. "|r"
+            else
+                displayText = textColor .. displayText .. "|r"
+            end
+
+            local fullText = string.format("%s%s%s", timeStr, senderPrefix, displayText)
+
             local maxTextW = maxBubbleWidth - (BUBBLE_PADDING * 2)
 
             measure:SetWidth(0)
             measure:SetText(fullText)
             local measuredW = measure:GetStringWidth() or 100
-            
+
             local finalTextW = math.max(40, measuredW)
             if finalTextW > maxTextW then finalTextW = maxTextW end
 
@@ -167,12 +190,12 @@ NSQC4.RegisterModule("nowim", function()
             local bg = bubble:CreateTexture(nil, "BACKGROUND")
             bg:SetTexture("Interface\\Buttons\\WHITE8x8")
             bg:SetAllPoints(bubble)
-            
+
             if msg.isMine then
-                bg:SetVertexColor(0.1, 0.3, 0.1, 0.9) -- Зеленоватый фон для своих
+                bg:SetVertexColor(0.1, 0.3, 0.1, 0.9)
                 bubble:SetPoint("TOPRIGHT", content, "TOPRIGHT", -PADDING_RIGHT, -yOffset)
             else
-                bg:SetVertexColor(0.2, 0.2, 0.2, 0.9) -- Серый фон для чужих
+                bg:SetVertexColor(0.2, 0.2, 0.2, 0.9)
                 bubble:SetPoint("TOPLEFT", content, "TOPLEFT", PADDING_LEFT, -yOffset)
             end
 

@@ -284,11 +284,41 @@ NSQC4.RegisterModule("ui_ao", function()
         local color = CLASS_COLORS[code] or DEFAULT_COLOR
         aoNames[cleanName] = { faction = faction }
 
-        local nickDisplay = cleanName
+        -- Применяем настройки отображения
+        local finalMeta = meta
         if meta and meta ~= "" then
-            nickDisplay = cleanName .. meta
+            -- Парсим meta (например, ":8:50" или ":70:5:10")
+            local parts = {}
+            for val in meta:gmatch("([^:]+)") do table.insert(parts, val) end
+            
+            local lvl = parts[1]
+            local gp  = parts[2]
+            local rep = parts[3]
+            
+            local outParts = {}
+            -- Уровень
+            if not aoSettings.hideLevel and lvl and tonumber(lvl) ~= 80 and tonumber(lvl) ~= 0 then
+                table.insert(outParts, lvl)
+            end
+            -- ГП
+            if not aoSettings.hideGP and gp and tonumber(gp) ~= 0 then
+                table.insert(outParts, gp)
+            end
+            -- Репа
+            if not aoSettings.hideRep and rep and tonumber(rep) ~= 0 then
+                table.insert(outParts, rep)
+            end
+            
+            if #outParts > 0 then
+                finalMeta = ":" .. table.concat(outParts, ":")
+            else
+                finalMeta = ""
+            end
         end
 
+        local nickDisplay = cleanName .. (finalMeta or "")
+        
+        -- Превращаем в кликабельную ссылку
         local nickLink = "|Hplayer:" .. cleanName .. "|h" ..
             color .. "[" .. nickDisplay .. "]" .. NICK_COLOR_RESET .. "|h"
 

@@ -27,8 +27,10 @@ NSQC4.RegisterModule("nowim", function()
     nsDbc4 = nsDbc4 or {}
     nsDbc4.nowim = nsDbc4.nowim or {
         dialogs = {},
+        archives = {},
         aliases = {},
         channels = {
+            ["GENERAL"] = { type = "GENERAL", name = "Общий" },
             ["GUILD"]   = { type = "GUILD",   name = "Гильдия" },
             ["OFFICER"] = { type = "OFFICER", name = "Офицерский" },
             ["RAID"]    = { type = "RAID",    name = "Рейд" },
@@ -40,8 +42,13 @@ NSQC4.RegisterModule("nowim", function()
             autoScroll     = true,
             interceptEnter = false,
             offsets        = {},
-            showBorder     = true,   -- рамка окна
-            showInputIdle  = true,   -- строка ввода видна в покое
+            showBorder     = true,
+            showInputIdle  = true,
+            showOfficerInGuild = false, -- НОВАЯ НАСТРОЙКА
+            filters        = {
+                GUILD = true, RAID = true, PARTY = true, WHISPER = true,
+                SYSTEM = true, SAY = true, YELL = true
+            },
         },
         window = {
             point = "CENTER", relPoint = "CENTER",
@@ -55,15 +62,13 @@ NSQC4.RegisterModule("nowim", function()
 
     C.db = nsDbc4.nowim
 
-    -- Миграция старых сохранений: если полей нет — создаём дефолты
-    if not C.db.settings.offsets then
-        C.db.settings.offsets = {}
-    end
-    if C.db.settings.showBorder == nil then
-        C.db.settings.showBorder = true
-    end
-    if C.db.settings.showInputIdle == nil then
-        C.db.settings.showInputIdle = true
-    end
+    -- Миграция старых сохранений
+    if not C.db.settings.offsets then C.db.settings.offsets = {} end
+    if C.db.settings.showBorder == nil then C.db.settings.showBorder = true end
+    if C.db.settings.showInputIdle == nil then C.db.settings.showInputIdle = true end
+    if C.db.settings.showOfficerInGuild == nil then C.db.settings.showOfficerInGuild = false end
+    if not C.db.archives then C.db.archives = {} end
 
+    -- НОВОЕ: где сейчас фокус ввода ("nowim" | "blizz")
+    if C.db.settings.lastChatFocus == nil then C.db.settings.lastChatFocus = "nowim" end
 end)

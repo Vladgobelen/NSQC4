@@ -27,55 +27,25 @@ NSQC4.RegisterModule("nowim", function()
         )
     end
 
-    -- ФУНКЦИЯ СКРЫТИЯ/ПОКАЗА СИСТЕМНОГО ЧАТА
     local function UpdateSystemChatVisibility()
         local C = NSQC4.Nowim.Config
         if not C or not C.db or not C.db.settings then return end
-
         local hideSystem = C.db.settings.interceptEnter
-        
-        -- Сдвигаем стандартные окна чата и их вкладки за экран
         for i = 1, 7 do
             local frame = _G["ChatFrame"..i]
-            local tab = _G["ChatFrame"..i.."Tab"]
-            
             if frame then
-                frame:ClearAllPoints()
                 if hideSystem then
-                    frame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", -3000, -3000)
+                    frame:SetAlpha(0.01)
+                    if frame.Background then frame.Background:SetAlpha(0.01) end
                 else
-                    -- Возвращаем на стандартное место (примерно)
-                    if i == 1 then
-                        frame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 32, 32)
-                    else
-                        frame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 32, 32 + (i-1)*100)
-                    end
+                    frame:SetAlpha(1)
+                    if frame.Background then frame.Background:SetAlpha(1) end
                 end
             end
-            
-            if tab then
-                tab:ClearAllPoints()
-                if hideSystem then
-                    tab:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -3000, 3000)
-                else
-                    -- Вкладки обычно привязаны к фреймам, вернем их обратно
-                    -- (если они сломаются, их пересоздаст игра при перезагрузке)
-                end
-            end
-        end
-        
-        -- Скрываем кнопку "Болтать" и поле ввода
-        if ChatFrameMenuButton then
-            if hideSystem then ChatFrameMenuButton:Hide() else ChatFrameMenuButton:Show() end
-        end
-        if ChatFrame1EditBox then
-            if hideSystem then ChatFrame1EditBox:Hide() else ChatFrame1EditBox:Show() end
         end
     end
-
     NSQC4.Nowim.UpdateSystemChatVisibility = UpdateSystemChatVisibility
 
-    -- Невидимая кнопка для перехвата Enter
     local enterCatcher = CreateFrame("Button", "NSQC4_NowimEnterCatcher", UIParent)
     enterCatcher:SetSize(1, 1)
     enterCatcher:SetPoint("CENTER")
@@ -108,23 +78,41 @@ NSQC4.RegisterModule("nowim", function()
         end
     end)
 
-    local function ApplyBinding()
+    local function ShouldNowimIntercept()
         local Nowim = NSQC4.Nowim
-        if not Nowim or not Nowim.Config then return end
-        local enabled = Nowim.Config.db.settings.interceptEnter
+        if not Nowim or not Nowim.Config or not Nowim.Config.db then return false end
+        local s = Nowim.Config.db.settings
+        if s.interceptEnter then return true end
+        return s.lastChatFocus == "nowim"
+    end
 
-        if enabled then
+    local function ApplyBinding()
+        if ShouldNowimIntercept() then
             SetOverrideBindingClick(enterCatcher, true, "ENTER", "NSQC4_NowimEnterCatcher")
             SetOverrideBindingClick(enterCatcher, true, "NUMPADENTER", "NSQC4_NowimEnterCatcher")
         else
             ClearOverrideBindings(enterCatcher)
         end
-
-        UpdateSystemChatVisibility()
     end
 
     NSQC4.Nowim = NSQC4.Nowim or {}
     NSQC4.Nowim.ApplyEnterBinding = ApplyBinding
+
+    function NSQC4.Nowim.FocusNowimChat()
+        local C = NSQC4.Nowim.Config
+        if C and C.db and C.db.settings then
+            C.db.settings.lastChatFocus = "nowim"
+        end
+        ApplyBinding()
+    end
+
+    function NSQC4.Nowim.FocusBlizzChat()
+        local C = NSQC4.Nowim.Config
+        if C and C.db and C.db.settings then
+            C.db.settings.lastChatFocus = "blizz"
+        end
+        ApplyBinding()
+    end
 
     local f = CreateFrame("Frame")
     f:RegisterEvent("PLAYER_LOGIN")
@@ -138,7 +126,7 @@ NSQC4.RegisterModule("nowim", function()
     local function HookMainFrame()
         local UI = NSQC4.Nowim and NSQC4.Nowim.UI
         local mainFrame = UI and UI.MainFrame
-        if not mainFrame or mainFrame._nowimEnterHooked then return end
+        if not mainFrame or mainFrame._nowimEnterHooked then return false end
         mainFrame._nowimEnterHooked = true
 
         local orig_Hide = mainFrame.Hide
@@ -152,6 +140,7 @@ NSQC4.RegisterModule("nowim", function()
             if orig_Show then orig_Show(self) else self:Show() end
             ApplyBinding()
         end
+        return true
     end
 
     if not HookMainFrame() then
@@ -160,6 +149,23 @@ NSQC4.RegisterModule("nowim", function()
         g:SetScript("OnEvent", function(self)
             if HookMainFrame() then self:UnregisterAllEvents() end
         end)
+    end
+
+    -- ========================================================================
+    -- ЛОВИМ ФОКУС НА СТАНДАРТНОМ ЧАТЕ
+    -- ========================================================================
+
+    for i = 1, 7 do
+        local eb = _G["ChatFrame"..i.."EditBox"]
+        if eb and not eb._nowimFocusHooked then
+            eb._nowimFocusHooked = true
+            
+            eb:HookScript("OnEditFocusGained", function(self)
+                if NSQC4.Nowim.FocusBlizzChat then
+                    NSQC4.Nowim.FocusBlizzChat()
+                end
+            end)
+        end
     end
 
 end)

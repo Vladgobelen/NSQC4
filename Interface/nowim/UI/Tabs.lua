@@ -17,15 +17,14 @@ NSQC4.RegisterModule("nowim", function()
     local filters = C.db.settings.filters
 
     local tabContainer = CreateFrame("Frame", nil, mainFrame)
-    tabContainer:SetPoint("BOTTOMLEFT", mainFrame, "TOPLEFT", 30, 0) 
+    tabContainer:SetPoint("BOTTOMLEFT", mainFrame, "TOPLEFT", 30, 0)
     tabContainer:SetPoint("BOTTOMRIGHT", mainFrame, "TOPRIGHT", -30, 0)
     tabContainer:SetHeight(24)
     tabContainer:SetFrameLevel(mainFrame:GetFrameLevel() + 10)
-    
+
     tabContainer:SetAlpha(0.01)
     tabContainer:EnableMouse(true)
 
-    -- Логика прозрачности (проявляется при наведении или непрочитанных)
     tabContainer:SetScript("OnUpdate", function(self)
         local hasUnread = false
         for _, key in ipairs(C.db.openTabs or {}) do
@@ -61,57 +60,99 @@ NSQC4.RegisterModule("nowim", function()
     -- Меню настроек (ПКМ по вкладке)
     -- ========================================================================
     local menuFrame
-    local function ShowTabMenu(btn)
+    local function ShowTabMenu(btn, key)
         if not menuFrame then
             menuFrame = CreateFrame("Frame", "NSQC4NowimTabMenu", UIParent, "UIDropDownMenuTemplate")
         end
-        
+
         UIDropDownMenu_Initialize(menuFrame, function(self, level)
             local info = UIDropDownMenu_CreateInfo()
-            
-            info.text = "|cffffd100Фильтры общего чата:|r"
+
+            info.text = "|cffffd100Настройки вкладки:|r"
             info.isTitle = true
             info.notCheckable = true
             UIDropDownMenu_AddButton(info, level)
 
-            local filterList = {
-                { key = "GUILD",   text = "Гильдия" },
-                { key = "RAID",    text = "Рейд" },
-                { key = "PARTY",   text = "Группа" },
-                { key = "WHISPER", text = "Шепот" },
-                { key = "SYSTEM",  text = "Системные (Лут/Ачивки)" },
-                { key = "SAY",     text = "Сказать (/say)" },
-                { key = "YELL",    text = "Крик (/yell)" },
-            }
-
-            for _, f in ipairs(filterList) do
+            -- ГАЛОЧКА ДЛЯ ГИЛЬДИИ
+            if key == "GUILD" then
                 info = UIDropDownMenu_CreateInfo()
-                info.text = f.text
-                info.checked = filters[f.key]
+                info.text = "|cff40ff40Показывать гильдейские|r"
+                info.checked = C.db.settings.showGuildInGuild
                 info.keepShownOnClick = true
-                info.func = function() filters[f.key] = not filters[f.key] end
+                info.func = function()
+                    C.db.settings.showGuildInGuild = not C.db.settings.showGuildInGuild
+                end
+                UIDropDownMenu_AddButton(info, level)
+
+                info = UIDropDownMenu_CreateInfo()
+                info.text = "|cff008000Показывать офицерские|r"
+                info.checked = C.db.settings.showOfficerInGuild
+                info.keepShownOnClick = true
+                info.func = function()
+                    C.db.settings.showOfficerInGuild = not C.db.settings.showOfficerInGuild
+                end
                 UIDropDownMenu_AddButton(info, level)
             end
 
-            info = UIDropDownMenu_CreateInfo()
-            info.text = "|cffffd100Каналы:|r"
-            info.isTitle = true
-            info.notCheckable = true
-            UIDropDownMenu_AddButton(info, level)
+            if key == "OFFICER" then
+                info = UIDropDownMenu_CreateInfo()
+                info.text = "|cff008000Показывать офицерские|r"
+                info.checked = C.db.settings.showOfficerInOfficer
+                info.keepShownOnClick = true
+                info.func = function()
+                    C.db.settings.showOfficerInOfficer = not C.db.settings.showOfficerInOfficer
+                end
+                UIDropDownMenu_AddButton(info, level)
+            end
 
-            for id, data in pairs(C.db.channels) do
-                if data.type == "CHANNEL" then
+            if key == "GENERAL" then
+                -- Фильтры для общего чата
+                info = UIDropDownMenu_CreateInfo()
+                info.text = "|cffffd100Фильтры общего чата:|r"
+                info.isTitle = true
+                info.notCheckable = true
+                UIDropDownMenu_AddButton(info, level)
+
+                local filterList = {
+                    { key = "GUILD",   text = "Гильдия" },
+                    { key = "RAID",    text = "Рейд" },
+                    { key = "PARTY",   text = "Группа" },
+                    { key = "WHISPER", text = "Шепот" },
+                    { key = "SYSTEM",  text = "Системные (Лут/Ачивки)" },
+                    { key = "SAY",     text = "Сказать (/say)" },
+                    { key = "YELL",    text = "Крик (/yell)" },
+                }
+
+                for _, f in ipairs(filterList) do
                     info = UIDropDownMenu_CreateInfo()
-                    info.text = data.name
-                    info.checked = filters[data.name] ~= false
+                    info.text = f.text
+                    info.checked = filters[f.key]
                     info.keepShownOnClick = true
-                    info.func = function() 
-                        filters[data.name] = not info.checked
-                    end
+                    info.func = function() filters[f.key] = not filters[f.key] end
                     UIDropDownMenu_AddButton(info, level)
+                end
+
+                info = UIDropDownMenu_CreateInfo()
+                info.text = "|cffffd100Каналы:|r"
+                info.isTitle = true
+                info.notCheckable = true
+                UIDropDownMenu_AddButton(info, level)
+
+                for id, data in pairs(C.db.channels) do
+                    if data.type == "CHANNEL" then
+                        info = UIDropDownMenu_CreateInfo()
+                        info.text = data.name
+                        info.checked = filters[data.name] ~= false
+                        info.keepShownOnClick = true
+                        info.func = function()
+                            filters[data.name] = not info.checked
+                        end
+                        UIDropDownMenu_AddButton(info, level)
+                    end
                 end
             end
 
+            -- Общие настройки
             info = UIDropDownMenu_CreateInfo()
             info.text = ""
             info.notCheckable = true
@@ -125,10 +166,15 @@ NSQC4.RegisterModule("nowim", function()
             UIDropDownMenu_AddButton(info, level)
 
             info = UIDropDownMenu_CreateInfo()
-            info.text = "Перехватывать Enter"
+            info.text = "Перехватывать Enter в Nowim"
             info.checked = C.db.settings.interceptEnter
-            info.func = function() 
-                C.db.settings.interceptEnter = not C.db.settings.interceptEnter 
+            info.keepShownOnClick = true
+            info.func = function()
+                C.db.settings.interceptEnter = not C.db.settings.interceptEnter
+                -- Включаем — фокус сразу на Nowim, чтобы сразу работало
+                if C.db.settings.interceptEnter then
+                    C.db.settings.lastChatFocus = "nowim"
+                end
                 if NSQC4.Nowim.ApplyEnterBinding then NSQC4.Nowim.ApplyEnterBinding() end
                 if NSQC4.Nowim.UpdateSystemChatVisibility then NSQC4.Nowim.UpdateSystemChatVisibility() end
             end
@@ -137,11 +183,7 @@ NSQC4.RegisterModule("nowim", function()
         ToggleDropDownMenu(1, nil, menuFrame, btn, 0, 0)
     end
 
-    -- ========================================================================
-    -- Создание вкладки
-    -- ========================================================================
     local function CreateTabButton(key)
-        -- Сама вкладка
         local btn = CreateFrame("Button", nil, tabContainer)
         btn:SetSize(TAB_WIDTH, TAB_HEIGHT)
         btn:SetBackdrop({
@@ -157,34 +199,28 @@ NSQC4.RegisterModule("nowim", function()
         text:SetText(GetTabLetter(key))
         text:SetTextColor(1, 1, 1)
 
-        -- Кнопка закрытия (крестик) - создаем НАПРЯМУЮ В tabContainer
         local close = CreateFrame("Button", nil, tabContainer)
         close:SetSize(14, 14)
         close:SetNormalTexture("Interface\\Buttons\\UI-GroupLoot-Pass-Up")
-        close:SetFrameLevel(tabContainer:GetFrameLevel() + 20) -- Самый верхний слой
+        close:SetFrameLevel(tabContainer:GetFrameLevel() + 20)
         close:EnableMouse(true)
         close:Hide()
-        
-        -- Привязываем крестик к правому верхнему углу вкладки
-        -- (позиция будет обновляться в T.Refresh)
-        
+
         close:SetScript("OnClick", function(self, button)
-            if button == "LeftButton" then 
-                E.CloseTab(key) 
+            if button == "LeftButton" then
+                E.CloseTab(key)
             end
         end)
 
-        -- Клик по самой вкладке
         btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         btn:SetScript("OnClick", function(self, button)
-            if button == "RightButton" then 
-                ShowTabMenu(self) 
-            else 
-                E.OpenDialog(key) 
+            if button == "RightButton" then
+                ShowTabMenu(self, key)
+            else
+                E.OpenDialog(key)
             end
         end)
-        
-        -- Показ крестика при наведении на вкладку
+
         btn:SetScript("OnEnter", function(self)
             close:Show()
             GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
@@ -192,36 +228,31 @@ NSQC4.RegisterModule("nowim", function()
             GameTooltip:AddLine("ЛКМ — открыть, ПКМ — настройки", 0.6, 0.6, 0.6)
             GameTooltip:Show()
         end)
-        
+
         btn:SetScript("OnLeave", function()
-            -- Скрываем крестик, если мышь не на нем
             if not close:IsMouseOver() then
                 close:Hide()
             end
             GameTooltip:Hide()
         end)
-        
-        -- Если ушли с крестика, скрываем его (если мышь не на вкладке)
+
         close:SetScript("OnLeave", function(self)
             if not btn:IsMouseOver() then
                 self:Hide()
             end
         end)
 
-        btn.close = close -- Сохраняем ссылку
+        btn.close = close
         tabButtons[key] = btn
         return btn
     end
 
-    -- ========================================================================
-    -- Обновление вкладок
-    -- ========================================================================
     function T.Refresh()
         local openTabs = C.db.openTabs
         local active = C.db.activeTab
 
-        for _, btn in pairs(tabButtons) do 
-            btn:Hide() 
+        for _, btn in pairs(tabButtons) do
+            btn:Hide()
             if btn.close then btn.close:Hide() end
         end
         if not openTabs then return end
@@ -230,10 +261,9 @@ NSQC4.RegisterModule("nowim", function()
         for _, key in ipairs(openTabs) do
             local btn = tabButtons[key] or CreateTabButton(key)
             btn:ClearAllPoints()
-            btn:SetPoint("BOTTOMLEFT", tabContainer, "BOTTOMLEFT", xPos, 0) 
+            btn:SetPoint("BOTTOMLEFT", tabContainer, "BOTTOMLEFT", xPos, 0)
             btn:Show()
 
-            -- Позиционируем крестик относительно вкладки
             if btn.close then
                 btn.close:ClearAllPoints()
                 btn.close:SetPoint("TOPRIGHT", btn, "TOPRIGHT", 2, 2)
@@ -250,8 +280,7 @@ NSQC4.RegisterModule("nowim", function()
                 btn:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
                 btn:SetHeight(TAB_HEIGHT)
             end
-            
-            -- Красная точка (слева, непрочитанные)
+
             if unread > 0 then
                 if not btn.RedDot then
                     btn.RedDot = btn:CreateTexture(nil, "OVERLAY")

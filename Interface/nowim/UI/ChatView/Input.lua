@@ -43,8 +43,10 @@ NSQC4.RegisterModule("nowim", function()
 
     local function GetInputHeight()
         if IsIdleHidden() then return 0 end
+
         local K = UI.Const or {}
         local minH = K.INPUT_HEIGHT or 30
+
         local text = editBox:GetText() or ""
         local lines = 1
         for _ in text:gmatch("\n") do lines = lines + 1 end
@@ -53,8 +55,16 @@ NSQC4.RegisterModule("nowim", function()
         return h
     end
 
+    local lastH = nil
+
     local function ApplyContainerSize()
         local h = GetInputHeight()
+
+        if h == lastH then
+            return
+        end
+        lastH = h
+
         container:SetHeight(h)
         if h > 0 then
             container:Show()
@@ -65,7 +75,15 @@ NSQC4.RegisterModule("nowim", function()
         else
             container:Hide()
         end
+
         if UI.Chat and UI.Chat.OnResize then UI.Chat.OnResize() end
+    end
+
+    -- Восстанавливаем перехват Enter на наш чат, не трогая lastChatFocus
+    local function RestoreNowimBinding()
+        if NSQC4.Nowim.ApplyEnterBinding then
+            NSQC4.Nowim.ApplyEnterBinding()
+        end
     end
 
     local ticker = CreateFrame("Frame")
@@ -74,11 +92,13 @@ NSQC4.RegisterModule("nowim", function()
         self:Hide()
         editBox:SetFocus()
         I._opening = false
+        lastH = nil
         ApplyContainerSize()
     end)
 
     editBox:SetScript("OnEscapePressed", function(self)
         self:ClearFocus()
+        RestoreNowimBinding()
     end)
 
     editBox:SetScript("OnTextChanged", function(self)
@@ -95,18 +115,14 @@ NSQC4.RegisterModule("nowim", function()
         else
             local text = self:GetText()
             if text and text:match("%S") then
-                -- Если это команда, отправляем как единую строку
-                if text:sub(1, 1) == "/" then
-                    E.SendMessage(text)
-                else
-                    -- Обычный текст разбиваем по строкам
-                    for line in text:gmatch("[^\r\n]+") do
-                        E.SendMessage(U.TrimToBytes(line:trim(), C.MAX_BYTES))
-                    end
+                for line in text:gmatch("[^\r\n]+") do
+                    E.SendMessage(U.TrimToBytes(line:trim(), C.MAX_BYTES))
                 end
             end
             self:SetText("")
             self:ClearFocus()
+            -- Возвращаем перехват Enter нашему чату, не сбрасывая lastChatFocus
+            RestoreNowimBinding()
         end
     end)
 
@@ -116,8 +132,12 @@ NSQC4.RegisterModule("nowim", function()
 
     editBox:SetScript("OnEditFocusLost", function()
         ApplyContainerSize()
+        -- Фокус ушёл (например, после отправки) — переустанавливаем биндинг,
+        -- чтобы следующий Enter снова шёл в Nowim, если lastChatFocus == "nowim"
+        RestoreNowimBinding()
     end)
 
+    -- ========================================================================
     function I.Open()
         I._opening = true
         container:Show()
@@ -143,15 +163,8 @@ NSQC4.RegisterModule("nowim", function()
         container:SetPoint("BOTTOMLEFT", left + 2, 2)
         container:SetPoint("BOTTOMRIGHT", -right - 2, 2)
 
-        local h = GetInputHeight()
-        container:SetHeight(h)
-        if h > 0 then
-            container:Show()
-            editBox:Show()
-        else
-            container:Hide()
-        end
-        editBox:SetWidth(container:GetWidth() - 10)
+        lastH = nil
+        ApplyContainerSize()
     end
 
     container:SetScript("OnSizeChanged", function()

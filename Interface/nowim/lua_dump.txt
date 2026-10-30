@@ -1,6 +1,6 @@
 ======================================================================
  LUA DUMP: /home/diver/Games/wc/CircleL/Interface/AddOns/NSQC4/Interface/nowim
- Date: 2026-10-30 13:25:58
+ Date: 2026-10-30 19:10:16
 ======================================================================
 
 ======================================================================
@@ -55,6 +55,69 @@ end)
 
 
 ======================================================================
+ FILE: Archive.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / nowim / Archive
+-- Хранилище для старых сообщений (архив)
+-- ============================================================================
+
+NSQC4.RegisterModule("nowim", function()
+    local C = NSQC4.Nowim.Config
+    local S = NSQC4.Nowim.Storage
+    local A = {}
+    NSQC4.Nowim.Archive = A
+
+    -- Инициализация таблицы архивов
+    C.db.archives = C.db.archives or {}
+
+    -- Функция добавления сообщения в архив
+    function A.AddToArchive(key, msgData)
+        C.db.archives[key] = C.db.archives[key] or {}
+        table.insert(C.db.archives[key], msgData)
+    end
+
+    -- Функция получения архива
+    function A.GetArchive(key)
+        return C.db.archives[key] or {}
+    end
+
+    -- Функция очистки архива (если понадобится)
+    function A.ClearArchive(key)
+        if C.db.archives[key] then
+            C.db.archives[key] = {}
+        end
+    end
+
+    -- Слэш-команда для просмотра архива
+    SLASH_NOWIM_ARCHIVE1 = "/nowim_archive"
+    SlashCmdList["NOWIM_ARCHIVE"] = function(nick)
+        nick = (nick or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if nick == "" then
+            print("|cffff0000[Nowim]|r Укажите ник: /nowim_archive ИмяНика")
+            return
+        end
+
+        local messages = A.GetArchive(nick)
+        if #messages == 0 then
+            print("|cff00ff00[Nowim]|r Архив для " .. nick .. " пуст.")
+            return
+        end
+
+        print("|cff00ff00[Nowim]|r Архив для " .. nick .. " (" .. #messages .. " сообщений):")
+        -- Выводим последние 20 сообщений из архива в чат
+        local startIdx = math.max(1, #messages - 20)
+        for i = startIdx, #messages do
+            local m = messages[i]
+            local sender = m.char or "Неизвестно"
+            print(string.format("[%s] %s: %s", m.time or "??:??", sender, m.text or ""))
+        end
+    end
+end)
+
+
+======================================================================
  FILE: ChatEngine.lua
 ======================================================================
 
@@ -76,9 +139,8 @@ NSQC4.RegisterModule("nowim", function()
     C.db.openTabs = C.db.openTabs or {}
     C.db.savedScroll = C.db.savedScroll or {}
 
-    function E.OpenDialog(key)
+    function E.OpenDialog(key, silent)
         if not key or key == "" then return end
-        -- Защита: не пускаем числа и прочий мусор в openTabs/dialogs
         if type(key) ~= "string" then return end
 
         C.db.dialogs[key] = C.db.dialogs[key] or { messages = {} }
@@ -97,8 +159,10 @@ NSQC4.RegisterModule("nowim", function()
             end
         end
 
-        C.db.activeTab = key
-        C.db.unread[key] = 0
+        if not silent then
+            C.db.activeTab = key
+            C.db.unread[key] = 0
+        end
 
         E.UpdateUI()
     end
@@ -138,16 +202,17 @@ NSQC4.RegisterModule("nowim", function()
         if UI.Tabs and UI.Tabs.Refresh then
             UI.Tabs.Refresh()
         end
-
         if UI.Chat and UI.Chat.Refresh then
             UI.Chat.Refresh()
         end
-
         if UI.LeftPanel and UI.LeftPanel.Refresh then
             UI.LeftPanel.Refresh()
         end
     end
 
+    -- ========================================================================
+    -- КОМАНДЫ
+    -- ========================================================================
     SLASH_NOWIM_CHAT1 = "/nowim"
     SlashCmdList["NOWIM_CHAT"] = function(msg)
         msg = (msg or ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -159,6 +224,35 @@ NSQC4.RegisterModule("nowim", function()
         end
     end
 
+    SLASH_NOWIM_ARCHIVE1 = "/nowim_archive"
+    SlashCmdList["NOWIM_ARCHIVE"] = function(msg)
+        msg = (msg or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if msg == "" then
+            print("|cffff0000[Nowim]|r Укажите ключ чата: /nowim_archive GUILD, GENERAL или ник")
+            return
+        end
+
+        local key = msg:upper()
+        -- Поиск по нику (если это не канал)
+        if not C.db.channels[key] then key = A.GetMainName(msg) end
+
+        local archive = C.db.archives[key]
+        
+        if not archive or not archive.messages or #archive.messages == 0 then
+            print("|cff00ff00[Nowim]|r Архив для " .. key .. " пуст.")
+            return
+        end
+
+        print("|cff00ff00[Nowim]|r Архив " .. key .. " (" .. #archive.messages .. " сообщений):")
+        
+        -- Выводим последние 15 сообщений в чат
+        local startIdx = math.max(1, #archive.messages - 15)
+        for i = startIdx, #archive.messages do
+            local m = archive.messages[i]
+            print(string.format("[%s] %s: %s", m.time or "??:??", m.char or "???", m.text or ""))
+        end
+    end
+
 end)
 
 
@@ -167,7 +261,7 @@ end)
 ======================================================================
 
 -- ============================================================================
--- NSQC4 / nowim / ChatHook
+-- NSQC4 / nowim / ChatHook (ФИКС ОФИЦЕРСКОГО)
 -- ============================================================================
 
 NSQC4.RegisterModule("nowim", function()
@@ -177,45 +271,140 @@ NSQC4.RegisterModule("nowim", function()
     local myName = UnitName("player")
 
     local frame = CreateFrame("Frame")
+    
     frame:RegisterEvent("CHAT_MSG_GUILD")
     frame:RegisterEvent("CHAT_MSG_OFFICER")
     frame:RegisterEvent("CHAT_MSG_RAID")
     frame:RegisterEvent("CHAT_MSG_RAID_LEADER")
     frame:RegisterEvent("CHAT_MSG_WHISPER")
+    frame:RegisterEvent("CHAT_MSG_SAY")
+    frame:RegisterEvent("CHAT_MSG_YELL")
+    frame:RegisterEvent("CHAT_MSG_PARTY")
+    frame:RegisterEvent("CHAT_MSG_PARTY_LEADER")
+    frame:RegisterEvent("CHAT_MSG_CHANNEL")
+    frame:RegisterEvent("CHAT_MSG_SYSTEM")
+    frame:RegisterEvent("CHAT_MSG_RAID_WARNING")
+    frame:RegisterEvent("CHAT_MSG_MONSTER_SAY")
+    frame:RegisterEvent("CHAT_MSG_MONSTER_YELL")
+    frame:RegisterEvent("CHAT_MSG_MONSTER_EMOTE")
+    frame:RegisterEvent("CHAT_MSG_BATTLEGROUND")
+    frame:RegisterEvent("CHAT_MSG_BATTLEGROUND_LEADER")
+    frame:RegisterEvent("CHAT_MSG_EMOTE")
+    frame:RegisterEvent("CHAT_MSG_LOOT")
+    frame:RegisterEvent("CHAT_MSG_MONEY")
+    frame:RegisterEvent("CHAT_MSG_SKILL")
 
     frame:SetScript("OnEvent", function(self, event, text, sender)
         if not text or text == "" then return end
-        if text:sub(1, 5) == "NSMSG" then return end
+        if text:sub(1, 5) == "NSMSG" then return end 
 
         local E = NSQC4.Nowim.ChatEngine
         if not E then return end
 
         local chatType = event:match("^CHAT_MSG_(.+)$")
-        local targetKey = chatType
+        local targetKey = "GENERAL"
+        local isMine = (sender == myName)
 
-        if sender == myName and NSQC4.Nowim._lastSentText == text and (GetTime() - (NSQC4.Nowim._lastSentTime or 0)) < 2 then
+        local isAO = text:find("^%[O") or text:find("^%[A") or text:find("^%[О") or text:find("^%[А") or text:find("^|c%x%x%x%x%x%x%[O") or text:find("^|c%x%x%x%x%x%x%[A")
+
+        local charTag
+        if isAO then
+            isMine = false
+            charTag = nil
+            if sender and sender ~= "" then
+                text = text:gsub("^" .. sender .. ":%s*", "")
+            end
+        else
+            charTag = isMine and myName or sender
+        end
+
+        -- ОТЛАДКА
+        if chatType == "OFFICER" then
+            print("|cff00ff00[DEBUG OFFICER]|r Пришло: " .. tostring(text) .. " | От: " .. tostring(sender) .. " | isAO: " .. tostring(isAO))
+        end
+
+        if isMine and NSQC4.Nowim._lastSentText == text and (GetTime() - (NSQC4.Nowim._lastSentTime or 0)) < 2 then
             return
         end
 
-        local cleanText = text:gsub("^" .. sender .. ":%s*", "")
-
-        local formattedText = cleanText
-        if NSQC4.AOClick_ReplaceAll then
-            formattedText = NSQC4.AOClick_ReplaceAll(cleanText)
+        if chatType == "CHANNEL" then
+            local _, channelName = GetChannelName(text)
+            if channelName then
+                local filters = C.db.settings.filters or {}
+                if filters[channelName] == false then return end
+            end
         end
 
-        if chatType == "WHISPER" then
-            targetKey = sender
-            E.OpenDialog(targetKey)
+        local formattedText = text
+
+        if chatType == "SYSTEM" or chatType == "LOOT" or chatType == "MONEY" or chatType == "SKILL" or not sender or sender == "" then
+            local filters = C.db.settings.filters or {}
+            if filters["SYSTEM"] == false then return end
+            S.AddMessage("GENERAL", formattedText, false, nil, chatType)
+        else
+            if chatType == "OFFICER" then
+                print("|cff00ff00[DEBUG OFFICER]|r Сохраняем в OFFICER.")
+                S.AddMessage("OFFICER", formattedText, isMine, charTag, chatType)
+                
+                if C.db.settings.showOfficerInGuild then
+                    print("|cff00ff00[DEBUG OFFICER]|r Дублируем в GUILD.")
+                    S.AddMessage("GUILD", formattedText, isMine, charTag, chatType)
+                end
+                
+                local hasOfficerTab = false
+                for _, key in ipairs(C.db.openTabs) do
+                    if key == "OFFICER" then hasOfficerTab = true break end
+                end
+                if not hasOfficerTab then
+                    print("|cff00ff00[DEBUG OFFICER]|r Вкладки OFFICER нет, открываем.")
+                    E.OpenDialog("OFFICER", true)
+                else
+                    print("|cff00ff00[DEBUG OFFICER]|r Вкладка OFFICER уже открыта.")
+                end
+                
+                -- ПРИНУДИТЕЛЬНО ОБНОВЛЯЕМ ЧАТ, ЕСЛИ АКТИВНА ВКЛАДКА OFFICER
+                if C.db.activeTab == "OFFICER" then
+                    print("|cff00ff00[DEBUG OFFICER]|r Обновляем чат (активна вкладка OFFICER).")
+                    local UI = NSQC4.Nowim.UI
+                    if UI and UI.Chat and UI.Chat.Refresh then UI.Chat.Refresh() end
+                else
+                    -- Если вкладка не активна, обновляем, чтобы там были данные
+                    local UI = NSQC4.Nowim.UI
+                    if UI and UI.Chat and UI.Chat.Refresh then UI.Chat.Refresh() end
+                end
+                
+                E.UpdateUI()
+                return
+            end
+
+            if chatType == "WHISPER" then
+                targetKey = sender
+                E.OpenDialog(targetKey, true) 
+            elseif chatType == "GUILD" then
+                targetKey = "GUILD"
+                S.AddMessage("GUILD", formattedText, isMine, charTag, chatType)
+                S.AddMessage("GENERAL", formattedText, isMine, charTag, chatType)
+            else
+                targetKey = "GENERAL"
+            end
+            
+            local filters = C.db.settings.filters or {}
+            if filters[chatType] == false then return end
+
+            if chatType ~= "GUILD" then
+                S.AddMessage(targetKey, formattedText, isMine, charTag, chatType)
+            end
+            
+            if C.db.activeTab == targetKey then
+                local UI = NSQC4.Nowim.UI
+                if UI and UI.Chat and UI.Chat.Refresh then UI.Chat.Refresh() end
+            end
         end
-
-        S.AddMessage(targetKey, formattedText, false, nil)
-
+        
         if C.db.activeTab == targetKey then
             E.UpdateUI()
         else
             C.db.unread[targetKey] = (C.db.unread[targetKey] or 0) + 1
-            -- ИСПРАВЛЕНО: UI.Chat вместо UI.ChatView
             local UI = NSQC4.Nowim.UI
             if UI and UI.Chat and UI.Chat.Refresh then
                 UI.Chat.Refresh()
@@ -259,8 +448,10 @@ NSQC4.RegisterModule("nowim", function()
     nsDbc4 = nsDbc4 or {}
     nsDbc4.nowim = nsDbc4.nowim or {
         dialogs = {},
+        archives = {},
         aliases = {},
         channels = {
+            ["GENERAL"] = { type = "GENERAL", name = "Общий" },
             ["GUILD"]   = { type = "GUILD",   name = "Гильдия" },
             ["OFFICER"] = { type = "OFFICER", name = "Офицерский" },
             ["RAID"]    = { type = "RAID",    name = "Рейд" },
@@ -272,8 +463,13 @@ NSQC4.RegisterModule("nowim", function()
             autoScroll     = true,
             interceptEnter = false,
             offsets        = {},
-            showBorder     = true,   -- рамка окна
-            showInputIdle  = true,   -- строка ввода видна в покое
+            showBorder     = true,
+            showInputIdle  = true,
+            showOfficerInGuild = false, -- НОВАЯ НАСТРОЙКА
+            filters        = {
+                GUILD = true, RAID = true, PARTY = true, WHISPER = true,
+                SYSTEM = true, SAY = true, YELL = true
+            },
         },
         window = {
             point = "CENTER", relPoint = "CENTER",
@@ -287,23 +483,25 @@ NSQC4.RegisterModule("nowim", function()
 
     C.db = nsDbc4.nowim
 
-    -- Миграция старых сохранений: если полей нет — создаём дефолты
-    if not C.db.settings.offsets then
-        C.db.settings.offsets = {}
-    end
-    if C.db.settings.showBorder == nil then
-        C.db.settings.showBorder = true
-    end
-    if C.db.settings.showInputIdle == nil then
-        C.db.settings.showInputIdle = true
-    end
+    -- Миграция старых сохранений
+    if not C.db.settings.offsets then C.db.settings.offsets = {} end
+    if C.db.settings.showBorder == nil then C.db.settings.showBorder = true end
+    if C.db.settings.showInputIdle == nil then C.db.settings.showInputIdle = true end
+    if C.db.settings.showOfficerInGuild == nil then C.db.settings.showOfficerInGuild = false end
+    if not C.db.archives then C.db.archives = {} end
 
+    -- НОВОЕ: где сейчас фокус ввода ("nowim" | "blizz")
+    if C.db.settings.lastChatFocus == nil then C.db.settings.lastChatFocus = "nowim" end
 end)
 
 
 ======================================================================
  FILE: Init.lua
 ======================================================================
+
+-- ============================================================================
+-- NSQC4 / nowim / Init
+-- ============================================================================
 
 NSQC4.RegisterModule("nowim", function()
 
@@ -315,13 +513,46 @@ NSQC4.RegisterModule("nowim", function()
         end
     end
 
-    -- Невидимая кнопка, на которую вешается ENTER
+    if NSQC4.SlashPanel_RegisterSectionButton then
+        NSQC4.SlashPanel_RegisterSectionButton(
+            "Чат (Nowim)",
+            "Ч",
+            "/nowim",
+            {
+                { text = "Кастомный чат Nowim", r = 1.00, g = 0.82, b = 0.00 },
+                { text = " " },
+                { text = "|cffff0000Внимание!|r Чат находится в разработке.", r = 1.00, g = 0.2, b = 0.2 },
+                { text = "Он очень кривой, могут быть баги и вылеты.", r = 0.85, g = 0.85, b = 0.85 },
+                { text = "Пользуйтесь на свой страх и риск.", r = 0.85, g = 0.85, b = 0.85 },
+            }
+        )
+    end
+
+    local function UpdateSystemChatVisibility()
+        local C = NSQC4.Nowim.Config
+        if not C or not C.db or not C.db.settings then return end
+        -- Прячем стандартные чаты только если галочка СТОИТ (мастер-режим)
+        local hideSystem = C.db.settings.interceptEnter
+        for i = 1, 7 do
+            local frame = _G["ChatFrame"..i]
+            if frame then
+                if hideSystem then
+                    frame:SetAlpha(0.01)
+                    if frame.Background then frame.Background:SetAlpha(0.01) end
+                else
+                    frame:SetAlpha(1)
+                    if frame.Background then frame.Background:SetAlpha(1) end
+                end
+            end
+        end
+    end
+    NSQC4.Nowim.UpdateSystemChatVisibility = UpdateSystemChatVisibility
+
     local enterCatcher = CreateFrame("Button", "NSQC4_NowimEnterCatcher", UIParent)
     enterCatcher:SetSize(1, 1)
     enterCatcher:SetPoint("CENTER")
     enterCatcher:Hide()
 
-    -- Обработчик Enter
     enterCatcher:SetScript("OnClick", function()
         local Nowim = NSQC4.Nowim
         if not Nowim then return end
@@ -331,10 +562,8 @@ NSQC4.RegisterModule("nowim", function()
 
         local mainFrame = UI.MainFrame
 
-        -- Если окно закрыто — открываем его на последнем чате
         if not mainFrame:IsShown() then
             if C.db.activeTab then
-                -- Восстанавливаем последний чат (если он ещё в openTabs)
                 local found = false
                 for _, key in ipairs(C.db.openTabs or {}) do
                     if key == C.db.activeTab then found = true; break end
@@ -346,19 +575,24 @@ NSQC4.RegisterModule("nowim", function()
             mainFrame:ShowFrame()
         end
 
-        -- Ставим фокус в поле ввода (теперь это UI.Input, а не UI.InputBox)
         if UI.Input and UI.Input.Open then
             UI.Input.Open()
         end
     end)
 
-    -- Установка / снятие бинда в зависимости от настройки
-    local function ApplyBinding()
+    -- Куда сейчас должен идти Enter
+    local function ShouldNowimIntercept()
         local Nowim = NSQC4.Nowim
-        if not Nowim or not Nowim.Config then return end
-        local enabled = Nowim.Config.db.settings.interceptEnter
+        if not Nowim or not Nowim.Config or not Nowim.Config.db then return false end
+        local s = Nowim.Config.db.settings
+        -- Мастер-галочка снята — Nowim не перехватывает никогда
+        if not s.interceptEnter then return false end
+        -- Галочка стоит — перехватываем только если последний клик был по нашему чату
+        return s.lastChatFocus == "nowim"
+    end
 
-        if enabled then
+    local function ApplyBinding()
+        if ShouldNowimIntercept() then
             SetOverrideBindingClick(enterCatcher, true, "ENTER", "NSQC4_NowimEnterCatcher")
             SetOverrideBindingClick(enterCatcher, true, "NUMPADENTER", "NSQC4_NowimEnterCatcher")
         else
@@ -369,30 +603,41 @@ NSQC4.RegisterModule("nowim", function()
     NSQC4.Nowim = NSQC4.Nowim or {}
     NSQC4.Nowim.ApplyEnterBinding = ApplyBinding
 
-    -- Ждём, когда всё загрузится, и вешаем бинд
+    -- Публичные функции смены фокуса
+    function NSQC4.Nowim.FocusNowimChat()
+        local C = NSQC4.Nowim.Config
+        if C and C.db and C.db.settings then
+            C.db.settings.lastChatFocus = "nowim"
+        end
+        ApplyBinding()
+    end
+
+    function NSQC4.Nowim.FocusBlizzChat()
+        local C = NSQC4.Nowim.Config
+        if C and C.db and C.db.settings then
+            C.db.settings.lastChatFocus = "blizz"
+        end
+        ApplyBinding()
+    end
+
     local f = CreateFrame("Frame")
     f:RegisterEvent("PLAYER_LOGIN")
     f:SetScript("OnEvent", function(self)
         self:UnregisterAllEvents()
-        -- Настройка могла быть ещё не создана — проверяем
         if NSQC4.Nowim and NSQC4.Nowim.Config and NSQC4.Nowim.Config.db then
             ApplyBinding()
         end
     end)
 
-    -- Хук на Hide/Show окна, чтобы бинд не снимался при скрытии окна
-    -- (перехват должен работать и при закрытом окне, если настройка включена)
     local function HookMainFrame()
         local UI = NSQC4.Nowim and NSQC4.Nowim.UI
         local mainFrame = UI and UI.MainFrame
-        if not mainFrame or mainFrame._nowimEnterHooked then return end
+        if not mainFrame or mainFrame._nowimEnterHooked then return false end
         mainFrame._nowimEnterHooked = true
 
         local orig_Hide = mainFrame.Hide
         mainFrame.Hide = function(self)
             if orig_Hide then orig_Hide(self) else self:Hide() end
-            -- Бинд НЕ снимаем: если interceptEnter включён, Enter должен
-            -- открывать окно даже когда оно скрыто.
             ApplyBinding()
         end
 
@@ -401,6 +646,7 @@ NSQC4.RegisterModule("nowim", function()
             if orig_Show then orig_Show(self) else self:Show() end
             ApplyBinding()
         end
+        return true
     end
 
     if not HookMainFrame() then
@@ -410,6 +656,22 @@ NSQC4.RegisterModule("nowim", function()
             if HookMainFrame() then self:UnregisterAllEvents() end
         end)
     end
+
+    -- Клик по стандартному чату → фокус туда
+    local function HookStandardChats()
+        for i = 1, 7 do
+            local frame = _G["ChatFrame"..i]
+            if frame and not frame._nowimClicked then
+                frame._nowimClicked = true
+                frame:HookScript("OnMouseDown", function()
+                    if NSQC4.Nowim.FocusBlizzChat then
+                        NSQC4.Nowim.FocusBlizzChat()
+                    end
+                end)
+            end
+        end
+    end
+    HookStandardChats()
 
 end)
 
@@ -539,14 +801,13 @@ NSQC4.RegisterModule("nowim", function()
 
     local function ResolveKey(nick)
         if not nick then return nil end
-        -- Приводим к строке: ключи в channels могут быть числами (каналы 1,2,4...)
         local s = tostring(nick)
         if C.db.channels[s] then return s end
         if C.db.channels[nick] then return nick end
         return A.GetMainName(s)
     end
 
-    function S.AddMessage(target, text, isMine, realSender)
+    function S.AddMessage(target, text, isMine, realSender, chatType)
         local key = ResolveKey(target)
         if not key or not text then return end
         if type(key) ~= "string" then return end
@@ -556,15 +817,20 @@ NSQC4.RegisterModule("nowim", function()
 
         local charTag = realSender or (isMine and UnitName("player") or nil)
 
-        table.insert(dialog.messages, {
+        local msgData = {
             text = text,
             isMine = isMine,
             time = U.GetTimeString(),
-            char = charTag
-        })
+            char = charTag,
+            chatType = chatType -- СОХРАНЯЕМ ТИП
+        }
 
-        while #dialog.messages > C.MAX_HISTORY do
-            table.remove(dialog.messages, 1)
+        table.insert(dialog.messages, msgData)
+
+        if #dialog.messages > C.MAX_HISTORY then
+            local oldMsg = table.remove(dialog.messages, 1)
+            C.db.archives[key] = C.db.archives[key] or { messages = {} }
+            table.insert(C.db.archives[key].messages, oldMsg)
         end
     end
 
@@ -583,31 +849,26 @@ NSQC4.RegisterModule("nowim", function()
 
     function S.GetContacts()
         local list = {}
-
-        -- ЛС (диалоги, которых нет в channels)
+        
         for key in pairs(C.db.dialogs) do
             local s = tostring(key)
             if not C.db.channels[s] and not C.db.channels[key] then
                 table.insert(list, { key = s, name = s, isChannel = false })
             end
         end
-
-        -- Каналы: ключ всегда строка (tostring), чтобы не ломать OpenDialog
+        
         for id, data in pairs(C.db.channels) do
             local key = tostring(id)
             table.insert(list, { key = key, name = tostring(data.name or id), isChannel = true })
         end
 
-        -- Сортировка: сначала ЛС, потом каналы; внутри — по имени
         table.sort(list, function(a, b)
             local nameA = tostring(a.name or "")
             local nameB = tostring(b.name or "")
-            if a.isChannel ~= b.isChannel then
-                return a.isChannel == false
-            end
+            if a.isChannel ~= b.isChannel then return a.isChannel == false end
             return nameA < nameB
         end)
-
+        
         return list
     end
 
@@ -633,7 +894,6 @@ end)
 
 -- ============================================================================
 -- NSQC4 / nowim / UI / ChatView
--- Совместимо с WoW 3.3.5 (CircleL)
 -- ============================================================================
 
 NSQC4.RegisterModule("nowim", function()
@@ -647,7 +907,6 @@ NSQC4.RegisterModule("nowim", function()
     UI.Chat = V
     local parent = UI.Content
 
-    -- ----- ScrollFrame + content -----
     local scroll = CreateFrame("ScrollFrame", "NSQC4_NowimChatScroll", parent)
     V.Scroll = scroll
 
@@ -656,19 +915,36 @@ NSQC4.RegisterModule("nowim", function()
     scroll:SetScrollChild(content)
     V.Content = content
 
+    -- ЛОВУШКА ДЛЯ КЛИКОВ: запоминает фокус на Nowim и открывает ввод
+    local clickCatcher = CreateFrame("Frame", nil, parent)
+    clickCatcher:SetAllPoints(scroll)
+    clickCatcher:EnableMouse(true)
+    clickCatcher:SetScript("OnMouseDown", function(self, button)
+        if button ~= "LeftButton" then return end
+        if NSQC4.Nowim.FocusNowimChat then
+            NSQC4.Nowim.FocusNowimChat()
+        end
+        if UI.Input and UI.Input.Open then
+            UI.Input.Open()
+        end
+    end)
+
     local scrollBar = CreateFrame("Slider", "NSQC4_NowimChatScrollBar", parent)
-    scrollBar:SetWidth(16)
+    scrollBar:SetWidth(8)
     scrollBar:SetMinMaxValues(0, 0)
     scrollBar:SetValueStep(1)
-    scrollBar:SetAlpha(0)
+    scrollBar:SetAlpha(0.01)
+
     local thumb = scrollBar:CreateTexture(nil, "ARTWORK")
-    thumb:SetTexture("Interface\\Buttons\\UI-ScrollBar-Knob")
-    thumb:SetSize(16, 16)
+    thumb:SetTexture("Interface\\Buttons\\WHITE8x8")
+    thumb:SetSize(8, 30)
+    thumb:SetVertexColor(0.6, 0.6, 0.6, 1)
     scrollBar:SetThumbTexture(thumb)
+
     scrollBar:EnableMouse(true)
     scrollBar:SetScript("OnEnter", function(self) self:SetAlpha(1) end)
     scrollBar:SetScript("OnLeave", function(self)
-        if not scroll:IsMouseOver() then self:SetAlpha(0) end
+        if not scroll:IsMouseOver() then self:SetAlpha(0.01) end
     end)
     scrollBar:SetScript("OnValueChanged", function(self, value)
         scroll:SetVerticalScroll(value)
@@ -692,9 +968,9 @@ NSQC4.RegisterModule("nowim", function()
         local maxScroll = math.max(0, (content:GetHeight() or 0) - (scroll:GetHeight() or 0))
         scroll:SetVerticalScroll(maxScroll)
         scrollBar:SetValue(maxScroll)
+        scrollBar:SetMinMaxValues(0, maxScroll)
     end
 
-    -- ----- Рисование пузырей -----
     local myName = UnitName("player") or "Unknown"
 
     local measure = content:CreateFontString(nil, "OVERLAY")
@@ -723,17 +999,18 @@ NSQC4.RegisterModule("nowim", function()
             end
         end
 
-        -- Читаем константы КАЖДЫЙ Refresh, чтобы слайдеры работали
         local KK = UI.Const or K
-        local SHRINK_AMOUNT = KK.BUBBLE_PADDING or 4
-        local GAP           = KK.GAP or 4
-        local PADDING_LEFT  = KK.CHAT_PADDING_L or 2
-        local PADDING_RIGHT = KK.CHAT_PADDING_R or 2
+        local BUBBLE_PADDING = (KK.BUBBLE_PADDING or 6) + 2
+        local GAP            = KK.GAP or 6
+        local PADDING_LEFT   = KK.CHAT_PADDING_L or 0
+        local PADDING_RIGHT  = KK.CHAT_PADDING_R or 0
+        local PADDING_TOP    = 8
 
-        local yOffset = 0
+        local yOffset = PADDING_TOP
         local totalWidth = scroll:GetWidth()
         if totalWidth < 50 then totalWidth = 300 end
-        local maxBubbleWidth = totalWidth - 20
+
+        local maxBubbleWidth = totalWidth - PADDING_LEFT - PADDING_RIGHT
         content:SetWidth(totalWidth)
 
         local fontPath = "Fonts\\FRIZQT__.TTF"
@@ -745,21 +1022,55 @@ NSQC4.RegisterModule("nowim", function()
 
         for _, msg in ipairs(messages) do
             local timeStr = C.COLOR_TIME .. "[" .. msg.time .. "]|r "
-            local senderColor = msg.isMine and C.COLOR_MY_MSG or C.COLOR_OTHER_MSG
-            local senderPrefix = ""
-            if msg.char then
-                local senderName = msg.isMine and myName or msg.char
-                senderPrefix = senderColor .. senderName .. ":|r "
+
+            local textColor = "|cffffffff"
+            if msg.chatType == "SYSTEM" or msg.chatType == "LOOT" or msg.chatType == "MONEY" or msg.chatType == "SKILL" then
+                textColor = "|cffffd100"
             elseif msg.isMine then
-                senderPrefix = senderColor .. myName .. ":|r "
+                textColor = C.COLOR_MY_MSG
+            else
+                textColor = C.COLOR_OTHER_MSG
             end
 
-            local fullText = string.format("%s%s%s", timeStr, senderPrefix, msg.text)
-            local maxTextW = maxBubbleWidth - (SHRINK_AMOUNT * 2)
+            local isAO = msg.text and (msg.text:find("^%[О") or msg.text:find("^%[А") or msg.text:find("^%[O") or msg.text:find("^%[A") or msg.text:find("^|c%x%x%x%x%x%x%[О") or msg.text:find("^|c%x%x%x%x%x%x%[А") or msg.text:find("^|c%x%x%x%x%x%x%[O") or msg.text:find("^|c%x%x%x%x%x%x%[A"))
 
-            measure:SetWidth(maxTextW)
+            local senderPrefix = ""
+            if not isAO and not msg.isMine and msg.char then
+                senderPrefix = textColor .. msg.char .. ":|r "
+            end
+
+            local displayText = msg.text or ""
+
+            if isAO then
+                local factionLetter = ""
+                if displayText:find("^%[О") or displayText:find("^|c%x%x%x%x%x%x%[О") then factionLetter = "О"
+                elseif displayText:find("^%[А") or displayText:find("^|c%x%x%x%x%x%x%[А") then factionLetter = "А"
+                elseif displayText:find("^%[O") or displayText:find("^|c%x%x%x%x%x%x%[O") then factionLetter = "О"
+                elseif displayText:find("^%[A") or displayText:find("^|c%x%x%x%x%x%x%[A") then factionLetter = "А"
+                end
+
+                local channelLetter = (active == "OFFICER") and "O" or "G"
+                local prefix = "[" .. channelLetter .. factionLetter .. "] "
+
+                displayText = prefix .. displayText
+
+                if NSQC4.AOClick_ReplaceAll then
+                    displayText = NSQC4.AOClick_ReplaceAll(displayText)
+                end
+
+                displayText = textColor .. displayText .. "|r"
+            else
+                displayText = textColor .. displayText .. "|r"
+            end
+
+            local fullText = string.format("%s%s%s", timeStr, senderPrefix, displayText)
+
+            local maxTextW = maxBubbleWidth - (BUBBLE_PADDING * 2)
+
+            measure:SetWidth(0)
             measure:SetText(fullText)
             local measuredW = measure:GetStringWidth() or 100
+
             local finalTextW = math.max(40, measuredW)
             if finalTextW > maxTextW then finalTextW = maxTextW end
 
@@ -768,20 +1079,17 @@ NSQC4.RegisterModule("nowim", function()
             local textHeight = measure:GetStringHeight() or (fontSize + 4)
 
             local bubble = CreateFrame("Frame", nil, content)
-            bubble:SetSize(finalTextW, textHeight)
+            bubble:SetSize(finalTextW + (BUBBLE_PADDING * 2), textHeight + (BUBBLE_PADDING * 2))
 
             local bg = bubble:CreateTexture(nil, "BACKGROUND")
             bg:SetTexture("Interface\\Buttons\\WHITE8x8")
+            bg:SetAllPoints(bubble)
 
             if msg.isMine then
                 bg:SetVertexColor(0.1, 0.3, 0.1, 0.9)
-                bg:SetPoint("TOPRIGHT", bubble, "TOPRIGHT", -SHRINK_AMOUNT, -SHRINK_AMOUNT)
-                bg:SetPoint("BOTTOMLEFT", bubble, "BOTTOMLEFT", SHRINK_AMOUNT, SHRINK_AMOUNT)
                 bubble:SetPoint("TOPRIGHT", content, "TOPRIGHT", -PADDING_RIGHT, -yOffset)
             else
                 bg:SetVertexColor(0.2, 0.2, 0.2, 0.9)
-                bg:SetPoint("TOPLEFT", bubble, "TOPLEFT", SHRINK_AMOUNT, -SHRINK_AMOUNT)
-                bg:SetPoint("BOTTOMRIGHT", bubble, "BOTTOMRIGHT", -SHRINK_AMOUNT, SHRINK_AMOUNT)
                 bubble:SetPoint("TOPLEFT", content, "TOPLEFT", PADDING_LEFT, -yOffset)
             end
 
@@ -790,30 +1098,35 @@ NSQC4.RegisterModule("nowim", function()
             textStr:SetJustifyH("LEFT")
             textStr:SetWordWrap(true)
             textStr:SetNonSpaceWrap(true)
-            textStr:SetPoint("TOPLEFT", bubble, "TOPLEFT", 0, 0)
+            textStr:SetPoint("TOPLEFT", bubble, "TOPLEFT", BUBBLE_PADDING, -BUBBLE_PADDING)
             textStr:SetWidth(finalTextW)
             textStr:SetText(fullText)
 
-            yOffset = yOffset + textHeight + GAP
+            yOffset = yOffset + bubble:GetHeight() + GAP
         end
 
-        content:SetHeight(math.max(1, yOffset))
+        content:SetHeight(math.max(1, yOffset + PADDING_TOP))
         scroll:UpdateScrollChildRect()
         V.ScrollToBottom()
     end
 
-    -- ========================================================================
-    -- OnResize: зазор справа берётся из UI.Const.CHAT_RIGHT_PAD
-    -- ========================================================================
     function V.OnResize()
         local KK = UI.Const or K
-        local rightPad = KK.CHAT_RIGHT_PAD or 16
+        local gap = KK.CHAT_RIGHT_PAD or 20
+
+        local leftOpen  = UI.LeftPanel  and UI.LeftPanel.IsOpen
+        local rightOpen = UI.RightPanel and UI.RightPanel.IsOpen
+
+        local panelPad = KK.CHAT_PAD_PANEL or 0
+
+        local left  = leftOpen  and ((KK.LEFT_WIDTH  or 150) + panelPad) or 0
+        local right = rightOpen and ((KK.RIGHT_WIDTH or 38)  + gap + panelPad) or gap
 
         scroll:ClearAllPoints()
-        scroll:SetPoint("TOPLEFT", 0, -2)
+        scroll:SetPoint("TOPLEFT", left, -(KK.CHAT_PAD_TOP or 4))
 
         local inputH = (UI.Input and UI.Input.Container and UI.Input.Container:GetHeight()) or 30
-        scroll:SetPoint("BOTTOMRIGHT", -rightPad, inputH + 4)
+        scroll:SetPoint("BOTTOMRIGHT", -right, inputH + (KK.CHAT_PAD_BOTTOM or 4))
 
         scrollBar:ClearAllPoints()
         scrollBar:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", 0, -4)
@@ -832,38 +1145,35 @@ end)
 
 -- ============================================================================
 -- NSQC4 / nowim / UI / ConfigUI
--- ЕДИНЫЙ ФАЙЛ С КОНСТАНТАМИ ДЛЯ ВСЕГО ИНТЕРФЕЙСА
--- ВАЖНО: этот файл должен грузиться РАНЬШЕ Chat.lua, Input.lua, Window.lua
 -- ============================================================================
 
 NSQC4.RegisterModule("nowim", function()
     NSQC4.Nowim.UI = NSQC4.Nowim.UI or {}
 
     NSQC4.Nowim.UI.Const = {
-        -- ====================================================================
         -- ОКНО
-        -- ====================================================================
-        EDGE_PADDING   = 6,    -- зазор от края окна до контента (было 0)
-        PANEL_HEIGHT   = 26,   -- отступ сверху для панелей (было 20)
-        LEFT_WIDTH     = 150,  -- ширина левой панели (было 140)
-        RIGHT_WIDTH    = 38,   -- ширина правой панели (было 36)
-        BTN_ALPHA      = 0.01, -- прозрачность кнопок в покое
-        TAB_WIDTH      = 34,   -- ширина вкладки (было 30)
-        TAB_HEIGHT     = 26,   -- высота вкладки (было 24)
+        EDGE_PADDING   = 6,    
+        PANEL_HEIGHT   = 26,   
+        LEFT_WIDTH     = 150,  
+        RIGHT_WIDTH    = 38,   
+        BTN_ALPHA      = 0.01, 
+        TAB_WIDTH      = 34,   
+        TAB_HEIGHT     = 26,   
 
-        -- ====================================================================
         -- ЧАТ (ОБЛАКА)
-        -- ====================================================================
-        BUBBLE_PADDING = 6,    -- отступ текста внутри облака (было 4)
-        GAP            = 6,    -- зазор между облаками (было 4)
-        CHAT_PADDING_L = 8,    -- сдвиг чужих сообщений от левого края (было 2)
-        CHAT_PADDING_R = 8,    -- сдвиг своих сообщений от правого края (было 2)
-        CHAT_RIGHT_PAD = 20,   -- зазор справа под скроллбар (было 16)
+        BUBBLE_PADDING = 6,    
+        GAP            = 6,    
+        CHAT_PADDING_L = 0,    -- было 4, теперь вплотную к левому краю
+        CHAT_PADDING_R = 0,    -- было 4, теперь вплотную к правому краю
+        
+        -- Отступы ScrollFrame
+        CHAT_PAD_TOP    = 4,   
+        CHAT_PAD_BOTTOM = 0,   -- было 2, теперь вплотную к низу
+        CHAT_PAD_PANEL  = 0,   
+        CHAT_RIGHT_PAD  = 0,   -- было 6, скроллбар прижат к правому краю
 
-        -- ====================================================================
         -- ВВОД
-        -- ====================================================================
-        INPUT_HEIGHT   = 32,   -- высота поля ввода (было 30)
+        INPUT_HEIGHT   = 32,   
     }
 end)
 
@@ -874,7 +1184,6 @@ end)
 
 -- ============================================================================
 -- NSQC4 / nowim / UI / Input
--- Совместимо с WoW 3.3.5 (CircleL)
 -- ============================================================================
 
 NSQC4.RegisterModule("nowim", function()
@@ -900,7 +1209,7 @@ NSQC4.RegisterModule("nowim", function()
     editBox:SetMultiLine(true)
     editBox:SetAutoFocus(false)
     editBox:SetFontObject("ChatFontNormal")
-    editBox:SetTextColor(1, 1, 1, 1)   -- явный белый, чтобы не зависеть от темы
+    editBox:SetTextColor(1, 1, 1, 1)
     editBox:SetWidth(100)
     editBox:SetHeight(20)
     scroll:SetScrollChild(editBox)
@@ -910,7 +1219,6 @@ NSQC4.RegisterModule("nowim", function()
     counter:SetPoint("BOTTOMRIGHT", -5, 5)
     counter:SetTextColor(0.5, 0.5, 0.5)
 
-    -- ========================================================================
     local function IsIdleHidden()
         if I._opening then return false end
         if C.db.settings.showInputIdle then return false end
@@ -931,8 +1239,18 @@ NSQC4.RegisterModule("nowim", function()
         return h
     end
 
+    -- Кэш последней применённой высоты: не пересчитываем чат, если высота не изменилась
+    local lastH = nil
+
     local function ApplyContainerSize()
         local h = GetInputHeight()
+
+        -- Ничего не изменилось — не дёргаем ни SetHeight, ни пересчёт чата
+        if h == lastH then
+            return
+        end
+        lastH = h
+
         container:SetHeight(h)
         if h > 0 then
             container:Show()
@@ -943,6 +1261,8 @@ NSQC4.RegisterModule("nowim", function()
         else
             container:Hide()
         end
+
+        -- Пересчёт чата нужен только при реальном изменении высоты поля ввода
         if UI.Chat and UI.Chat.OnResize then UI.Chat.OnResize() end
     end
 
@@ -953,6 +1273,8 @@ NSQC4.RegisterModule("nowim", function()
         self:Hide()
         editBox:SetFocus()
         I._opening = false
+        -- Сбрасываем кэш, чтобы гарантированно применить размер после открытия
+        lastH = nil
         ApplyContainerSize()
     end)
 
@@ -965,7 +1287,7 @@ NSQC4.RegisterModule("nowim", function()
         local bytes = #text
         counter:SetText(bytes .. "/" .. C.MAX_BYTES)
         counter:SetTextColor(bytes > C.MAX_BYTES and 1 or 0.5, bytes > C.MAX_BYTES and 0 or 0.5, 0.5)
-        ApplyContainerSize()
+        ApplyContainerSize() -- внутри ранний return, если высота не менялась
     end)
 
     editBox:SetScript("OnEnterPressed", function(self)
@@ -1017,15 +1339,9 @@ NSQC4.RegisterModule("nowim", function()
         container:SetPoint("BOTTOMLEFT", left + 2, 2)
         container:SetPoint("BOTTOMRIGHT", -right - 2, 2)
 
-        local h = GetInputHeight()
-        container:SetHeight(h)
-        if h > 0 then
-            container:Show()
-            editBox:Show()
-        else
-            container:Hide()
-        end
-        editBox:SetWidth(container:GetWidth() - 10)
+        -- Принудительно применяем (ширина/позиция могли измениться)
+        lastH = nil
+        ApplyContainerSize()
     end
 
     container:SetScript("OnSizeChanged", function()
@@ -1040,12 +1356,104 @@ end)
 
 
 ======================================================================
+ FILE: UI/ChatView/Scroll.lua
+======================================================================
+
+NSQC4.RegisterModule("nowim", function()
+    local UI = NSQC4.Nowim.UI
+    UI.ChatView = UI.ChatView or {}
+    local V = UI.ChatView
+    local parent = UI.Content
+
+    -- Создаем ScrollFrame
+    local scroll = CreateFrame("ScrollFrame", "NSQC4_NowimChatScroll", parent)
+    V.Scroll = scroll
+
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetSize(300, 1)
+    scroll:SetScrollChild(content)
+    V.Content = content
+
+    -- Создаем ручной скроллбар (без шаблонов)
+    local scrollBar = CreateFrame("Slider", "NSQC4_NowimChatScrollBar", parent)
+    scrollBar:SetWidth(8) -- Тонкий ползунок
+    scrollBar:SetMinMaxValues(0, 0)
+    scrollBar:SetValueStep(1)
+    scrollBar:SetAlpha(0.01) -- Прозрачный в покое (1%)
+    
+    -- Текстура ползунка (тонкая полоска)
+    local thumb = scrollBar:CreateTexture(nil, "ARTWORK")
+    thumb:SetTexture("Interface\\Buttons\\WHITE8x8")
+    thumb:SetSize(8, 30) -- Высота бегунка
+    thumb:SetVertexColor(0.6, 0.6, 0.6, 1) -- Серый цвет
+    scrollBar:SetThumbTexture(thumb)
+
+    -- Разрешаем мышь
+    scrollBar:EnableMouse(true)
+    
+    -- Поведение прозрачности
+    scrollBar:SetScript("OnEnter", function(self) 
+        self:SetAlpha(1) 
+    end)
+    scrollBar:SetScript("OnLeave", function(self) 
+        if not scroll:IsMouseOver() then 
+            self:SetAlpha(0.01) 
+        end 
+    end)
+    
+    -- Логика прокрутки при перетаскивании
+    scrollBar:SetScript("OnValueChanged", function(self, value)
+        scroll:SetVerticalScroll(value)
+    end)
+
+    -- Прокрутка колесиком
+    scroll:EnableMouseWheel(true)
+    scroll:SetScript("OnMouseWheel", function(self, delta)
+        local offset = scroll:GetVerticalScroll() or 0
+        local maxScroll = math.max(0, (content:GetHeight() or 0) - (scroll:GetHeight() or 0))
+        local newOffset = math.max(0, math.min(offset - (delta * 30), maxScroll))
+        scroll:SetVerticalScroll(newOffset)
+        scrollBar:SetValue(newOffset)
+    end)
+    
+    -- Синхронизация скроллбара при прокрутке чата
+    scroll:SetScript("OnVerticalScroll", function(self, offset)
+        content:ClearAllPoints()
+        content:SetPoint("TOPLEFT", self, "TOPLEFT", 0, offset)
+        scrollBar:SetValue(offset) -- Обновляем значение ползунка
+    end)
+    
+    -- Показываем скроллбар при наведении на чат
+    scroll:SetScript("OnEnter", function()
+        scrollBar:SetAlpha(1)
+    end)
+    scroll:SetScript("OnLeave", function()
+        if not scrollBar:IsMouseOver() then
+            scrollBar:SetAlpha(0.01)
+        end
+    end)
+    
+    -- Функция для прокрутки в самый низ
+    function V.ScrollToBottom()
+        -- ВАЖНО: сначала обновляем высоту контента, чтобы GetHeight() вернул правильное значение
+        scroll:UpdateScrollChildRect()
+        
+        local maxScroll = math.max(0, (content:GetHeight() or 0) - (scroll:GetHeight() or 0))
+        scroll:SetVerticalScroll(maxScroll)
+        scrollBar:SetValue(maxScroll)
+        
+        -- Обновляем границы скроллбара (важно, чтобы ползунок правильно позиционировался)
+        scrollBar:SetMinMaxValues(0, maxScroll)
+    end
+end)
+
+
+======================================================================
  FILE: UI/ChatView/Window.lua
 ======================================================================
 
 -- ============================================================================
 -- NSQC4 / nowim / UI / Window
--- Совместимо с WoW 3.3.5 (CircleL)
 -- ============================================================================
 
 NSQC4.RegisterModule("nowim", function()
@@ -1057,9 +1465,6 @@ NSQC4.RegisterModule("nowim", function()
 
     local K = UI.Const or {}
 
-    -- ========================================================================
-    -- ГЛАВНОЕ ОКНО
-    -- ========================================================================
     local mainFrame = CreateFrame("Frame", "NSQC4_NowimMainFrame", UIParent)
     UI.MainFrame = mainFrame
 
@@ -1080,9 +1485,6 @@ NSQC4.RegisterModule("nowim", function()
     mainFrame:SetBackdropColor(0, 0, 0, 0.95)
     mainFrame:SetBackdropBorderColor(1, 1, 1, 1)
 
-    -- ========================================================================
-    -- РАМКА: показать/скрыть по showBorder
-    -- ========================================================================
     local function ApplyBorder()
         if C.db.settings.showBorder then
             mainFrame:SetBackdropBorderColor(1, 1, 1, 1)
@@ -1105,21 +1507,21 @@ NSQC4.RegisterModule("nowim", function()
         C.db.window.point = p; C.db.window.relPoint = rp; C.db.window.x = x; C.db.window.y = y
     end)
 
-    local closeBtn = CreateFrame("Button", nil, mainFrame, "UIPanelCloseButton")
+    local closeBtn = CreateFrame("Button", "NSQC4_NowimCloseBtn", mainFrame, "UIPanelCloseButton")
     closeBtn:SetPoint("TOPRIGHT", -2, -2)
     closeBtn:SetAlpha(K.BTN_ALPHA or 0.01)
+    closeBtn:SetFrameLevel(mainFrame:GetFrameLevel() + 60) -- Поднимаем крестик
     closeBtn:SetScript("OnEnter", function(self) self:SetAlpha(1) end)
-    closeBtn:SetScript("OnLeave", function(self) self:SetAlpha(K.BTN_ALPHA or 0.01) end)
+    closeBtn:SetScript("OnLeave", function(self) 
+        if not NSQC4.Nowim.settingsOpen then self:SetAlpha(K.BTN_ALPHA or 0.01) end 
+    end)
     closeBtn:SetScript("OnClick", function() mainFrame:Hide() end)
 
     local content = CreateFrame("Frame", nil, mainFrame)
-    content:SetPoint("TOPLEFT", K.EDGE_PADDING or 0, -(K.EDGE_PADDING or 0))
-    content:SetPoint("BOTTOMRIGHT", -(K.EDGE_PADDING or 0), K.EDGE_PADDING or 0)
+    content:SetPoint("TOPLEFT", K.EDGE_PADDING or 4, -(K.EDGE_PADDING or 4))
+    content:SetPoint("BOTTOMRIGHT", -(K.EDGE_PADDING or 4), K.EDGE_PADDING or 4)
     UI.Content = content
 
-    -- ========================================================================
-    -- РЕСАЙЗ-ГРИП
-    -- ========================================================================
     local grip = CreateFrame("Button", nil, mainFrame)
     grip:SetSize(16, 16)
     grip:SetPoint("BOTTOMRIGHT", -2, 2)
@@ -1158,9 +1560,6 @@ NSQC4.RegisterModule("nowim", function()
     grip:SetScript("OnMouseUp", function(_, btn) if btn == "LeftButton" then StopResize() end end)
     grip:SetScript("OnHide", StopResize)
 
-    -- ========================================================================
-    -- TABS
-    -- ========================================================================
     local Tabs = {}
     UI.Tabs = Tabs
     local tabContainer = CreateFrame("Frame", nil, mainFrame)
@@ -1187,7 +1586,6 @@ NSQC4.RegisterModule("nowim", function()
 
         local xOffset = 0
         for _, key in ipairs(C.db.openTabs or {}) do
-            -- Защита: пропускаем не-строки (старый мусор в сохранении)
             if type(key) == "string" then
                 local btn = tabButtons[key]
                 if not btn then
@@ -1215,9 +1613,7 @@ NSQC4.RegisterModule("nowim", function()
         end
     end
 
-    -- ========================================================================
-    -- LEFT PANEL (контакты и каналы)
-    -- ========================================================================
+    -- ЛЕВАЯ ПАНЕЛЬ
     local LeftPanel = {}
     UI.LeftPanel = LeftPanel
     LeftPanel.IsOpen = false
@@ -1242,14 +1638,17 @@ NSQC4.RegisterModule("nowim", function()
     LeftPanel.Content = lpContent
     LeftPanel.Rows = {}
 
-    local lpToggle = CreateFrame("Button", nil, mainFrame, "UIPanelButtonTemplate")
+    local lpToggle = CreateFrame("Button", "NSQC4_NowimLeftToggle", mainFrame, "UIPanelButtonTemplate")
     lpToggle:SetSize(20, 20)
     lpToggle:SetText("<")
     lpToggle:SetAlpha(K.BTN_ALPHA or 0.01)
+    lpToggle:SetFrameLevel(mainFrame:GetFrameLevel() + 50) -- Поверх окна
+    lpToggle:EnableMouse(true) -- ВАЖНО: чтобы клик срабатывал
     lpToggle:SetScript("OnEnter", function(self) self:SetAlpha(1) end)
-    lpToggle:SetScript("OnLeave", function(self) self:SetAlpha(K.BTN_ALPHA or 0.01) end)
+    lpToggle:SetScript("OnLeave", function(self) 
+        if not NSQC4.Nowim.settingsOpen then self:SetAlpha(K.BTN_ALPHA or 0.01) end 
+    end)
 
-    -- Кнопка НАД окном, вровень с вкладками.
     local function UpdateLeftTogglePosition()
         local KK = UI.Const or K
         local w = KK.LEFT_WIDTH or 140
@@ -1309,9 +1708,7 @@ NSQC4.RegisterModule("nowim", function()
         lpContent:SetHeight(math.max(1, yOffset))
     end
 
-    -- ========================================================================
-    -- RIGHT PANEL (кнопки инструментов)
-    -- ========================================================================
+    -- ПРАВАЯ ПАНЕЛЬ
     local RightPanel = {}
     UI.RightPanel = RightPanel
     RightPanel.IsOpen = false
@@ -1326,14 +1723,19 @@ NSQC4.RegisterModule("nowim", function()
     rpFrame:Hide()
     RightPanel.Frame = rpFrame
 
-    local rpToggle = CreateFrame("Button", nil, mainFrame, "UIPanelButtonTemplate")
+    local rpToggle = CreateFrame("Button", "NSQC4_NowimRightToggle", mainFrame, "UIPanelButtonTemplate")
     rpToggle:SetSize(20, 20)
     rpToggle:SetText(">")
+    
+    rpToggle:SetPoint("BOTTOMRIGHT", mainFrame, "TOPRIGHT", -28, 0)
     rpToggle:SetAlpha(K.BTN_ALPHA or 0.01)
+    rpToggle:SetFrameLevel(mainFrame:GetFrameLevel() + 50) -- Поверх окна
+    rpToggle:EnableMouse(true) -- ВАЖНО: чтобы клик срабатывал
     rpToggle:SetScript("OnEnter", function(self) self:SetAlpha(1) end)
-    rpToggle:SetScript("OnLeave", function(self) self:SetAlpha(K.BTN_ALPHA or 0.01) end)
+    rpToggle:SetScript("OnLeave", function(self) 
+        if not NSQC4.Nowim.settingsOpen then self:SetAlpha(K.BTN_ALPHA or 0.01) end 
+    end)
 
-    -- Кнопка НАД окном, вровень с вкладками. -22 — место под крестик.
     local function UpdateRightTogglePosition()
         local KK = UI.Const or K
         local w = KK.RIGHT_WIDTH or 36
@@ -1341,7 +1743,7 @@ NSQC4.RegisterModule("nowim", function()
         if RightPanel.IsOpen then
             rpToggle:SetPoint("BOTTOMRIGHT", mainFrame, "TOPRIGHT", -(w + 22), 0)
         else
-            rpToggle:SetPoint("BOTTOMRIGHT", mainFrame, "TOPRIGHT", -22, 0)
+            rpToggle:SetPoint("BOTTOMRIGHT", mainFrame, "TOPRIGHT", -28, 0)
         end
     end
 
@@ -1354,7 +1756,6 @@ NSQC4.RegisterModule("nowim", function()
     end
     rpToggle:SetScript("OnClick", RightPanel.Toggle)
 
-    -- Вспомогательная функция для кнопок-инструментов
     local function CreateToolButton(parent, iconText, tooltipText, onClick)
         local btn = CreateFrame("Button", nil, parent)
         btn:SetSize(28, 28)
@@ -1384,20 +1785,17 @@ NSQC4.RegisterModule("nowim", function()
         return btn
     end
 
-    -- 1. Настройки констант
     local btnSettings = CreateToolButton(rpFrame, "?", "Настройки констант", function()
         local CS = UI.ConstSettings
         if CS and CS.Show then CS.Show() end
     end)
     btnSettings:SetPoint("TOP", rpFrame, "TOP", 0, -4)
 
-    -- 2. Твинки
     local btnTwinks = CreateToolButton(rpFrame, "Т", "Управление твинками", function()
         if UI.AliasWindow then UI.AliasWindow.Show() else print("|cffff0000[Nowim]|r Окно твинков не готово.") end
     end)
     btnTwinks:SetPoint("TOP", btnSettings, "BOTTOM", 0, -4)
 
-    -- 3. Объединение чатов
     local btnMerge = CreateToolButton(rpFrame, "О", "Объединять чаты персонажей", function(self)
         C.db.settings.mergeChats = not C.db.settings.mergeChats
         if C.db.settings.mergeChats then
@@ -1410,7 +1808,6 @@ NSQC4.RegisterModule("nowim", function()
     btnMerge:SetPoint("TOP", btnTwinks, "BOTTOM", 0, -4)
     if C.db.settings.mergeChats then btnMerge:SetBackdropColor(0.1, 0.4, 0.1, 1) end
 
-    -- 4. Размер шрифта
     local btnFont = CreateToolButton(rpFrame, "А", function()
         return "Размер шрифта: " .. (C.db.settings.fontSize or 12) .. "\nЛКМ — увеличить, ПКМ — уменьшить"
     end, function(self, button)
@@ -1431,7 +1828,6 @@ NSQC4.RegisterModule("nowim", function()
     end)
     btnFont:SetPoint("TOP", btnMerge, "BOTTOM", 0, -4)
 
-    -- 5. Очистить историю
     local btnClear = CreateToolButton(rpFrame, "X", "Очистить историю", function()
         if C.db.activeTab then
             S.ClearHistory(C.db.activeTab)
@@ -1440,17 +1836,13 @@ NSQC4.RegisterModule("nowim", function()
     end)
     btnClear:SetPoint("TOP", btnFont, "BOTTOM", 0, -4)
 
-    -- ========================================================================
-    -- REAPPLY LAYOUT — единая точка раскладки
-    -- ========================================================================
     function UI.ReapplyLayout()
         local KK = UI.Const or K
-
         ApplyBorder()
 
         content:ClearAllPoints()
-        content:SetPoint("TOPLEFT", KK.EDGE_PADDING or 0, -(KK.EDGE_PADDING or 0))
-        content:SetPoint("BOTTOMRIGHT", -(KK.EDGE_PADDING or 0), KK.EDGE_PADDING or 0)
+        content:SetPoint("TOPLEFT", KK.EDGE_PADDING or 4, -(KK.EDGE_PADDING or 4))
+        content:SetPoint("BOTTOMRIGHT", -(KK.EDGE_PADDING or 4), KK.EDGE_PADDING or 4)
 
         lpFrame:ClearAllPoints()
         lpFrame:SetPoint("TOPLEFT", 0, -(KK.PANEL_HEIGHT or 20))
@@ -1468,13 +1860,10 @@ NSQC4.RegisterModule("nowim", function()
         UpdateLeftTogglePosition()
         UpdateRightTogglePosition()
 
-        if UI.Chat and UI.Chat.OnResize then UI.Chat.OnResize() end
+        if UI.ChatView and UI.ChatView.OnResize then UI.ChatView.OnResize() end
         if UI.Input and UI.Input.OnResize then UI.Input.OnResize() end
     end
 
-    -- ========================================================================
-    -- SHOW
-    -- ========================================================================
     function mainFrame:ShowFrame()
         self:Show()
         self:Raise()
@@ -1482,7 +1871,6 @@ NSQC4.RegisterModule("nowim", function()
         if UI.ReapplyLayout then UI.ReapplyLayout() end
     end
 
-    -- Первичное позиционирование кнопок
     UpdateLeftTogglePosition()
     UpdateRightTogglePosition()
 end)
@@ -1494,17 +1882,12 @@ end)
 
 -- ============================================================================
 -- NSQC4 / nowim / UI / ConstSettings
--- Окно ручной подстройки констант (offset -50..+50) + чекбоксы
--- Совместимо с WoW 3.3.5 (CircleL)
 -- ============================================================================
 
 NSQC4.RegisterModule("nowim", function()
     local C = NSQC4.Nowim.Config
     local UI = NSQC4.Nowim.UI
 
-    -- ========================================================================
-    -- СЛАЙДЕРЫ (offset -50..+50)
-    -- ========================================================================
     local FIELDS = {
         { key = "EDGE_PADDING",   label = "Отступ от края окна" },
         { key = "PANEL_HEIGHT",   label = "Отступ сверху панелей" },
@@ -1517,18 +1900,19 @@ NSQC4.RegisterModule("nowim", function()
         { key = "CHAT_PADDING_L", label = "Сдвиг чужих сообщений" },
         { key = "CHAT_PADDING_R", label = "Сдвиг своих сообщений" },
         { key = "CHAT_RIGHT_PAD", label = "Зазор справа (скроллбар)" },
+        { key = "CHAT_PAD_TOP",    label = "Отступ чата сверху" },
+        { key = "CHAT_PAD_BOTTOM", label = "Отступ чата снизу (над вводом)" },
+        { key = "CHAT_PAD_PANEL",  label = "Зазор чата до панелей" },
         { key = "INPUT_HEIGHT",   label = "Высота поля ввода" },
     }
 
     C.db.settings.offsets = C.db.settings.offsets or {}
     local offsets = C.db.settings.offsets
-
     local base = {}
-
     local MIN = {
         INPUT_HEIGHT = 5, TAB_WIDTH = 5, TAB_HEIGHT = 5,
         LEFT_WIDTH = 5, RIGHT_WIDTH = 5, GAP = 0, BUBBLE_PADDING = 0,
-        CHAT_RIGHT_PAD = 0,
+        CHAT_RIGHT_PAD = 0, CHAT_PAD_TOP = -10, CHAT_PAD_BOTTOM = -10, CHAT_PAD_PANEL = -10,
     }
 
     local function RefreshBase()
@@ -1551,14 +1935,11 @@ NSQC4.RegisterModule("nowim", function()
     end
 
     local function ApplyAll()
-        for _, f in ipairs(FIELDS) do
-            ApplyOffset(f.key)
-        end
+        for _, f in ipairs(FIELDS) do ApplyOffset(f.key) end
     end
 
     local function Rebuild()
-        if UI.ReapplyLayout then
-            UI.ReapplyLayout()
+        if UI.ReapplyLayout then UI.ReapplyLayout()
         else
             if UI.Tabs and UI.Tabs.Refresh then UI.Tabs.Refresh() end
             if UI.Chat and UI.Chat.OnResize then UI.Chat.OnResize() end
@@ -1566,21 +1947,16 @@ NSQC4.RegisterModule("nowim", function()
         end
     end
 
-    -- ========================================================================
-    -- ОКНО
-    -- ========================================================================
     local win = CreateFrame("Frame", "NSQC4_NowimConstSettings", UIParent)
-    win:SetSize(380, 560)
+    win:SetSize(380, 600)
     win:SetPoint("CENTER")
     win:SetFrameStrata("DIALOG")
     win:SetMovable(true)
     win:EnableMouse(true)
     win:SetClampedToScreen(true)
     win:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-        insets = { left = 0, right = 0, top = 0, bottom = 0 },
+        bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1, insets = { left = 0, right = 0, top = 0, bottom = 0 },
     })
     win:SetBackdropColor(0, 0, 0, 0.95)
     win:SetBackdropBorderColor(1, 1, 1, 1)
@@ -1603,7 +1979,6 @@ NSQC4.RegisterModule("nowim", function()
     header:SetScript("OnDragStart", function() win:StartMoving() end)
     header:SetScript("OnDragStop", function() win:StopMovingOrSizing() end)
 
-    -- ВАЖНО: имя обязательно для UIPanelScrollFrameTemplate в 3.3.5
     local scroll = CreateFrame("ScrollFrame", "NSQC4_NowimConstSettingsScroll", win, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", 8, -34)
     scroll:SetPoint("BOTTOMRIGHT", -28, 40)
@@ -1643,9 +2018,7 @@ NSQC4.RegisterModule("nowim", function()
         slider:SetHeight(16)
         slider:SetMinMaxValues(-50, 50)
         slider:SetValueStep(1)
-        if slider.SetObeyStepOnDrag then
-            slider:SetObeyStepOnDrag(true)
-        end
+        if slider.SetObeyStepOnDrag then slider:SetObeyStepOnDrag(true) end
         slider:SetValue(offsets[field.key] or 0)
 
         local low  = _G[sliderName .. "Low"]
@@ -1673,9 +2046,6 @@ NSQC4.RegisterModule("nowim", function()
         y = y + ROW_H
     end
 
-    -- ========================================================================
-    -- ЧЕКБОКСЫ
-    -- ========================================================================
     local function MakeCheckbox(parent, y, labelText, getValue, setValue)
         local row = CreateFrame("Frame", nil, parent)
         row:SetPoint("TOPLEFT", 0, -y)
@@ -1690,9 +2060,7 @@ NSQC4.RegisterModule("nowim", function()
         label:SetPoint("LEFT", cb, "RIGHT", 6, 0)
         label:SetText(labelText)
 
-        local function Update()
-            cb:SetChecked(getValue() and true or false)
-        end
+        local function Update() cb:SetChecked(getValue() and true or false) end
         Update()
 
         cb:SetScript("OnClick", function(self)
@@ -1700,36 +2068,28 @@ NSQC4.RegisterModule("nowim", function()
             Update()
             Rebuild()
         end)
-
         return row
     end
 
     y = y + 8
-    MakeCheckbox(content, y,
-        "Отображать рамку окна",
+    MakeCheckbox(content, y, "Отображать рамку окна",
         function() return C.db.settings.showBorder end,
         function(v) C.db.settings.showBorder = v end)
     y = y + 28
 
-    MakeCheckbox(content, y,
-        "Отображать строку ввода в покое",
+    MakeCheckbox(content, y, "Отображать строку ввода в покое",
         function() return C.db.settings.showInputIdle end,
         function(v) C.db.settings.showInputIdle = v end)
     y = y + 28
 
     content:SetHeight(math.max(1, y))
 
-    -- ========================================================================
-    -- Кнопки внизу
-    -- ========================================================================
     local reset = CreateFrame("Button", nil, win, "UIPanelButtonTemplate")
     reset:SetSize(90, 22)
     reset:SetPoint("BOTTOMLEFT", 8, 8)
     reset:SetText("Сброс")
     reset:SetScript("OnClick", function()
-        for _, f in ipairs(FIELDS) do
-            offsets[f.key] = 0
-        end
+        for _, f in ipairs(FIELDS) do offsets[f.key] = 0 end
         ApplyAll()
         for _, s in pairs(sliders) do
             s.slider:SetValue(0)
@@ -1744,9 +2104,6 @@ NSQC4.RegisterModule("nowim", function()
     btnClose:SetText("Закрыть")
     btnClose:SetScript("OnClick", function() win:Hide() end)
 
-    -- ========================================================================
-    -- Отложенная инициализация
-    -- ========================================================================
     local function InitWhenReady()
         if not UI.Const then return false end
         RefreshBase()
@@ -1766,17 +2123,81 @@ NSQC4.RegisterModule("nowim", function()
         end)
     end
 
+    -- ========================================================================
+    -- ОТЛАДКА И УПРАВЛЕНИЕ КНОПКАМИ
+    -- ========================================================================
     local CS = {}
     UI.ConstSettings = CS
+
+    local buttonsToShow = { 
+        "NSQC4_NowimLeftToggle", 
+        "NSQC4_NowimRightToggle" 
+    }
+
+    local function SetButtonsAlpha(alpha)
+        for _, name in ipairs(buttonsToShow) do
+            local btn = _G[name]
+            if btn then 
+                btn:SetAlpha(alpha) 
+            end
+        end
+    end
+
+    -- Функция отладки: показывает в чат, где кнопки и какая у них альфа
+    local function DebugButtons()
+        print("|cff00ff00[Nowim Debug]|r --- Проверка кнопок ---")
+        
+        -- Левая кнопка
+        local leftBtn = _G["NSQC4_NowimLeftToggle"]
+        if leftBtn then
+            print("LeftToggle существует. Alpha:", leftBtn:GetAlpha(), "Shown:", tostring(leftBtn:IsShown()))
+            print("LeftToggle родитель:", leftBtn:GetParent():GetName() or "Без имени")
+        else
+            print("|cffff0000LeftToggle НЕ НАЙДЕН!|r")
+        end
+
+        -- Правая кнопка
+        local rightBtn = _G["NSQC4_NowimRightToggle"]
+        if rightBtn then
+            print("RightToggle существует. Alpha:", rightBtn:GetAlpha(), "Shown:", tostring(rightBtn:IsShown()))
+            print("RightToggle родитель:", rightBtn:GetParent():GetName() or "Без имени")
+        else
+            print("|cffff0000RightToggle НЕ НАЙДЕН!|r")
+        end
+
+        -- Кнопка закрытия окна (крестик)
+        local closeBtn = _G["NSQC4_NowimMainFrameCloseButton"]
+        if closeBtn then
+            print("CloseBtn существует. Alpha:", closeBtn:GetAlpha())
+        else
+            print("|cffff0000CloseBtn не имеет имени (это нормально, если создан через CreateFrame без имени)|r")
+        end
+        
+        -- Контейнер вкладок
+        local tabs = UI.Tabs
+        if tabs and tabs.Buttons then
+            print("Вкладок создано:", #tabs.Buttons)
+        end
+        
+        print("|cff00ff00[Nowim Debug]|r --- Конец проверки ---")
+    end
+
     function CS.Show()
         win:Show()
         win:Raise()
+        NSQC4.Nowim.settingsOpen = true
+        SetButtonsAlpha(1)
+        DebugButtons() -- ВЫЗЫВАЕМ ОТЛАДКУ ПРИ ОТКРЫТИИ
     end
+
     function CS.Hide()
         win:Hide()
+        NSQC4.Nowim.settingsOpen = false
+        SetButtonsAlpha(0.01)
     end
+
     function CS.Toggle()
-        if win:IsShown() then win:Hide() else CS.Show() end
+        if win:IsShown() then CS.Hide() else CS.Show() end
     end
 end)
 
@@ -1791,6 +2212,312 @@ end)
 
 NSQC4.RegisterModule("nowim", function()
     -- Код будет добавлен позже
+end)
+
+
+======================================================================
+ FILE: UI/Tabs.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / nowim / UI / Tabs
+-- ============================================================================
+
+NSQC4.RegisterModule("nowim", function()
+    local C = NSQC4.Nowim.Config
+    local E = NSQC4.Nowim.ChatEngine
+    local UI = NSQC4.Nowim.UI
+
+    local T = {}
+    UI.Tabs = T
+    local mainFrame = UI.MainFrame
+
+    C.db.settings.filters = C.db.settings.filters or {
+        GUILD = true, RAID = true, PARTY = true, WHISPER = true, SYSTEM = true, SAY = true, YELL = true
+    }
+    local filters = C.db.settings.filters
+
+    local tabContainer = CreateFrame("Frame", nil, mainFrame)
+    tabContainer:SetPoint("BOTTOMLEFT", mainFrame, "TOPLEFT", 30, 0)
+    tabContainer:SetPoint("BOTTOMRIGHT", mainFrame, "TOPRIGHT", -30, 0)
+    tabContainer:SetHeight(24)
+    tabContainer:SetFrameLevel(mainFrame:GetFrameLevel() + 10)
+
+    tabContainer:SetAlpha(0.01)
+    tabContainer:EnableMouse(true)
+
+    tabContainer:SetScript("OnUpdate", function(self)
+        local hasUnread = false
+        for _, key in ipairs(C.db.openTabs or {}) do
+            if (C.db.unread[key] or 0) > 0 then hasUnread = true break end
+        end
+        if hasUnread then self:SetAlpha(1) return end
+
+        local isOver = self:IsMouseOver()
+        if not isOver then
+            for _, btn in pairs(T.Buttons) do
+                if btn:IsMouseOver() then isOver = true break end
+            end
+        end
+        self:SetAlpha(isOver and 1 or 0.01)
+    end)
+
+    mainFrame.Tabs = tabContainer
+    T.Buttons = {}
+    local tabButtons = T.Buttons
+    local TAB_WIDTH = 30
+    local TAB_HEIGHT = 24
+
+    local function GetTabLetter(key)
+        if key == "GENERAL" then return "О" end
+        if key == "GUILD" then return "Г" end
+        if key == "OFFICER" then return "О" end
+        if key == "RAID" then return "Р" end
+        if type(key) ~= "string" then return "?" end
+        return (key:match("^([%z\1-\127\194-\244][\128-\191]*)") or "?"):upper()
+    end
+
+    -- ========================================================================
+    -- Меню настроек (ПКМ по вкладке)
+    -- ========================================================================
+    local menuFrame
+    local function ShowTabMenu(btn, key)
+        if not menuFrame then
+            menuFrame = CreateFrame("Frame", "NSQC4NowimTabMenu", UIParent, "UIDropDownMenuTemplate")
+        end
+
+        UIDropDownMenu_Initialize(menuFrame, function(self, level)
+            local info = UIDropDownMenu_CreateInfo()
+
+            info.text = "|cffffd100Настройки вкладки:|r"
+            info.isTitle = true
+            info.notCheckable = true
+            UIDropDownMenu_AddButton(info, level)
+
+            -- ГАЛОЧКА ДЛЯ ГИЛЬДИИ
+            if key == "GUILD" then
+                info = UIDropDownMenu_CreateInfo()
+                info.text = "|cff40ff40Показывать гильдейские|r"
+                info.checked = C.db.settings.showGuildInGuild
+                info.keepShownOnClick = true
+                info.func = function()
+                    C.db.settings.showGuildInGuild = not C.db.settings.showGuildInGuild
+                end
+                UIDropDownMenu_AddButton(info, level)
+
+                info = UIDropDownMenu_CreateInfo()
+                info.text = "|cff008000Показывать офицерские|r"
+                info.checked = C.db.settings.showOfficerInGuild
+                info.keepShownOnClick = true
+                info.func = function()
+                    C.db.settings.showOfficerInGuild = not C.db.settings.showOfficerInGuild
+                end
+                UIDropDownMenu_AddButton(info, level)
+            end
+
+            if key == "OFFICER" then
+                info = UIDropDownMenu_CreateInfo()
+                info.text = "|cff008000Показывать офицерские|r"
+                info.checked = C.db.settings.showOfficerInOfficer
+                info.keepShownOnClick = true
+                info.func = function()
+                    C.db.settings.showOfficerInOfficer = not C.db.settings.showOfficerInOfficer
+                end
+                UIDropDownMenu_AddButton(info, level)
+            end
+
+            if key == "GENERAL" then
+                -- Фильтры для общего чата
+                info = UIDropDownMenu_CreateInfo()
+                info.text = "|cffffd100Фильтры общего чата:|r"
+                info.isTitle = true
+                info.notCheckable = true
+                UIDropDownMenu_AddButton(info, level)
+
+                local filterList = {
+                    { key = "GUILD",   text = "Гильдия" },
+                    { key = "RAID",    text = "Рейд" },
+                    { key = "PARTY",   text = "Группа" },
+                    { key = "WHISPER", text = "Шепот" },
+                    { key = "SYSTEM",  text = "Системные (Лут/Ачивки)" },
+                    { key = "SAY",     text = "Сказать (/say)" },
+                    { key = "YELL",    text = "Крик (/yell)" },
+                }
+
+                for _, f in ipairs(filterList) do
+                    info = UIDropDownMenu_CreateInfo()
+                    info.text = f.text
+                    info.checked = filters[f.key]
+                    info.keepShownOnClick = true
+                    info.func = function() filters[f.key] = not filters[f.key] end
+                    UIDropDownMenu_AddButton(info, level)
+                end
+
+                info = UIDropDownMenu_CreateInfo()
+                info.text = "|cffffd100Каналы:|r"
+                info.isTitle = true
+                info.notCheckable = true
+                UIDropDownMenu_AddButton(info, level)
+
+                for id, data in pairs(C.db.channels) do
+                    if data.type == "CHANNEL" then
+                        info = UIDropDownMenu_CreateInfo()
+                        info.text = data.name
+                        info.checked = filters[data.name] ~= false
+                        info.keepShownOnClick = true
+                        info.func = function()
+                            filters[data.name] = not info.checked
+                        end
+                        UIDropDownMenu_AddButton(info, level)
+                    end
+                end
+            end
+
+            -- Общие настройки
+            info = UIDropDownMenu_CreateInfo()
+            info.text = ""
+            info.notCheckable = true
+            info.disabled = true
+            UIDropDownMenu_AddButton(info, level)
+
+            info = UIDropDownMenu_CreateInfo()
+            info.text = "Автопрокрутка"
+            info.checked = C.db.settings.autoScroll
+            info.func = function() C.db.settings.autoScroll = not C.db.settings.autoScroll end
+            UIDropDownMenu_AddButton(info, level)
+
+            info = UIDropDownMenu_CreateInfo()
+            info.text = "Перехватывать Enter в Nowim"
+            info.checked = C.db.settings.interceptEnter
+            info.keepShownOnClick = true
+            info.func = function()
+                C.db.settings.interceptEnter = not C.db.settings.interceptEnter
+                -- Включаем — фокус сразу на Nowim, чтобы сразу работало
+                if C.db.settings.interceptEnter then
+                    C.db.settings.lastChatFocus = "nowim"
+                end
+                if NSQC4.Nowim.ApplyEnterBinding then NSQC4.Nowim.ApplyEnterBinding() end
+                if NSQC4.Nowim.UpdateSystemChatVisibility then NSQC4.Nowim.UpdateSystemChatVisibility() end
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end)
+        ToggleDropDownMenu(1, nil, menuFrame, btn, 0, 0)
+    end
+
+    local function CreateTabButton(key)
+        local btn = CreateFrame("Button", nil, tabContainer)
+        btn:SetSize(TAB_WIDTH, TAB_HEIGHT)
+        btn:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            edgeSize = 8, insets = { left = 2, right = 2, top = 2, bottom = 0 }
+        })
+        btn:SetBackdropColor(0.15, 0.15, 0.15, 0.9)
+        btn:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+
+        local text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        text:SetPoint("CENTER", 0, 2)
+        text:SetText(GetTabLetter(key))
+        text:SetTextColor(1, 1, 1)
+
+        local close = CreateFrame("Button", nil, tabContainer)
+        close:SetSize(14, 14)
+        close:SetNormalTexture("Interface\\Buttons\\UI-GroupLoot-Pass-Up")
+        close:SetFrameLevel(tabContainer:GetFrameLevel() + 20)
+        close:EnableMouse(true)
+        close:Hide()
+
+        close:SetScript("OnClick", function(self, button)
+            if button == "LeftButton" then
+                E.CloseTab(key)
+            end
+        end)
+
+        btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        btn:SetScript("OnClick", function(self, button)
+            if button == "RightButton" then
+                ShowTabMenu(self, key)
+            else
+                E.OpenDialog(key)
+            end
+        end)
+
+        btn:SetScript("OnEnter", function(self)
+            close:Show()
+            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+            GameTooltip:SetText(key, 1, 1, 1)
+            GameTooltip:AddLine("ЛКМ — открыть, ПКМ — настройки", 0.6, 0.6, 0.6)
+            GameTooltip:Show()
+        end)
+
+        btn:SetScript("OnLeave", function()
+            if not close:IsMouseOver() then
+                close:Hide()
+            end
+            GameTooltip:Hide()
+        end)
+
+        close:SetScript("OnLeave", function(self)
+            if not btn:IsMouseOver() then
+                self:Hide()
+            end
+        end)
+
+        btn.close = close
+        tabButtons[key] = btn
+        return btn
+    end
+
+    function T.Refresh()
+        local openTabs = C.db.openTabs
+        local active = C.db.activeTab
+
+        for _, btn in pairs(tabButtons) do
+            btn:Hide()
+            if btn.close then btn.close:Hide() end
+        end
+        if not openTabs then return end
+
+        local xPos = 0
+        for _, key in ipairs(openTabs) do
+            local btn = tabButtons[key] or CreateTabButton(key)
+            btn:ClearAllPoints()
+            btn:SetPoint("BOTTOMLEFT", tabContainer, "BOTTOMLEFT", xPos, 0)
+            btn:Show()
+
+            if btn.close then
+                btn.close:ClearAllPoints()
+                btn.close:SetPoint("TOPRIGHT", btn, "TOPRIGHT", 2, 2)
+            end
+
+            local unread = C.db.unread[key] or 0
+
+            if key == active then
+                btn:SetBackdropColor(0.1, 0.1, 0.1, 1)
+                btn:SetBackdropBorderColor(0.5, 0.5, 0.5, 1)
+                btn:SetHeight(TAB_HEIGHT + 2)
+            else
+                btn:SetBackdropColor(0.15, 0.15, 0.15, 0.9)
+                btn:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+                btn:SetHeight(TAB_HEIGHT)
+            end
+
+            if unread > 0 then
+                if not btn.RedDot then
+                    btn.RedDot = btn:CreateTexture(nil, "OVERLAY")
+                    btn.RedDot:SetSize(6, 6)
+                    btn.RedDot:SetPoint("TOPLEFT", 2, -2)
+                    btn.RedDot:SetTexture("Interface\\Buttons\\WHITE8x8")
+                    btn.RedDot:SetVertexColor(1, 0, 0, 1)
+                end
+                btn.RedDot:Show()
+            elseif btn.RedDot then
+                btn.RedDot:Hide()
+            end
+
+            xPos = xPos + TAB_WIDTH + 2
+        end
+    end
 end)
 
 

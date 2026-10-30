@@ -13,14 +13,13 @@ NSQC4.RegisterModule("nowim", function()
 
     local function ResolveKey(nick)
         if not nick then return nil end
-        -- Приводим к строке: ключи в channels могут быть числами (каналы 1,2,4...)
         local s = tostring(nick)
         if C.db.channels[s] then return s end
         if C.db.channels[nick] then return nick end
         return A.GetMainName(s)
     end
 
-    function S.AddMessage(target, text, isMine, realSender)
+    function S.AddMessage(target, text, isMine, realSender, chatType)
         local key = ResolveKey(target)
         if not key or not text then return end
         if type(key) ~= "string" then return end
@@ -30,15 +29,20 @@ NSQC4.RegisterModule("nowim", function()
 
         local charTag = realSender or (isMine and UnitName("player") or nil)
 
-        table.insert(dialog.messages, {
+        local msgData = {
             text = text,
             isMine = isMine,
             time = U.GetTimeString(),
-            char = charTag
-        })
+            char = charTag,
+            chatType = chatType -- СОХРАНЯЕМ ТИП
+        }
 
-        while #dialog.messages > C.MAX_HISTORY do
-            table.remove(dialog.messages, 1)
+        table.insert(dialog.messages, msgData)
+
+        if #dialog.messages > C.MAX_HISTORY then
+            local oldMsg = table.remove(dialog.messages, 1)
+            C.db.archives[key] = C.db.archives[key] or { messages = {} }
+            table.insert(C.db.archives[key].messages, oldMsg)
         end
     end
 
@@ -57,31 +61,26 @@ NSQC4.RegisterModule("nowim", function()
 
     function S.GetContacts()
         local list = {}
-
-        -- ЛС (диалоги, которых нет в channels)
+        
         for key in pairs(C.db.dialogs) do
             local s = tostring(key)
             if not C.db.channels[s] and not C.db.channels[key] then
                 table.insert(list, { key = s, name = s, isChannel = false })
             end
         end
-
-        -- Каналы: ключ всегда строка (tostring), чтобы не ломать OpenDialog
+        
         for id, data in pairs(C.db.channels) do
             local key = tostring(id)
             table.insert(list, { key = key, name = tostring(data.name or id), isChannel = true })
         end
 
-        -- Сортировка: сначала ЛС, потом каналы; внутри — по имени
         table.sort(list, function(a, b)
             local nameA = tostring(a.name or "")
             local nameB = tostring(b.name or "")
-            if a.isChannel ~= b.isChannel then
-                return a.isChannel == false
-            end
+            if a.isChannel ~= b.isChannel then return a.isChannel == false end
             return nameA < nameB
         end)
-
+        
         return list
     end
 
