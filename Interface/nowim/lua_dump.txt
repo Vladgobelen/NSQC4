@@ -1,6 +1,6 @@
 ======================================================================
  LUA DUMP: /home/diver/Games/wc/CircleL/Interface/AddOns/NSQC4/Interface/nowim
- Date: 2026-10-30 19:10:16
+ Date: 2026-10-31 13:59:25
 ======================================================================
 
 ======================================================================
@@ -531,7 +531,6 @@ NSQC4.RegisterModule("nowim", function()
     local function UpdateSystemChatVisibility()
         local C = NSQC4.Nowim.Config
         if not C or not C.db or not C.db.settings then return end
-        -- Прячем стандартные чаты только если галочка СТОИТ (мастер-режим)
         local hideSystem = C.db.settings.interceptEnter
         for i = 1, 7 do
             local frame = _G["ChatFrame"..i]
@@ -580,14 +579,11 @@ NSQC4.RegisterModule("nowim", function()
         end
     end)
 
-    -- Куда сейчас должен идти Enter
     local function ShouldNowimIntercept()
         local Nowim = NSQC4.Nowim
         if not Nowim or not Nowim.Config or not Nowim.Config.db then return false end
         local s = Nowim.Config.db.settings
-        -- Мастер-галочка снята — Nowim не перехватывает никогда
-        if not s.interceptEnter then return false end
-        -- Галочка стоит — перехватываем только если последний клик был по нашему чату
+        if s.interceptEnter then return true end
         return s.lastChatFocus == "nowim"
     end
 
@@ -603,7 +599,6 @@ NSQC4.RegisterModule("nowim", function()
     NSQC4.Nowim = NSQC4.Nowim or {}
     NSQC4.Nowim.ApplyEnterBinding = ApplyBinding
 
-    -- Публичные функции смены фокуса
     function NSQC4.Nowim.FocusNowimChat()
         local C = NSQC4.Nowim.Config
         if C and C.db and C.db.settings then
@@ -657,21 +652,22 @@ NSQC4.RegisterModule("nowim", function()
         end)
     end
 
-    -- Клик по стандартному чату → фокус туда
-    local function HookStandardChats()
-        for i = 1, 7 do
-            local frame = _G["ChatFrame"..i]
-            if frame and not frame._nowimClicked then
-                frame._nowimClicked = true
-                frame:HookScript("OnMouseDown", function()
-                    if NSQC4.Nowim.FocusBlizzChat then
-                        NSQC4.Nowim.FocusBlizzChat()
-                    end
-                end)
-            end
+    -- ========================================================================
+    -- ЛОВИМ ФОКУС НА СТАНДАРТНОМ ЧАТЕ
+    -- ========================================================================
+
+    for i = 1, 7 do
+        local eb = _G["ChatFrame"..i.."EditBox"]
+        if eb and not eb._nowimFocusHooked then
+            eb._nowimFocusHooked = true
+            
+            eb:HookScript("OnEditFocusGained", function(self)
+                if NSQC4.Nowim.FocusBlizzChat then
+                    NSQC4.Nowim.FocusBlizzChat()
+                end
+            end)
         end
     end
-    HookStandardChats()
 
 end)
 
@@ -1239,13 +1235,11 @@ NSQC4.RegisterModule("nowim", function()
         return h
     end
 
-    -- Кэш последней применённой высоты: не пересчитываем чат, если высота не изменилась
     local lastH = nil
 
     local function ApplyContainerSize()
         local h = GetInputHeight()
 
-        -- Ничего не изменилось — не дёргаем ни SetHeight, ни пересчёт чата
         if h == lastH then
             return
         end
@@ -1262,24 +1256,29 @@ NSQC4.RegisterModule("nowim", function()
             container:Hide()
         end
 
-        -- Пересчёт чата нужен только при реальном изменении высоты поля ввода
         if UI.Chat and UI.Chat.OnResize then UI.Chat.OnResize() end
     end
 
-    -- Тикер на 1 кадр: даёт Show() примениться до SetFocus()
+    -- Восстанавливаем перехват Enter на наш чат, не трогая lastChatFocus
+    local function RestoreNowimBinding()
+        if NSQC4.Nowim.ApplyEnterBinding then
+            NSQC4.Nowim.ApplyEnterBinding()
+        end
+    end
+
     local ticker = CreateFrame("Frame")
     ticker:Hide()
     ticker:SetScript("OnUpdate", function(self)
         self:Hide()
         editBox:SetFocus()
         I._opening = false
-        -- Сбрасываем кэш, чтобы гарантированно применить размер после открытия
         lastH = nil
         ApplyContainerSize()
     end)
 
     editBox:SetScript("OnEscapePressed", function(self)
         self:ClearFocus()
+        RestoreNowimBinding()
     end)
 
     editBox:SetScript("OnTextChanged", function(self)
@@ -1287,7 +1286,7 @@ NSQC4.RegisterModule("nowim", function()
         local bytes = #text
         counter:SetText(bytes .. "/" .. C.MAX_BYTES)
         counter:SetTextColor(bytes > C.MAX_BYTES and 1 or 0.5, bytes > C.MAX_BYTES and 0 or 0.5, 0.5)
-        ApplyContainerSize() -- внутри ранний return, если высота не менялась
+        ApplyContainerSize()
     end)
 
     editBox:SetScript("OnEnterPressed", function(self)
@@ -1302,6 +1301,8 @@ NSQC4.RegisterModule("nowim", function()
             end
             self:SetText("")
             self:ClearFocus()
+            -- Возвращаем перехват Enter нашему чату, не сбрасывая lastChatFocus
+            RestoreNowimBinding()
         end
     end)
 
@@ -1311,6 +1312,9 @@ NSQC4.RegisterModule("nowim", function()
 
     editBox:SetScript("OnEditFocusLost", function()
         ApplyContainerSize()
+        -- Фокус ушёл (например, после отправки) — переустанавливаем биндинг,
+        -- чтобы следующий Enter снова шёл в Nowim, если lastChatFocus == "nowim"
+        RestoreNowimBinding()
     end)
 
     -- ========================================================================
@@ -1339,7 +1343,6 @@ NSQC4.RegisterModule("nowim", function()
         container:SetPoint("BOTTOMLEFT", left + 2, 2)
         container:SetPoint("BOTTOMRIGHT", -right - 2, 2)
 
-        -- Принудительно применяем (ширина/позиция могли измениться)
         lastH = nil
         ApplyContainerSize()
     end

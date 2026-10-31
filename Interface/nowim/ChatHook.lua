@@ -56,11 +56,6 @@ NSQC4.RegisterModule("nowim", function()
             charTag = isMine and myName or sender
         end
 
-        -- ОТЛАДКА
-        if chatType == "OFFICER" then
-            print("|cff00ff00[DEBUG OFFICER]|r Пришло: " .. tostring(text) .. " | От: " .. tostring(sender) .. " | isAO: " .. tostring(isAO))
-        end
-
         if isMine and NSQC4.Nowim._lastSentText == text and (GetTime() - (NSQC4.Nowim._lastSentTime or 0)) < 2 then
             return
         end
@@ -81,11 +76,9 @@ NSQC4.RegisterModule("nowim", function()
             S.AddMessage("GENERAL", formattedText, false, nil, chatType)
         else
             if chatType == "OFFICER" then
-                print("|cff00ff00[DEBUG OFFICER]|r Сохраняем в OFFICER.")
                 S.AddMessage("OFFICER", formattedText, isMine, charTag, chatType)
                 
                 if C.db.settings.showOfficerInGuild then
-                    print("|cff00ff00[DEBUG OFFICER]|r Дублируем в GUILD.")
                     S.AddMessage("GUILD", formattedText, isMine, charTag, chatType)
                 end
                 
@@ -94,22 +87,11 @@ NSQC4.RegisterModule("nowim", function()
                     if key == "OFFICER" then hasOfficerTab = true break end
                 end
                 if not hasOfficerTab then
-                    print("|cff00ff00[DEBUG OFFICER]|r Вкладки OFFICER нет, открываем.")
                     E.OpenDialog("OFFICER", true)
-                else
-                    print("|cff00ff00[DEBUG OFFICER]|r Вкладка OFFICER уже открыта.")
                 end
                 
-                -- ПРИНУДИТЕЛЬНО ОБНОВЛЯЕМ ЧАТ, ЕСЛИ АКТИВНА ВКЛАДКА OFFICER
-                if C.db.activeTab == "OFFICER" then
-                    print("|cff00ff00[DEBUG OFFICER]|r Обновляем чат (активна вкладка OFFICER).")
-                    local UI = NSQC4.Nowim.UI
-                    if UI and UI.Chat and UI.Chat.Refresh then UI.Chat.Refresh() end
-                else
-                    -- Если вкладка не активна, обновляем, чтобы там были данные
-                    local UI = NSQC4.Nowim.UI
-                    if UI and UI.Chat and UI.Chat.Refresh then UI.Chat.Refresh() end
-                end
+                local UI = NSQC4.Nowim.UI
+                if UI and UI.Chat and UI.Chat.Refresh then UI.Chat.Refresh() end
                 
                 E.UpdateUI()
                 return
