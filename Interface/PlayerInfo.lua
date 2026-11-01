@@ -55,9 +55,11 @@ NSQC4.RegisterModule("ui_player_info", function()
         for i = 1, NUM_CHAT_WINDOWS do
             local f = _G["ChatFrame"..i]
             if f and f.name == tabName then
-                -- Если уже есть, просто делаем её активной
+                -- Если уже есть, делаем активной
                 FCF_DockFrame(f)
                 FCF_SelectDockFrame(f)
+                -- Открываем ввод шепота
+                ChatFrame_OpenChat("/w " .. playerName .. " ", f)
                 return
             end
         end
@@ -66,9 +68,8 @@ NSQC4.RegisterModule("ui_player_info", function()
         local chatFrame = FCF_OpenNewWindow(tabName)
         
         if chatFrame then
-            -- Принудительно докируем её к основной панели, чтобы не было наслаивания
+            -- Докируем и активируем
             FCF_DockFrame(chatFrame)
-            -- Делаем её активной (переключаемся на неё)
             FCF_SelectDockFrame(chatFrame)
 
             -- Фильтруем входящие шепоты
@@ -90,6 +91,9 @@ NSQC4.RegisterModule("ui_player_info", function()
                 end
                 return false
             end)
+
+            -- СРАЗУ ОТКРЫВАЕМ ВВОД ШЕПОТА В ЭТОЙ ВКЛАДКЕ
+            ChatFrame_OpenChat("/w " .. playerName .. " ", chatFrame)
 
             print("|cff00ff00[NSQC4]|r Создана вкладка " .. tabName)
         end
