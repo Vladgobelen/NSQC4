@@ -86,11 +86,25 @@ Quests\Field\UI\API.lua
 # QUESTS — профиль "df" (проект через общее поле)
 # ==========================================
 
-# --- живые существа ---
+# --- живые существа (база) ---
 Quests\df\Entities\Init.lua
 Quests\df\Entities\Storage.lua
 Quests\df\Entities\UI.lua
 Quests\df\Entities\Logic.lua
+
+# --- гоблины ---
+Quests\df\Goblin\Init.lua
+Quests\df\Goblin\Behavior\Peaceful.lua
+Quests\df\Goblin\Behavior\Aggressive.lua
+Quests\df\Goblin\Names.lua
+Quests\df\Goblin\Spawner.lua
+
+# --- дворфы ---
+Quests\df\Dwarf\Init.lua
+Quests\df\Dwarf\Behavior\Peaceful.lua
+Quests\df\Dwarf\Behavior\Aggressive.lua
+Quests\df\Dwarf\Names.lua
+Quests\df\Dwarf\Spawner.lua
 
 # --- ландшафт ---
 Quests\df\Terrain\Init.lua

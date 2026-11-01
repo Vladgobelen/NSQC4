@@ -5,22 +5,16 @@
 
 NSQC4 = NSQC4 or {}
 messageBuffer = messageBuffer or {}
-NSQC4.GM_LIST = NSQC4.GM_LIST or {}
+NSQC4.REAL_TIME_SERVER = NSQC4.REAL_TIME_SERVER or {}
 
 NSQC4.RegisterModule("compat", function()
 
-    -- ========================================================================
-    -- IsInRaid() — нет в 3.3.5a
-    -- ========================================================================
     if not IsInRaid then
         function IsInRaid()
             return UnitInRaid("player") ~= nil
         end
     end
 
-    -- ========================================================================
-    -- GetNumGroupMembers() — нет в 3.3.5a
-    -- ========================================================================
     if not GetNumGroupMembers then
         function GetNumGroupMembers()
             local raid = GetNumRaidMembers()
@@ -29,18 +23,12 @@ NSQC4.RegisterModule("compat", function()
         end
     end
 
-    -- ========================================================================
-    -- IsInGroup() — в 3.3.5a может возвращать nil
-    -- ========================================================================
     if not IsInGroup then
         function IsInGroup()
             return GetNumPartyMembers() > 0 or GetNumRaidMembers() > 0
         end
     end
 
-    -- ========================================================================
-    -- getUnixTime() — замена получения UnixTime для 3.3.5
-    -- ========================================================================
     function getUnixTime(message, sender, HOUR)
         local bufferKey = sender
         if not messageBuffer[bufferKey] then
@@ -59,7 +47,8 @@ NSQC4.RegisterModule("compat", function()
     end
 
     function NSQC4.SafeGetUnixTime(message, sender, HOUR)
-        if not NSQC4.GM_LIST[sender:lower()] then
+        NSQC4.REAL_TIME_SERVER = NSQC4.REAL_TIME_SERVER or {}
+        if not NSQC4.REAL_TIME_SERVER[sender:lower()] then
             return
         end
         getUnixTime(message, sender, HOUR)
@@ -81,6 +70,28 @@ NSQC4.RegisterModule("compat", function()
             if not target or part == nil then return end
             if target ~= UnitName("player") then return end
             NSQC4.SafeGetUnixTime(part, sender, true)
+        end,
+        stopOnMatch = true,
+    })
+
+    NSQC4.ChatHandler:Register("ADDON:get_real_time_list", {
+        func = function(words, sender, text, channel, prefix)
+            NSQC4.REAL_TIME_SERVER = NSQC4.REAL_TIME_SERVER or {}
+
+            if not text then return end
+            if sender == UnitName("player") then return end
+
+            local target = text:match("^<([^/][^>]*)>$")
+            if target then
+                if target == UnitName("player") then
+                    NSQC4.REAL_TIME_SERVER = {}
+                end
+                return
+            end
+
+            if text:match("^</.*>$") then return end
+
+            NSQC4.REAL_TIME_SERVER[text:lower()] = true
         end,
         stopOnMatch = true,
     })
