@@ -44,10 +44,73 @@ NSQC4.RegisterModule("ui_player_info", function()
     end
 
     -- ========================================================================
-    -- Хук на контекстное меню: пункт «Посмотреть информацию»
+    -- Создание отдельной вкладки для шепота с фильтром
+    -- ========================================================================
+    local function MoveToSeparateTab(playerName)
+        if not playerName or playerName == "" then return end
+
+        local tabName = "Шепот: " .. playerName
+
+        -- Проверяем, не открыта ли уже вкладка с таким именем
+        for i = 1, NUM_CHAT_WINDOWS do
+            local f = _G["ChatFrame"..i]
+            if f and f.name == tabName then
+                -- Если уже есть, просто делаем её активной
+                FCF_DockFrame(f)
+                FCF_SelectDockFrame(f)
+                return
+            end
+        end
+
+        -- Создаем новую
+        local chatFrame = FCF_OpenNewWindow(tabName)
+        
+        if chatFrame then
+            -- Принудительно докируем её к основной панели, чтобы не было наслаивания
+            FCF_DockFrame(chatFrame)
+            -- Делаем её активной (переключаемся на неё)
+            FCF_SelectDockFrame(chatFrame)
+
+            -- Фильтруем входящие шепоты
+            ChatFrame_AddMessageEventFilter("CHAT_MSG_WHISPER", function(self, event, msg, author, ...)
+                if self == chatFrame and author == playerName then
+                    return false -- Показать
+                elseif self == chatFrame then
+                    return true -- Скрыть
+                end
+                return false
+            end)
+            
+            -- Фильтруем исходящие шепоты
+            ChatFrame_AddMessageEventFilter("CHAT_MSG_WHISPER_INFORM", function(self, event, msg, author, ...)
+                if self == chatFrame and author == playerName then
+                    return false 
+                elseif self == chatFrame then
+                    return true
+                end
+                return false
+            end)
+
+            print("|cff00ff00[NSQC4]|r Создана вкладка " .. tabName)
+        end
+    end
+
+    -- ========================================================================
+    -- Хук на контекстное меню: добавление пунктов
     -- ========================================================================
     local function AddInfoMenuEntry(name)
         if not name or name == UNKNOWNOBJECT then return end
+
+        -- Пункт «В отдельную вкладку»
+        UIDropDownMenu_AddButton({
+            text = "В отдельную вкладку",
+            notCheckable = 1,
+            func = function()
+                MoveToSeparateTab(name)
+            end,
+        }, 1)
+
+        -- Пункт «Посмотреть информацию»
         UIDropDownMenu_AddButton({
             text = "Посмотреть информацию",
             notCheckable = 1,

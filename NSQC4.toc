@@ -70,8 +70,51 @@ Course\CodeShare.lua
 Course\Triggers.lua
 Course\Init.lua
 VERSION.lua
+
+# ==========================================
+# QUESTS — ядро поля 10×10
+# ==========================================
 Quests\Field\Init.lua
-Quests\Field\UI.lua
+Quests\Field\Storage.lua
+Quests\Field\UI\Cells.lua
+Quests\Field\UI\Border.lua
+Quests\Field\UI\Resize.lua
+Quests\Field\UI\Frame.lua
+Quests\Field\UI\API.lua
+
+# ==========================================
+# QUESTS — профиль "df" (проект через общее поле)
+# ==========================================
+
+# --- живые существа ---
+Quests\df\Entities\Init.lua
+Quests\df\Entities\Storage.lua
+Quests\df\Entities\UI.lua
+Quests\df\Entities\Logic.lua
+
+# --- ландшафт ---
+Quests\df\Terrain\Init.lua
+Quests\df\Terrain\Storage.lua
+Quests\df\Terrain\UI.lua
+Quests\df\Terrain\Logic.lua
+
+# --- постройки ---
+Quests\df\Buildings\Init.lua
+Quests\df\Buildings\Storage.lua
+Quests\df\Buildings\Defaults.lua
+Quests\df\Buildings\Types.lua
+Quests\df\Buildings\UI.lua
+Quests\df\Buildings\Logic.lua
+
+# --- действия (клики) ---
+Quests\df\Actions\Terrain\LeftClick.lua
+Quests\df\Actions\Terrain\ContextMenu.lua
+Quests\df\Actions\Entities\LeftClick.lua
+Quests\df\Actions\Buildings\LeftClick.lua
+Quests\df\Actions\Init.lua
+
+# --- главный инит проекта df (загружается последним, чтобы собрать всё воедино) ---
+Quests\df\Init.lua
 
 # ==========================================
 # NOWIM (ЧАТ)
@@ -80,7 +123,6 @@ Interface\nowim\Config.lua
 Interface\nowim\Utils.lua
 Interface\nowim\Aliases.lua
 Interface\nowim\Storage.lua
-Interface\nowim\Network.lua
 Interface\nowim\Network.lua
 Interface\nowim\ChatHook.lua
 Interface\nowim\ChatEngine.lua

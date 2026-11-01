@@ -9,30 +9,42 @@ NSQC4.RegisterModule("guild_recruiter", function()
     local GuildRecruiter = NSQC4.GuildRecruiterClass
     if not GuildRecruiter then return end
 
+    local EXCEPTION_TTL = 7 * 24 * 60 * 60  -- 7 дней
+
     -- ========================================================================
-    -- Мониторинг событий
+    -- Единая проверка исключений (антибот), работает независимо от поиска
+    -- ========================================================================
+    function GuildRecruiter:IsExcluded(name)
+        local t = self.exceptions[name]
+        if type(t) ~= "number" then return false end
+        if time() - t > EXCEPTION_TTL then
+            self.exceptions[name] = nil
+            return false
+        end
+        return true
+    end
+
+    -- ========================================================================
+    -- Мониторинг событий поиска
     -- ========================================================================
     function GuildRecruiter:EnableEventMonitoring()
         self.frame:RegisterEvent("WHO_LIST_UPDATE")
-        self.frame:RegisterEvent("GUILD_INVITE_REQUEST")
-        self.frame:SetScript("OnEvent", function(_, event, ...)
-            self:OnEvent(event, ...)
-        end)
+        -- GUILD_INVITE_REQUEST регистрируется постоянно в Init, здесь не трогаем
+        if not self._whoHandlerInstalled then
+            self._whoHandlerInstalled = true
+            local orig = self.frame:GetScript("OnEvent")
+            self.frame:SetScript("OnEvent", function(f, event, ...)
+                if event == "WHO_LIST_UPDATE" and self.isSearching then
+                    self:ProcessWhoResults()
+                end
+                if orig then orig(f, event, ...) end
+            end)
+        end
     end
 
     function GuildRecruiter:DisableEventMonitoring()
         self.frame:UnregisterEvent("WHO_LIST_UPDATE")
-        self.frame:UnregisterEvent("GUILD_INVITE_REQUEST")
-        self.frame:SetScript("OnEvent", nil)
-    end
-
-    function GuildRecruiter:OnEvent(event, ...)
-        if event == "WHO_LIST_UPDATE" and self.isSearching then
-            self:ProcessWhoResults()
-        elseif event == "GUILD_INVITE_REQUEST" then
-            local name = ...
-            self:RemoveFromList(name)
-        end
+        -- GUILD_INVITE_REQUEST остаётся зарегистрированным постоянно
     end
 
     -- ========================================================================
@@ -114,13 +126,11 @@ NSQC4.RegisterModule("guild_recruiter", function()
     -- ========================================================================
     function GuildRecruiter:ProcessWhoResults()
         local n = GetNumWhoResults()
-        local now = time()
 
         for i = 1, n do
             local name, guildName, lvl, raceRU, classRU, _, classENG = GetWhoInfo(i)
             if not (guildName and guildName ~= "") then
-                local inviteTime = self.exceptions[name]
-                if not (type(inviteTime) == "number" and now - inviteTime <= 7 * 24 * 60 * 60) then
+                if not self:IsExcluded(name) then
                     if self:MatchesFilters(raceRU, classENG) then
                         local already = false
                         for _, r in ipairs(self.results) do
@@ -154,7 +164,7 @@ NSQC4.RegisterModule("guild_recruiter", function()
     -- Действия с игроками
     -- ========================================================================
     function GuildRecruiter:InviteAndExclude(name)
-        if self.exceptions[name] then
+        if self:IsExcluded(name) then
             print("|cFFFF0000[GUILD RECRUITER]|r АВТО-ИНВАЙТ: " .. name .. " уже в исключениях. Отменено.")
             return
         end

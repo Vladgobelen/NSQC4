@@ -87,6 +87,53 @@ NSQC4.RegisterModule("guild_recruiter", function()
 
         self:SafeHookWhoFrame()
 
+        -- ====================================================================
+        -- Постоянный антибот: очистка просроченных исключений (раз в минуту),
+        -- независимо от состояния поиска и видимости окна.
+        -- ====================================================================
+        self.cleanupTimer = CreateFrame("Frame")
+        self.cleanupTimer.elapsed = 0
+        self.cleanupTimer.guildRecruiter = self
+        self.cleanupTimer:SetScript("OnUpdate", function(f, dt)
+            f.elapsed = f.elapsed + dt
+            if f.elapsed >= 60 then
+                f.elapsed = 0
+                local now = time()
+                local gr = f.guildRecruiter
+                if gr and gr.exceptions then
+                    for name, t in pairs(gr.exceptions) do
+                        if type(t) == "number" and now - t > 7 * 24 * 60 * 60 then
+                            gr.exceptions[name] = nil
+                        end
+                    end
+                end
+            end
+        end)
+
+        -- ====================================================================
+        -- Постоянная обработка входящих запросов на гильд-инвайт:
+        -- если игрока пригласили в другую гильдию — убираем из списка.
+        -- Работает независимо от поиска.
+        -- ====================================================================
+        self.frame:RegisterEvent("GUILD_INVITE_REQUEST")
+        self.frame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        self.frame:SetScript("OnEvent", function(f, event, ...)
+            if event == "GUILD_INVITE_REQUEST" then
+                local name = ...
+                if name and f.RemoveFromList then
+                    f:RemoveFromList(name)
+                end
+            elseif event == "PLAYER_ENTERING_WORLD" then
+                -- при входе в игру сразу чистим просроченные исключения
+                local now = time()
+                for name, t in pairs(self.exceptions) do
+                    if type(t) == "number" and now - t > 7 * 24 * 60 * 60 then
+                        self.exceptions[name] = nil
+                    end
+                end
+            end
+        end)
+
         return self
     end
 

@@ -417,21 +417,27 @@ NSQC4.RegisterModule("guild_recruiter", function()
                 btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
                 btn:SetScript("OnClick", function(self2, button)
-                    if GuildRecruiter.instance.cooldown then return end
+                    local gr = GuildRecruiter.instance
+                    if gr.cooldown then return end
+                    if gr:IsExcluded(p.name) then
+                        print("|cFFFF0000[GUILD RECRUITER]|r " .. p.name .. " в исключениях, действие отменено.")
+                        gr:RemoveFromList(p.name)
+                        return
+                    end
 
                     if button == "LeftButton" then
                         GuildInvite(p.name)
-                        GuildRecruiter.instance.exceptions[p.name] = time()
+                        gr.exceptions[p.name] = time()
                         print("|cFF00FF00[GUILD RECRUITER]|r (Клик) " .. p.name .. " приглашён, добавлен в игнор.")
-                        GuildRecruiter.instance:RemoveFromList(p.name)
-                        GuildRecruiter.instance:SetCooldown()
-                        GuildRecruiter.instance:AutoSave()
+                        gr:RemoveFromList(p.name)
+                        gr:SetCooldown()
+                        gr:AutoSave()
 
                     elseif button == "RightButton" then
-                        GuildRecruiter.instance.exceptions[p.name] = time()
+                        gr.exceptions[p.name] = time()
                         print("|cFF00FF00[GUILD RECRUITER]|r (ПКМ) " .. p.name .. " добавлен в игнор без инвайта.")
-                        GuildRecruiter.instance:RemoveFromList(p.name)
-                        GuildRecruiter.instance:AutoSave()
+                        gr:RemoveFromList(p.name)
+                        gr:AutoSave()
                     end
                 end)
             end

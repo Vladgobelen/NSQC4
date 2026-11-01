@@ -9,6 +9,8 @@ NSQC4.RegisterModule("guild_recruiter", function()
     local GuildRecruiter = NSQC4.GuildRecruiterClass
     if not GuildRecruiter then return end
 
+    local EXCEPTION_TTL = 7 * 24 * 60 * 60
+
     -- ========================================================================
     -- Инициализация подтаблицы
     -- ========================================================================
@@ -99,7 +101,7 @@ NSQC4.RegisterModule("guild_recruiter", function()
 
         local now = time()
         for name, inviteTime in pairs(self.exceptions) do
-            if type(inviteTime) == "number" and now - inviteTime > 7 * 24 * 60 * 60 then
+            if type(inviteTime) == "number" and now - inviteTime > EXCEPTION_TTL then
                 self.exceptions[name] = nil
             end
         end
