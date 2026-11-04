@@ -32,11 +32,25 @@ frame:SetScript("OnEvent", function(self, event, text, sender)
         table.insert(words, w)
     end
 
-    -- Общая проверка на "-" — это команды, их обрабатывает ChatHandler
-    if text:sub(1, 1) == "-" then return end
-
     -- Определяем реальный канал (GUILD или OFFICER)
     local channel = event:match("^CHAT_MSG_(.+)$")
+
+    -- ИСКЛЮЧЕНИЕ: Пропускаем "-гп" дальше (если это именно наша команда)
+    local isGpCmd = false
+    local lowerText = text:lower()
+    local startPos = lowerText:find("-гп", 1, true)
+    if startPos then
+        -- Проверяем, что это не просто "-гпавно" или "-гп..." — должно быть слово
+        local after = lowerText:sub(startPos + #"-гп")
+        if after == "" or after:sub(1, 1):match("%s") then
+            isGpCmd = true
+        end
+    end
+
+    -- Если это команда и это НЕ "-гп" — игнорируем (это делает ChatHandler)
+    if text:sub(1, 1) == "-" and not isGpCmd then 
+        return 
+    end
 
     -- Вызываем всех подписчиков
     for _, entry in ipairs(handlers) do

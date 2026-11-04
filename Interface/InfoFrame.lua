@@ -86,7 +86,7 @@ NSQC4.RegisterModule("ui_info", function()
         local self = setmetatable({}, InfoFrame)
 
         self.name = name
-        self.rows = {}          -- [{ name, code, valueFunc, interval, addToTop, elapsed, headerText, valueText, clickFrame, rowFrame }]
+        self.rows = {}          -- [{ name, code, valueFunc, interval, addToTop, elapsed, headerText, valueText, clickFrame }]
         self.isCollapsed = false
         self.collapsedRow = nil
 
@@ -245,11 +245,29 @@ NSQC4.RegisterModule("ui_info", function()
     end
 
     function InfoFrame:RemoveRow(row)
+        -- индекс в self.rows
+        local rowIdx = nil
         for i, r in ipairs(self.rows) do
             if r == row then
-                table.remove(self.rows, i)
+                rowIdx = i
                 break
             end
+        end
+        if not rowIdx then return end
+
+        -- индекс в self.data.rows: ищем по всем полям, ровно одну запись
+        local dataIdx = nil
+        for i, r in ipairs(self.data.rows) do
+            if r.name == row.name and r.code == row.code
+               and r.interval == row.interval and r.addToTop == row.addToTop then
+                dataIdx = i
+                break
+            end
+        end
+
+        table.remove(self.rows, rowIdx)
+        if dataIdx then
+            table.remove(self.data.rows, dataIdx)
         end
 
         if row.clickFrame then
@@ -263,14 +281,6 @@ NSQC4.RegisterModule("ui_info", function()
         if row.valueText then
             row.valueText:Hide()
             row.valueText:SetText("")
-        end
-
-        -- Удалить из saveTable
-        for i, r in ipairs(self.data.rows) do
-            if r.name == row.name and r.code == row.code then
-                table.remove(self.data.rows, i)
-                break
-            end
         end
 
         if self.collapsedRow == row then
@@ -410,9 +420,6 @@ NSQC4.RegisterModule("ui_info", function()
 
         local bottomHeight = #bottom * ROW_HEIGHT
         local topHeight = #top * ROW_HEIGHT
-
-        local bottomY = -FRAME_PADDING - topHeight - bottomHeight
-        -- если bottom нет, bottomY не используется
 
         for i, row in ipairs(bottom) do
             row.headerText:ClearAllPoints()
@@ -766,6 +773,27 @@ NSQC4.RegisterModule("ui_info", function()
             end
         end
 
+        -- Заполнение полей сверху данными выбранной строки
+        function f:FillRowFields(row)
+            if not row then return end
+
+            f.rowNameBox:SetText(tostring(row.name or ""))
+
+            local code = tostring(row.code or "")
+            f.codeBox:SetText(code)
+            if code == "" then
+                f.codePlaceholder:Show()
+            else
+                f.codePlaceholder:Hide()
+            end
+
+            f.intervalBox:SetText(tostring(row.interval or DEFAULT_INTERVAL))
+
+            local toTop = row.addToTop and true or false
+            f.topRadio:SetChecked(toTop)
+            f.bottomRadio:SetChecked(not toTop)
+        end
+
         function f:RefreshRowList()
             for _, r in ipairs(f.listRows) do
                 r:Hide()
@@ -786,10 +814,22 @@ NSQC4.RegisterModule("ui_info", function()
                 local rowFrame = CreateFrame("Frame", nil, listContent)
                 rowFrame:SetSize(480, 22)
                 rowFrame:SetPoint("TOPLEFT", 0, y)
+                rowFrame.rowData = row
+                rowFrame:EnableMouse(true)
 
                 local bg = rowFrame:CreateTexture(nil, "BACKGROUND")
                 bg:SetAllPoints(rowFrame)
                 bg:SetTexture(0.1, 0.1, 0.15, 0.7)
+
+                local hl = rowFrame:CreateTexture(nil, "HIGHLIGHT")
+                hl:SetAllPoints(rowFrame)
+                hl:SetTexture(0.2, 0.3, 0.5, 0.4)
+
+                rowFrame:SetScript("OnMouseDown", function(self, button)
+                    if button == "LeftButton" then
+                        f:FillRowFields(self.rowData)
+                    end
+                end)
 
                 local nameText = rowFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
                 nameText:SetPoint("LEFT", 6, 0)
@@ -799,33 +839,35 @@ NSQC4.RegisterModule("ui_info", function()
                 infoText:SetPoint("LEFT", 150, 0)
                 infoText:SetText("[" .. tostring(row.interval or "?") .. " мс]")
 
-                local delBtn = CreateFrame("Button", nil, rowFrame, "UIPanelCloseButton")
+                local delBtn = CreateFrame("Button", nil, rowFrame)
                 delBtn:SetSize(20, 20)
                 delBtn:SetPoint("RIGHT", -2, 0)
+
+                local delTex = delBtn:CreateTexture(nil, "ARTWORK")
+                delTex:SetAllPoints(delBtn)
+                delTex:SetTexture("Interface\\Buttons\\UI-GroupLoot-Pass-Up")
+
                 delBtn:SetScript("OnClick", function()
                     local frameName2 = nsDbc4.ui_info.currentFrame
                     local data = nsDbc4.ui_info.frames[frameName2]
                     if not data then return end
-                    local idx = nil
-                    for j, r in ipairs(data.rows) do
-                        if r == row then
-                            idx = j
+
+                    local inst = activeFrames[frameName2]
+                    if not inst then return end
+
+                    -- Найти соответствующий ряд инстанса по полям
+                    local instIdx = nil
+                    for j, r in ipairs(inst.rows) do
+                        if r.name == row.name and r.code == row.code
+                           and r.interval == row.interval and r.addToTop == row.addToTop then
+                            instIdx = j
                             break
                         end
                     end
-                    if idx then
-                        table.remove(data.rows, idx)
-                    end
+                    if not instIdx then return end
 
-                    -- Обновить инстанс
-                    local inst = activeFrames[frameName2]
-                    if inst then
-                        inst:ClearAllRows()
-                        inst:_RestoreRows()
-                        if #inst.rows == 0 then
-                            inst.frame:Hide()
-                        end
-                    end
+                    -- RemoveRow сам удалит и из inst.rows, и из inst.data.rows
+                    inst:RemoveRow(inst.rows[instIdx])
 
                     f:RefreshRowList()
                 end)
@@ -1007,8 +1049,6 @@ NSQC4.RegisterModule("ui_info", function()
     SlashCmdList["NSINFO"] = function(msg)
         msg = Trim(msg)
         if msg == "add" then
-            -- быстрая команда: /ns_info add Name | code
-            -- пока просто открываем окно
             Module:ShowOptions()
         else
             Module:ShowOptions()
@@ -1032,7 +1072,7 @@ NSQC4.RegisterModule("ui_info", function()
     -- ========================================================================
     NSQC4.SetModuleMeta("ui_info", {
         label   = "Инфо-фреймы",
-        tooltip = "Универсальные плавающие фреймы с обновляемыми значениями. /ns_info.",
+        tooltip   = "Универсальные плавающие фреймы с обновляемыми значениями. /ns_info.",
         order   = 40,
     })
 

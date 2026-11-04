@@ -80,55 +80,135 @@ Quests\Field\UI\Cells.lua
 Quests\Field\UI\Border.lua
 Quests\Field\UI\Resize.lua
 Quests\Field\UI\Frame.lua
-Quests\Field\UI\API.lua
+
+# --- API поля ---
+Quests\Field\UI\API\Textures.lua
+Quests\Field\UI\API\Anchors.lua
+Quests\Field\UI\API\Text.lua
+Quests\Field\UI\API\Mouse.lua
+Quests\Field\UI\API\Hover.lua
+Quests\Field\UI\API\ContextMenu.lua
+Quests\Field\UI\API\Clear.lua
+Quests\Field\UI\API\Tooltip.lua
 
 # ==========================================
-# QUESTS — профиль "df" (проект через общее поле)
+# QUESTS — профиль "df"
 # ==========================================
+
+# --- Единый реестр клеток ---
+Quests\df\Grid.lua
+Quests\df\Grid\Hardness.lua
+Quests\df\Grid\Neighbors.lua
+
+# --- Реестр профессий (плоский список имён для known_skills) ---
+Quests\df\Professions.lua
+
+# --- Реестр профессий (API + реализации) ---
+Quests\df\Professions\Init.lua
+Quests\df\Professions\Resolve.lua
+Quests\df\Professions\Digger.lua
+Quests\df\Professions\Lumberjack.lua
+Quests\df\Professions\Stonecutter.lua
+Quests\df\Professions\Herbalist.lua
+
+# --- Ландшафт: данные типов ---
+Quests\df\Terrain\Data\Init.lua
+Quests\df\Terrain\Data\Earth.lua
+Quests\df\Terrain\Data\Grass.lua
+Quests\df\Terrain\Data\Stone.lua
+Quests\df\Terrain\Data\Tree.lua
+Quests\df\Terrain\Data\Pool.lua
+
+# --- Ландшафт: ядро и логика ---
+Quests\df\Terrain\Init.lua
+Quests\df\Terrain\Storage.lua
+Quests\df\Terrain\UI\Api.lua
+Quests\df\Terrain\Logic\Init.lua
+Quests\df\Terrain\Logic\Earth.lua
+Quests\df\Terrain\Logic\Grass.lua
+Quests\df\Terrain\Logic\Stone.lua
+Quests\df\Terrain\Logic\Tree.lua
+Quests\df\Terrain\Logic\Pool.lua
 
 # --- живые существа (база) ---
 Quests\df\Entities\Init.lua
 Quests\df\Entities\Storage.lua
-Quests\df\Entities\UI.lua
-Quests\df\Entities\Logic.lua
+Quests\df\Entities\Tooltip.lua
+Quests\df\Entities\UI\Api.lua
+Quests\df\Entities\UI\Animate.lua
 
-# --- гоблины ---
+# --- TerrainActions (5 типов × 4 файла) ---
+Quests\df\Actions\Terrain\Init.lua
+
+Quests\df\Actions\Terrain\Earth\Check.lua
+Quests\df\Actions\Terrain\Earth\LeftClickSelf.lua
+Quests\df\Actions\Terrain\Earth\LeftClickEntities.lua
+Quests\df\Actions\Terrain\Earth\RightClickEntities.lua
+
+Quests\df\Actions\Terrain\Grass\Check.lua
+Quests\df\Actions\Terrain\Grass\LeftClickSelf.lua
+Quests\df\Actions\Terrain\Grass\LeftClickEntities.lua
+Quests\df\Actions\Terrain\Grass\RightClickEntities.lua
+
+Quests\df\Actions\Terrain\Stone\Check.lua
+Quests\df\Actions\Terrain\Stone\LeftClickSelf.lua
+Quests\df\Actions\Terrain\Stone\LeftClickEntities.lua
+Quests\df\Actions\Terrain\Stone\RightClickEntities.lua
+
+Quests\df\Actions\Terrain\Tree\Check.lua
+Quests\df\Actions\Terrain\Tree\LeftClickSelf.lua
+Quests\df\Actions\Terrain\Tree\LeftClickEntities.lua
+Quests\df\Actions\Terrain\Tree\RightClickEntities.lua
+
+Quests\df\Actions\Terrain\Pool\Check.lua
+Quests\df\Actions\Terrain\Pool\LeftClickSelf.lua
+Quests\df\Actions\Terrain\Pool\LeftClickEntities.lua
+Quests\df\Actions\Terrain\Pool\RightClickEntities.lua
+
+# --- AI: реестр поведений (до Tick.lua!) ---
+Quests\df\AI\Behavior\Init.lua
+
+# --- AI: подсистемы ---
+Quests\df\AI\Init.lua
+Quests\df\AI\Ticker.lua
+Quests\df\AI\State.lua
+Quests\df\AI\Path.lua
+Quests\df\AI\Find.lua
+Quests\df\AI\Move.lua
+Quests\df\AI\Sound.lua
+Quests\df\AI\Work.lua
+Quests\df\AI\Complete.lua
+Quests\df\AI\Default.lua
+
+# --- Goblin: база + поведение ---
 Quests\df\Goblin\Init.lua
+Quests\df\Goblin\Allowed.lua
+Quests\df\Goblin\Behavior\Init.lua
 Quests\df\Goblin\Behavior\Peaceful.lua
 Quests\df\Goblin\Behavior\Aggressive.lua
 Quests\df\Goblin\Names.lua
+Quests\df\Goblin\Stats.lua
+Quests\df\Goblin\Descriptions.lua
 Quests\df\Goblin\Spawner.lua
+Quests\df\Goblin\Tooltip.lua
 
-# --- дворфы ---
+# --- Dwarf: база + поведение ---
 Quests\df\Dwarf\Init.lua
+Quests\df\Dwarf\Allowed.lua
+Quests\df\Dwarf\Behavior\Init.lua
 Quests\df\Dwarf\Behavior\Peaceful.lua
 Quests\df\Dwarf\Behavior\Aggressive.lua
 Quests\df\Dwarf\Names.lua
+Quests\df\Dwarf\Stats.lua
+Quests\df\Dwarf\Descriptions.lua
 Quests\df\Dwarf\Spawner.lua
+Quests\df\Dwarf\Tooltip.lua
 
-# --- ландшафт ---
-Quests\df\Terrain\Init.lua
-Quests\df\Terrain\Storage.lua
-Quests\df\Terrain\UI.lua
-Quests\df\Terrain\Logic.lua
-
-# --- постройки ---
-Quests\df\Buildings\Init.lua
-Quests\df\Buildings\Storage.lua
-Quests\df\Buildings\Defaults.lua
-Quests\df\Buildings\Types.lua
-Quests\df\Buildings\UI.lua
-Quests\df\Buildings\Logic.lua
-
-# --- действия (клики) ---
-Quests\df\Actions\Terrain\LeftClick.lua
-Quests\df\Actions\Terrain\ContextMenu.lua
-Quests\df\Actions\Entities\LeftClick.lua
-Quests\df\Actions\Buildings\LeftClick.lua
-Quests\df\Actions\Init.lua
-
-# --- главный инит проекта df (загружается последним, чтобы собрать всё воедино) ---
+# --- главный инит проекта df (вызывает Ticker:Start) ---
 Quests\df\Init.lua
+
+# --- AI: диспетчер поведения. СТРОГО ПОСЛЕДНИМ (переопределяет AI:TickEntity) ---
+Quests\df\AI\Tick.lua
 
 # ==========================================
 # NOWIM (ЧАТ)
