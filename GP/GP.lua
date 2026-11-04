@@ -2004,6 +2004,9 @@ NSQC4.RegisterModule("gp", function()
             function() self.raidWindow.gpEditBox:ClearFocus() end
         )
 
+        -- ====================================================================
+        -- Кнопка «Начислить» — ОДНА, с ОДНИМ обработчиком OnClick.
+        -- ====================================================================
         self.raidWindow.awardButton = CreateFrame(
             "Button", nil, self.raidWindow, "UIPanelButtonTemplate"
         )
@@ -2104,8 +2107,13 @@ NSQC4.RegisterModule("gp", function()
                         channel = "GUILD"
                         table.insert(guildNicks, nick)
                     else
+                        -- ВАЖНО: канал ВСЕГДА GUILD — nsGP1A обрабатывается
+                        -- сервером через Relay в RAID и обратно (как в
+                        -- BossLoot.AssignGpToRaid и TargetGP.ApplyGP).
+                        -- Если отправить в RAID, relay не сработает и
+                        -- начисление не дойдёт.
                         prefix  = "nsGP1A"
-                        channel = "RAID"
+                        channel = "GUILD"
                         table.insert(nonGuildNicks, nick)
                     end
 
