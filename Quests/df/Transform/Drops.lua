@@ -8,17 +8,20 @@
 --
 -- ANCHOR_INSET (из NSQC4.QuestsFieldConst.ANCHOR_INSET):
 --   Дальность крайних лут-якорей от центра клетки (px).
---     0 — вплотную к краю (как было)
---     > 0 — ближе к центру на N px
 --   CENTER не двигается.
 --
 -- РАЗМЕР ИКОНКИ ЛУТА:
---   size = btn:GetWidth() / 3 - 1  (на 1 px меньше 1/3 клетки)
+--   size = btn:GetWidth() / 3 - 2  (на 2 px меньше 1/3 клетки)
+--
+-- РЕСАЙЗ (RefreshAllLootSizes):
+--   При изменении размера фрейма OnSizeChanged в Frame.lua зовёт
+--   RefreshAllLootSizes() — пересчитывает SetSize у показанных лут-текстур
+--   (без пересоздания, без полного Render). Дёшево.
 --
 -- РАМКА ВОКРУГ ЛУТ-ЯКОРЯ:
 --   Каждый лут (ARTWORK/7) обёрнут рамкой (Frame с backdrop WHITE8x8,
---   edgeSize = BORDER_SIZE, прозрачная заливка, цвет BORDER_RGBA).
---   Рамка создаётся в btn._lootBorders[anchor] — вокруг лут-текстуры (tex).
+--   edgeSize = BORDER_SIZE). Создаётся в btn._lootBorders[anchor] — вокруг
+--   лут-текстуры (tex).
 --
 -- ОТЛАДКА:
 --   /ns_drops on | off | dump | params
@@ -44,10 +47,8 @@ NSQC4.RegisterModule("quests", function()
     local CONST = NSQC4.QuestsFieldConst
     local TOTAL = CONST and (CONST.COLS * CONST.ROWS) or 100
 
-    -- Дальность крайних лут-якорей от центра (px). 0 — вплотную к краю.
     local ANCHOR_INSET = CONST and CONST.ANCHOR_INSET or 0
 
-    -- Лут-якоря: все 9, кроме TOPLEFT (он под существо).
     local LOOT_ANCHORS = {
         "TOPCENTER", "TOPRIGHT",
         "MIDLEFT",   "CENTER",    "MIDRIGHT",
@@ -57,13 +58,7 @@ NSQC4.RegisterModule("quests", function()
     Drops.LOOT_ANCHORS = LOOT_ANCHORS
 
     -- ========================================================================
-    -- Параметры рамки вокруг лут-текстуры
-    --   BORDER_PAD:
-    --     > 0  — рамка выступает НАРУЖУ от иконки на BORDER_PAD px
-    --     = 0  — рамка ровно по краю иконки
-    --     < 0  — рамка ВНУТРИ иконки на |BORDER_PAD| px от края
-    --
-    --   BORDER_SIZE — толщина линии. 0.5 в 3.3.5 округляется до 1.
+    -- Параметры рамки вокруг лут-текстуры (константы — как у тебя)
     -- ========================================================================
     local LOOT_SUBLEVEL  = 7
     local BORDER_SIZE    = 1
@@ -71,7 +66,7 @@ NSQC4.RegisterModule("quests", function()
     local BORDER_G       = 0.0
     local BORDER_B       = 0.0
     local BORDER_A       = 1.0
-    local BORDER_PAD     = 1        -- -1: рамка внутри иконки (1 px от края)
+    local BORDER_PAD     = 1
 
     -- ========================================================================
     -- Отладка
@@ -203,8 +198,7 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Создать/обновить рамку вокруг лут-текстуры tex (в клетке index,
-    -- для якоря anchor). Рамка — Frame с backdrop WHITE8x8, edgeSize = BORDER_SIZE.
+    -- Создать/обновить рамку вокруг лут-текстуры tex
     -- ========================================================================
     local function SetLootBorder(index, anchor, tex)
         local btn = QuestsField.cells and QuestsField.cells[index]
@@ -268,11 +262,10 @@ NSQC4.RegisterModule("quests", function()
             tex:SetTexture(d.icon)
             tex:SetTexCoord(0, 1, 0, 1)
 
-            -- размер иконки лута: на 1 px меньше 1/3 клетки
+            -- размер иконки лута: на 2 px меньше 1/3 клетки (как у тебя)
             local size = btn:GetWidth() / 3 - 2
             tex:SetSize(size, size)
 
-            -- позиция лут-якоря с учётом ANCHOR_INSET (CENTER не двигается)
             local ins = ANCHOR_INSET
             if anchor == "TOPCENTER" then
                 tex:SetPoint("TOP", btn, "TOP", 0, -ins)
@@ -306,6 +299,24 @@ NSQC4.RegisterModule("quests", function()
         return true
     end
 
+    -- ========================================================================
+    -- Публичный метод: пересчитать SetSize у показанных лут-текстур (все клетки).
+    --   Вызывается из Frame.lua OnSizeChanged (без полного Render — дёшево).
+    -- ========================================================================
+    function Drops:RefreshAllLootSizes()
+        for i = 1, TOTAL do
+            local btn = QuestsField.cells and QuestsField.cells[i]
+            if btn and btn._lootTextures then
+                local size = btn:GetWidth() / 3 - 2
+                for _, tex in pairs(btn._lootTextures) do
+                    if tex:IsShown() then
+                        tex:SetSize(size, size)
+                    end
+                end
+            end
+        end
+    end
+
     function Drops:RenderAll()
         for i = 1, TOTAL do
             self:Render(i)
@@ -313,7 +324,7 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Слэш-команда: /ns_drops on | off | dump | params
+    -- Слэш-команда
     -- ========================================================================
     SLASH_NSDROPS1 = "/ns_drops"
     SlashCmdList["NSDROPS"] = function(msg)

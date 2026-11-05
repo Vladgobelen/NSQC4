@@ -13,6 +13,11 @@
 -- РАЗМЕР ИКОНКИ:
 --   size = btn:GetWidth() / 3 - 1  (на 1 px меньше 1/3 клетки)
 --
+-- РЕСАЙЗ (RefreshAnchorSizes / RefreshAllAnchorSizes):
+--   При изменении размера фрейма OnSizeChanged в Frame.lua зовёт
+--   RefreshAllAnchorSizes() — пересчитывает SetSize у показанных якорей
+--   (без пересоздания текстур и без полного Render). Дёшево.
+--
 -- Рамка вокруг якоря (SetAnchorBorder) — API, НЕ вызывается из этого файла.
 -- ============================================================================
 
@@ -57,10 +62,6 @@ NSQC4.RegisterModule("quests", function()
 
     -- ========================================================================
     -- Позиционирование якоря с учётом ANCHOR_INSET.
-    --   ins = ANCHOR_INSET:
-    --     0 — вплотную к краю
-    --     > 0 — ближе к центру на ins px
-    --   CENTER — не двигается.
     -- ========================================================================
     local function ApplyAnchorPosition(texture, btn, pos, expanded)
         texture:ClearAllPoints()
@@ -91,6 +92,31 @@ NSQC4.RegisterModule("quests", function()
             elseif pos == "BOTRIGHT" then
                 texture:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -ins, ins)
             end
+        end
+    end
+
+    -- ========================================================================
+    -- Публичный метод: пересчитать SetSize у показанных якорей клетки.
+    --   Вызывается из Frame.lua OnSizeChanged (RefreshAllAnchorSizes).
+    -- ========================================================================
+    function QuestsField:RefreshAnchorSizes(index)
+        self:EnsureFrame()
+        local btn = self.cells[index]
+        if not btn or not btn.anchors then return end
+
+        local size = btn:GetWidth() / 3 - 1
+        for _, pos in ipairs(ANCHOR_POSITIONS) do
+            local anchor = btn.anchors[pos]
+            if anchor and anchor:IsShown() then
+                anchor:SetSize(size, size)
+            end
+        end
+    end
+
+    function QuestsField:RefreshAllAnchorSizes()
+        local n = self.cells and #self.cells or 0
+        for i = 1, n do
+            self:RefreshAnchorSizes(i)
         end
     end
 

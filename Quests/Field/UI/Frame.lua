@@ -1,26 +1,21 @@
 -- ============================================================================
 -- NSQC4 / Quests / Field / UI / Frame
 -- Создание главного фрейма поля + клетки + рамка + ресайз + крестик.
--- Клики по клеткам НЕ вешает — это делают модули (TerrainActions → Mouse).
--- Здесь только: drag фрейма, ресайз, крестик, раскладка.
 --
--- РЕЖИМЫ ОТОБРАЖЕНИЯ (self.viewMode):
---   "detail"   — обычный вид: 10×10 детальных клеток.
---   "overview" — вид сверху: 10×10 «больших» квадратов, наш этаж — 1 из 100,
---                внутри — 10×10 пикселей (см. Overview.lua).
+-- ОГРАНИЧЕНИЕ РАЗМЕРА:
+--   MaxCellForScreen() = min(MAX_CELL, cellSizeFromScreen),
+--   cellSizeFromScreen = из 90% самой узкой стороны UIParent.
+--   Применяется:
+--     - в EnsureFrame (при создании фрейма)
+--     - в Show (при каждом открытии — принудительно сжать, если cellSize > eff)
+--     - в Resize.lua (при ресайзе — см. отдельный файл)
 --
--- Show():
---   - если viewMode == "overview" → self:ShowOverview() (а не детальный рендер)
---   - иначе                       → детальный рендер (Terrain/Entities)
--- Hide():
---   - скрыть overview (если был), скрыть тултип, скрыть frame
--- Toggle():
---   - просто Show/Hide, режим сохраняется
---
--- OnSizeChanged:
---   - ReflowCells + ApplyBorderAnchors (как раньше)
---   - если viewMode == "overview" → self:RefreshOverviewLayout() (если Overview
---     загружен; метод экспортируется из Overview.lua)
+-- ОТЛАДКА:
+--   /ns_frame on | off | dump
+--   При on:
+--     - EnsureFrame: [FRAME] EnsureFrame cs=... eff=... fromScreen=...
+--     - Show:        [FRAME] Show cs=... eff=... clamp=yes/no
+--     - MaxCellForScreen: [FRAME] MaxCellForScreen eff=... fromScreen=... uiW=... uiH=...
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -35,7 +30,21 @@ NSQC4.RegisterModule("quests", function()
     local DEFAULT_CELL   = CONST.DEFAULT_CELL
     local MIN_CELL       = CONST.MIN_CELL
     local MAX_CELL       = CONST.MAX_CELL
+    local SCREEN_PERCENT = CONST.SCREEN_PERCENT or 1
 
+    -- ========================================================================
+    -- Отладка
+    -- ========================================================================
+    local FrameDebug = { DEBUG = false }
+    QuestsField._FrameDebug = FrameDebug
+
+    local function dbg(...)
+        if FrameDebug.DEBUG then print("|cff00ffff[FRAME]|r", ...) end
+    end
+
+    -- ========================================================================
+    -- Размер фрейма по cellSize
+    -- ========================================================================
     local function FrameSizeForCell(cs)
         return cs * COLS + (COLS - 1) * CELL_GAP + GRID_PADDING * 2,
                cs * ROWS + (ROWS - 1) * CELL_GAP + GRID_PADDING * 2
@@ -43,7 +52,53 @@ NSQC4.RegisterModule("quests", function()
     QuestsField._FrameSizeForCell = FrameSizeForCell
 
     -- ========================================================================
-    -- EnsureFrame — создать фрейм и всё вокруг (идемпотентно)
+    -- MaxCellForScreen(): максимальный cellSize с учётом 90% самой узкой
+    -- стороны UIParent. Возвращает effMaxCell, maxFromScreen.
+    -- ========================================================================
+    function QuestsField:MaxCellForScreen()
+        local uiW = (UIParent and UIParent:GetWidth())  or 0
+        local uiH = (UIParent and UIParent:GetHeight()) or 0
+        local minSide = math.min(uiW, uiH)
+        if minSide <= 0 then
+            dbg("MaxCellForScreen: UIParent size = 0 → fallback MAX_CELL")
+            return MAX_CELL, MAX_CELL
+        end
+
+        local maxSide = minSide * SCREEN_PERCENT
+        local byW = (maxSide - (COLS - 1) * CELL_GAP - GRID_PADDING * 2) / COLS
+        local byH = (maxSide - (ROWS - 1) * CELL_GAP - GRID_PADDING * 2) / ROWS
+        local maxFromScreen = math.floor(math.min(byW, byH))
+
+        if maxFromScreen < MIN_CELL then maxFromScreen = MIN_CELL end
+
+        local effMaxCell = math.min(MAX_CELL, maxFromScreen)
+
+        dbg(string.format(
+            "MaxCellForScreen: uiW=%.1f uiH=%.1f minSide=%.1f maxSide=%.1f byW=%.2f byH=%.2f fromScreen=%d eff=%d (MAX_CELL=%d)",
+            uiW, uiH, minSide, maxSide, byW, byH, maxFromScreen, effMaxCell, MAX_CELL))
+
+        return effMaxCell, maxFromScreen
+    end
+
+    -- ========================================================================
+    -- Применить cellSize к фрейму (размер, клетки, рамка, якоря, лут)
+    -- ========================================================================
+    function QuestsField:ApplyCellSize(cs)
+        if not self.frame then return end
+        self.cellSize = cs
+        local w, h = FrameSizeForCell(cs)
+        self.frame:SetSize(w, h)
+        self:ReflowCells()
+        self:ApplyBorderAnchors()
+        if self.RefreshAllAnchorSizes then self:RefreshAllAnchorSizes() end
+        local Drops = NSQC4.QuestsDfTransformDrops
+        if Drops and Drops.RefreshAllLootSizes then Drops:RefreshAllLootSizes() end
+
+        dbg(string.format("ApplyCellSize: cs=%d frame=%dx%d", cs, w, h))
+    end
+
+    -- ========================================================================
+    -- EnsureFrame
     -- ========================================================================
     function QuestsField:EnsureFrame()
         if self.frame then return self.frame end
@@ -51,9 +106,18 @@ NSQC4.RegisterModule("quests", function()
         if not self.saved then self:Load() end
         local saved = self.saved or {}
 
+        local effMaxCell, maxFromScreen = self:MaxCellForScreen()
+
         local cs = math.floor((saved.cellSize or DEFAULT_CELL) + 0.5)
         if cs < MIN_CELL then cs = MIN_CELL end
-        if cs > MAX_CELL then cs = MAX_CELL end
+        local csBefore = cs
+        if cs > effMaxCell then cs = effMaxCell end
+
+        dbg(string.format(
+            "EnsureFrame: saved.cellSize=%s csBefore=%d → cs=%d (eff=%d fromScreen=%d) clamped=%s",
+            tostring(saved.cellSize), csBefore, cs, effMaxCell, maxFromScreen,
+            (csBefore ~= cs) and "YES" or "no"))
+
         self.cellSize = cs
 
         local w0, h0 = FrameSizeForCell(cs)
@@ -74,13 +138,11 @@ NSQC4.RegisterModule("quests", function()
             f:SetPoint("CENTER")
         end
 
-        -- Клетки
         for index = 1, COLS * ROWS do
             self.cells[index] = self:CreateCell(index)
         end
         self:ReflowCells()
 
-        -- UI-механика фрейма (не клики клеток)
         self:CreateBorder()
         self:CreateResizeHandle()
         self:CreateCloseButton()
@@ -90,36 +152,52 @@ NSQC4.RegisterModule("quests", function()
             self:SetBorderVisible(true)
         end
 
-        -- OnSizeChanged: ReflowCells + ApplyBorderAnchors + Overview layout
         f:HookScript("OnSizeChanged", function()
             self:ReflowCells()
             self:ApplyBorderAnchors()
+            if self.RefreshAllAnchorSizes then self:RefreshAllAnchorSizes() end
+            local Drops = NSQC4.QuestsDfTransformDrops
+            if Drops and Drops.RefreshAllLootSizes then Drops:RefreshAllLootSizes() end
             if self.viewMode == "overview" and self.RefreshOverviewLayout then
                 self:RefreshOverviewLayout()
             end
         end)
 
         f:Hide()
+
+        dbg(string.format("EnsureFrame: created frame %dx%d at cellSize=%d", w0, h0, cs))
         return f
     end
 
     -- ========================================================================
-    -- Show / Hide / Toggle (с учётом viewMode)
+    -- Show / Hide / Toggle
     -- ========================================================================
     function QuestsField:Show()
         self:EnsureFrame()
 
-        -- Скрыть тултип (на случай, если он висел от прошлого показа)
         GameTooltip:Hide()
 
-        -- Если включён overview — показать overview, а не детальный вид
+        -- Принудительно обрезать при открытии, если cellSize > eff
+        local effMaxCell, maxFromScreen = self:MaxCellForScreen()
+        if self.cellSize and self.cellSize > effMaxCell then
+            local csBefore = self.cellSize
+            dbg(string.format(
+                "Show: clamp cellSize %d → %d (eff=%d fromScreen=%d)",
+                csBefore, effMaxCell, effMaxCell, maxFromScreen))
+            self:ApplyCellSize(effMaxCell)
+            self:Save()
+        else
+            dbg(string.format(
+                "Show: cellSize=%s eff=%d fromScreen=%d — без clamp",
+                tostring(self.cellSize), effMaxCell, maxFromScreen))
+        end
+
         if self.viewMode == "overview" and self.ShowOverview then
             self.frame:Show()
             self:ShowOverview()
             return
         end
 
-        -- Обычный детальный вид
         self.frame:Show()
 
         if NSQC4.QuestsDfTerrain then NSQC4.QuestsDfTerrain:Render() end
@@ -128,14 +206,10 @@ NSQC4.RegisterModule("quests", function()
     end
 
     function QuestsField:Hide()
-        -- Скрыть overview (если был) — чтобы при следующем Show
-        -- не остались «большие» квадраты поверх клеток
         if self.viewMode == "overview" and self.HideOverview then
             self:HideOverview()
         end
-
         GameTooltip:Hide()
-
         if self.frame then self.frame:Hide() end
     end
 
@@ -168,4 +242,35 @@ NSQC4.RegisterModule("quests", function()
         self.closeBtn = btn
         return btn
     end
+
+    -- ========================================================================
+    -- Слэш-команда: /ns_frame on | off | dump
+    -- ========================================================================
+    SLASH_NSFRAME1 = "/ns_frame"
+    SlashCmdList["NSFRAME"] = function(msg)
+        local cmd = (msg or ""):lower():match("^(%S*)")
+        if cmd == "on" then
+            FrameDebug.DEBUG = true
+            print("[FRAME] DEBUG = true")
+            local e, m = NSQC4.QuestsField:MaxCellForScreen()
+            print(string.format("[FRAME] eff=%d fromScreen=%d MAX_CELL=%d MIN_CELL=%d SCREEN_PERCENT=%s",
+                e, m, NSQC4.QuestsFieldConst.MAX_CELL, NSQC4.QuestsFieldConst.MIN_CELL,
+                tostring(NSQC4.QuestsFieldConst.SCREEN_PERCENT)))
+        elseif cmd == "off" then
+            FrameDebug.DEBUG = false
+            print("[FRAME] DEBUG = false")
+        elseif cmd == "dump" then
+            local F = NSQC4.QuestsField
+            local e, m = F:MaxCellForScreen()
+            print(string.format(
+                "[FRAME] dump: cellSize=%s frameW=%s frameH=%s eff=%d fromScreen=%d",
+                tostring(F.cellSize),
+                tostring(F.frame and F.frame:GetWidth() or "nil"),
+                tostring(F.frame and F.frame:GetHeight() or "nil"),
+                e, m))
+        else
+            print("[FRAME] /ns_frame on | off | dump")
+        end
+    end
+
 end)

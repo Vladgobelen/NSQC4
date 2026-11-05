@@ -16,6 +16,10 @@
 --     > 0 — якоря ближе к центру на N px
 --   CENTER не двигается.
 --   Используется в Anchors.lua (якорь существа) и Drops.lua (лут).
+--
+-- MAX_CELL:
+--   Абсолютный верхний предел клетки (px). Дополнительно ограничивается
+--   «90% самой узкой стороны экрана» (см. FrameSizeForCell + MaxFrameWidth).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -25,13 +29,14 @@ NSQC4.RegisterModule("quests", function()
     local GRID_PADDING = 40
     local DEFAULT_CELL = 32
     local MIN_CELL     = 10
-    local MAX_CELL     = 64
+    local MAX_CELL     = 128
     local SAVE_KEY     = "questsField"
 
     -- Дальность крайних якорей от центра (px).
-    -- 0 — вплотную к краю; > 0 — ближе к центру.
-    -- CENTER не двигается.
     local ANCHOR_INSET = 2
+
+    -- Ограничение размера фрейма: не более 90% самой узкой стороны экрана.
+    local SCREEN_PERCENT = 1
 
     local QuestsField = {}
     QuestsField.__index = QuestsField
@@ -43,6 +48,7 @@ NSQC4.RegisterModule("quests", function()
         DEFAULT_CELL = DEFAULT_CELL, MIN_CELL = MIN_CELL, MAX_CELL = MAX_CELL,
         SAVE_KEY = SAVE_KEY,
         ANCHOR_INSET = ANCHOR_INSET,
+        SCREEN_PERCENT = SCREEN_PERCENT,
     }
 
     function QuestsField.new()
