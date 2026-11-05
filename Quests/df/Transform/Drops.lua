@@ -7,16 +7,17 @@
 -- TOPLEFT — под существо, лут туда НЕ кладётся.
 --
 -- РАМКА ВОКРУГ ЛУТ-ЯКОРЯ:
---   Каждый лут (ARTWORK/7) обёрнут тонкой рамкой 1 px (Frame с backdrop
---   WHITE8x8, edgeSize = 1, прозрачная заливка, чёрная граница).
+--   Каждый лут (ARTWORK/7) обёрнут тонкой рамкой (Frame с backdrop
+--   WHITE8x8, edgeSize = BORDER_SIZE, прозрачная заливка, чёрная граница).
 --   Рамка создаётся в самом Drops.lua (btn._lootBorders[anchor]) — вокруг
---   лут-текстуры (tex), а НЕ вокруг btn.anchors[pos] (это якорь существа).
---   Anchors.lua больше НЕ вызывает SetAnchorBorder — вокруг существа
---   рамки нет. Рамка только вокруг лута.
+--   лут-текстуры (tex), а НЕ вокруг btn.anchors[pos].
 --
--- ЯКОРЬ ВЫШЕ ЛУТА:
---   Якорь (существо) — ARTWORK/8 (ANCHOR_SUBLEVEL = 8 в Anchors.lua).
---   Лут — ARTWORK/7. Якорь рисуется ВЫШЕ лута. Не меняем subLevel лута.
+-- ОТЛАДКА:
+--   /ns_drops on | off | dump
+--   При on — print в чат:
+--     - параметры рамки (PAD/SIZE/суммарный размер)
+--     - при SetLootBorder — что именно создаётся, где, какого размера
+--     - при ClearLootTextures — что скрывается
 --
 -- API:
 --   Drops:FreeAnchors(index)       → массив свободных лут-якорей
@@ -61,6 +62,13 @@ NSQC4.RegisterModule("quests", function()
 
     -- ========================================================================
     -- Параметры рамки вокруг лут-текстуры
+    --   BORDER_PAD:
+    --     > 0  — рамка выступает НАРУЖУ от иконки на BORDER_PAD px
+    --     = 0  — рамка ровно по краю иконки (перекрывает 1 px иконки)
+    --     < 0  — рамка ВНУТРИ иконки на |BORDER_PAD| px от края
+    --
+    --   BORDER_SIZE — толщина линии. 0.5 в 3.3.5 может не работать
+    --   (SetBackdrop округляет до 1), 1 — надёжно.
     -- ========================================================================
     local LOOT_SUBLEVEL  = 7         -- лут — ARTWORK/7 (якорь выше: ARTWORK/8)
     local BORDER_SIZE    = 1         -- 1 px
@@ -68,8 +76,27 @@ NSQC4.RegisterModule("quests", function()
     local BORDER_G       = 0.0
     local BORDER_B       = 0.0
     local BORDER_A       = 1.0
-    local BORDER_PAD     = 1         -- выступ рамки наружу на 1 px,
-                                     -- чтобы edgeSize=1 не перекрывал иконку
+    local BORDER_PAD     = -1        -- -1: рамка внутри иконки (отступ 1 px от края)
+
+    -- ========================================================================
+    -- Отладка
+    -- ========================================================================
+    Drops.DEBUG = false
+
+    local function dbg(...)
+        if Drops.DEBUG then print("|cff00ffff[DROPS]|r", ...) end
+    end
+
+    local function dbgAlways(...)
+        print("|cff00ffff[DROPS]|r", ...)
+    end
+
+    local function DumpParams()
+        dbgAlways(string.format(
+            "params: LOOT_SUBLEVEL=%d  BORDER_SIZE=%s  BORDER_PAD=%s  BORDER_RGBA=%s,%s,%s,%s",
+            LOOT_SUBLEVEL, tostring(BORDER_SIZE), tostring(BORDER_PAD),
+            tostring(BORDER_R), tostring(BORDER_G), tostring(BORDER_B), tostring(BORDER_A)))
+    end
 
     local function EnsureLoot(index)
         local c = Grid:GetCell(index)
@@ -84,7 +111,7 @@ NSQC4.RegisterModule("quests", function()
     function Drops:FreeAnchors(index)
         local c = Grid:GetCell(index)
         if not c then return {} end
-        if c.terrain == "void" then return {} end   -- в пустоте лут-якоря «заняты»
+        if c.terrain == "void" then return {} end
         local loot = c.loot or {}
         local free = {}
         for _, a in ipairs(LOOT_ANCHORS) do
@@ -93,9 +120,6 @@ NSQC4.RegisterModule("quests", function()
         return free
     end
 
-    -- ========================================================================
-    -- Есть ли лут в клетке
-    -- ========================================================================
     function Drops:HasAny(index)
         local c = Grid:GetCell(index)
         if not c or not c.loot then return false end
@@ -111,10 +135,6 @@ NSQC4.RegisterModule("quests", function()
         return n
     end
 
-    -- ========================================================================
-    -- Положить дроп в свободный лут-якорь.
-    -- Возвращает anchor или nil (если свободных нет / void).
-    -- ========================================================================
     function Drops:Add(index, id, icon)
         index = tonumber(index) or 0
         if index < 1 or index > TOTAL then return nil end
@@ -132,18 +152,12 @@ NSQC4.RegisterModule("quests", function()
         return anchor
     end
 
-    -- ========================================================================
-    -- Получить дроп по anchor
-    -- ========================================================================
     function Drops:Get(index, anchor)
         local c = Grid:GetCell(index)
         if not c or not c.loot then return nil end
         return c.loot[anchor]
     end
 
-    -- ========================================================================
-    -- Все дропы клетки (массив { anchor, id, icon })
-    -- ========================================================================
     function Drops:GetAll(index)
         local c = Grid:GetCell(index)
         if not c or not c.loot then return {} end
@@ -157,9 +171,6 @@ NSQC4.RegisterModule("quests", function()
         return list
     end
 
-    -- ========================================================================
-    -- Очистить лут клетки
-    -- ========================================================================
     function Drops:Clear(index)
         local c = Grid:GetCell(index)
         if not c then return false end
@@ -176,6 +187,8 @@ NSQC4.RegisterModule("quests", function()
         if not btn then return end
 
         if btn._lootTextures then
+            dbg(string.format("cell %d: clear %d loot textures",
+                index, (function() local n=0 for _ in pairs(btn._lootTextures) do n=n+1 end return n end)()))
             for _, tex in pairs(btn._lootTextures) do
                 tex:Hide()
                 tex:ClearAllPoints()
@@ -185,6 +198,8 @@ NSQC4.RegisterModule("quests", function()
         end
 
         if btn._lootBorders then
+            dbg(string.format("cell %d: hide %d loot borders",
+                index, (function() local n=0 for _ in pairs(btn._lootBorders) do n=n+1 end return n end)()))
             for _, border in pairs(btn._lootBorders) do
                 border:Hide()
             end
@@ -193,9 +208,12 @@ NSQC4.RegisterModule("quests", function()
 
     -- ========================================================================
     -- Создать/обновить рамку вокруг лут-текстуры tex (в клетке index,
-    -- для якоря anchor). Рамка — Frame с backdrop WHITE8x8, edgeSize = 1.
-    -- BORDER_PAD = 1 — рамка на 1 px больше иконки со всех сторон;
-    -- SetBackdrop рисует границу ВНУТРИ этого Frame — снаружи иконки.
+    -- для якоря anchor). Рамка — Frame с backdrop WHITE8x8, edgeSize = BORDER_SIZE.
+    --
+    -- BORDER_PAD:
+    --   > 0 — рамка на BORDER_PAD px больше иконки со всех сторон
+    --   = 0 — ровно по краю иконки
+    --   < 0 — рамка на |BORDER_PAD| px ВНУТРИ иконки
     -- ========================================================================
     local function SetLootBorder(index, anchor, tex)
         local btn = QuestsField.cells and QuestsField.cells[index]
@@ -204,6 +222,7 @@ NSQC4.RegisterModule("quests", function()
         if not btn._lootBorders then btn._lootBorders = {} end
         local border = btn._lootBorders[anchor]
 
+        local created = false
         if not border then
             border = CreateFrame("Frame", nil, btn)
             border:SetFrameLevel(btn:GetFrameLevel() + 11)
@@ -214,16 +233,29 @@ NSQC4.RegisterModule("quests", function()
             border:SetBackdropColor(0, 0, 0, 0)
             border:SetBackdropBorderColor(BORDER_R, BORDER_G, BORDER_B, BORDER_A)
             btn._lootBorders[anchor] = border
+            created = true
         end
 
         border:ClearAllPoints()
         border:SetPoint("TOPLEFT",     tex, "TOPLEFT",     -BORDER_PAD,  BORDER_PAD)
         border:SetPoint("BOTTOMRIGHT", tex, "BOTTOMRIGHT",  BORDER_PAD, -BORDER_PAD)
         border:Show()
+
+        if Drops.DEBUG then
+            local texW, texH = tex:GetWidth(), tex:GetHeight()
+            local bw, bh = border:GetWidth(), border:GetHeight()
+            dbg(string.format(
+                "cell %d anchor %s: %s border  PAD=%d SIZE=%s  tex=%sx%s  border=%sx%s  edge=%s",
+                index, anchor, created and "CREATE" or "UPDATE",
+                BORDER_PAD, tostring(BORDER_SIZE),
+                tostring(texW), tostring(texH),
+                tostring(bw), tostring(bh),
+                tostring(border:GetBackdrop() and border:GetBackdrop().edgeSize or "?")))
+        end
     end
 
     -- ========================================================================
-    -- Рендер лута клетки: каждая иконка — в свой лут-якорь + рамка вокруг
+    -- Рендер лута клетки
     -- ========================================================================
     function Drops:Render(index)
         index = tonumber(index) or 0
@@ -244,7 +276,6 @@ NSQC4.RegisterModule("quests", function()
             tex:SetDrawLayer("ARTWORK", LOOT_SUBLEVEL)
             tex:SetTexture(d.icon)
             tex:SetTexCoord(0, 1, 0, 1)
-            -- размер и позиция — как у существа (1/3 клетки), через якорь
             local size = btn:GetWidth() / 3
             tex:SetSize(size, size)
             if anchor == "TOPCENTER" then
@@ -267,7 +298,12 @@ NSQC4.RegisterModule("quests", function()
             tex:Show()
             btn._lootTextures[anchor] = tex
 
-            -- рамка вокруг лут-текстуры (1 px, снаружи)
+            if Drops.DEBUG then
+                dbg(string.format("cell %d anchor %s: tex created %sx%s at (%s,%s)",
+                    index, anchor, tostring(tex:GetWidth()), tostring(tex:GetHeight()),
+                    tostring(tex:GetLeft()), tostring(tex:GetBottom())))
+            end
+
             SetLootBorder(index, anchor, tex)
         end
 
@@ -279,5 +315,46 @@ NSQC4.RegisterModule("quests", function()
             self:Render(i)
         end
     end
+
+    -- ========================================================================
+    -- Слэш-команда: /ns_drops on | off | dump | params
+    -- ========================================================================
+    SLASH_NSDROPS1 = "/ns_drops"
+    SlashCmdList["NSDROPS"] = function(msg)
+        local cmd = (msg or ""):lower():match("^(%S*)")
+        if cmd == "" or cmd == "on" then
+            Drops.DEBUG = true
+            print("[DROPS] DEBUG = true")
+            DumpParams()
+        elseif cmd == "off" then
+            Drops.DEBUG = false
+            print("[DROPS] DEBUG = false")
+        elseif cmd == "params" then
+            DumpParams()
+        elseif cmd == "dump" then
+            -- дамп всех лут-рамок и их размеров
+            print("[DROPS] dump:")
+            DumpParams()
+            for i = 1, TOTAL do
+                local btn = QuestsField.cells and QuestsField.cells[i]
+                if btn and btn._lootBorders then
+                    for anchor, border in pairs(btn._lootBorders) do
+                        local bw, bh = border:GetWidth(), border:GetHeight()
+                        local shown = border:IsShown()
+                        local bd = border:GetBackdrop()
+                        print(string.format(
+                            "  cell %d anchor %s: border=%sx%s shown=%s edgeSize=%s",
+                            i, anchor, tostring(bw), tostring(bh), tostring(shown),
+                            tostring(bd and bd.edgeSize or "?")))
+                    end
+                end
+            end
+        else
+            print("[DROPS] /ns_drops on | off | params | dump")
+        end
+    end
+
+    print("|cff00ffff[DROPS]|r Drops загружен (DEBUG=" .. tostring(Drops.DEBUG) .. ")")
+    DumpParams()
 
 end)
