@@ -4,29 +4,24 @@
 -- Только визуал: SetAnchorTexture, SetAnchorExpanded,
 -- ClearAnchorTexture, ClearAnchorTextures.
 --
--- ВАЖНО:
---   - Якорь (иконка существа) рисуется НАД всем остальным в клетке:
---     ландшафт (BACKGROUND/0), ховер (BORDER/2), лут (ARTWORK/7),
---     текст (OVERLAY/1,2). Якорь — ARTWORK/subLevel 7, но поднят
---     FrameLevel'ом кнопки? Нет: ARTWORK/7 — текстура на уровне кнопки.
---     Чтобы якорь был ВЫШЕ лут-текстур (тоже ARTWORK/7) — используем
---     subLevel 7 у якоря и subLevel 7 у лута, но порядок создания
---     определяет «кто выше». Надёжнее — вынести якорь на OVERLAY/0
---     или поднять FrameLevel. Здесь якорь на ARTWORK/7, как было,
---     но с ЯВНЫМ SetDrawLayer("ARTWORK", ANCHOR_SUBLEVEL) при каждом
---     показе — чтобы пересоздание текстур не сбивало слой.
+-- ANCHOR_INSET (из NSQC4.QuestsFieldConst.ANCHOR_INSET):
+--   Дальность крайних якорей от центра клетки (px).
+--     0 — якоря вплотную к краю (как было)
+--     > 0 — якоря ближе к центру на N px
+--   CENTER не двигается.
 --
---   - Рамка вокруг якоря (1 px) — БОЛЬШЕ НЕ ВЫЗЫВАЕТСЯ отсюда.
---     Метод QuestsField:SetAnchorBorder(index, pos, visible) оставлен
---     как API (может пригодиться), но Anchors.lua его не зовёт.
---     Рамка вокруг ЛУТА — в Drops.lua (своя, вокруг лут-текстуры).
+-- РАЗМЕР ИКОНКИ:
+--   size = btn:GetWidth() / 3 - 1  (на 1 px меньше 1/3 клетки)
 --
--- Клики НЕ здесь — регистрация кликов только через Mouse.lua.
+-- Рамка вокруг якоря (SetAnchorBorder) — API, НЕ вызывается из этого файла.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
     local QuestsField = NSQC4.QuestsFieldClass
     if not QuestsField then return end
+
+    local CONST = NSQC4.QuestsFieldConst
+    local ANCHOR_INSET = CONST and CONST.ANCHOR_INSET or 0
 
     local ANCHOR_POSITIONS = {
         "TOPLEFT", "TOPCENTER", "TOPRIGHT",
@@ -34,23 +29,17 @@ NSQC4.RegisterModule("quests", function()
         "BOTLEFT", "BOTCENTER", "BOTRIGHT",
     }
 
-    -- Якорь (иконка существа) — ARTWORK, subLevel 7.
-    -- Лут (Drops.lua) — тоже ARTWORK/7. Чтобы якорь был ВЫШЕ лута,
-    -- якорь дополнительно поднимаем по FrameLevel кнопки — но текстуры
-    -- не имеют своего FrameLevel, они рисуются на уровне родителя.
-    -- Значит «выше» = позже создан / больше subLevel. Оставляем 7,
-    -- но SetDrawLayer вызываем при каждом показе — чтобы не сбивалось.
     local ANCHOR_SUBLEVEL = 7
 
     -- ========================================================================
-    -- Параметры рамки (API для будущего; Anchors.lua не вызывает)
+    -- Параметры рамки (API для будущего; не вызывается)
     -- ========================================================================
-    local BORDER_SIZE  = 0.5
+    local BORDER_SIZE  = 1
     local BORDER_R     = 0.0
     local BORDER_G     = 0.0
     local BORDER_B     = 0.0
     local BORDER_A     = 1.0
-    local BORDER_PAD   = -1
+    local BORDER_PAD   = 1
 
     -- ========================================================================
     -- Ленивое создание якоря (текстуры)
@@ -62,44 +51,51 @@ NSQC4.RegisterModule("quests", function()
             anchor = btn:CreateTexture(nil, "ARTWORK", nil, ANCHOR_SUBLEVEL)
             btn.anchors[pos] = anchor
         end
-        -- Всегда переустанавливаем слой — чтобы якорь был на ARTWORK/7
-        -- даже если текстура была пересоздана или слой сбит.
         anchor:SetDrawLayer("ARTWORK", ANCHOR_SUBLEVEL)
         return anchor
     end
 
+    -- ========================================================================
+    -- Позиционирование якоря с учётом ANCHOR_INSET.
+    --   ins = ANCHOR_INSET:
+    --     0 — вплотную к краю
+    --     > 0 — ближе к центру на ins px
+    --   CENTER — не двигается.
+    -- ========================================================================
     local function ApplyAnchorPosition(texture, btn, pos, expanded)
         texture:ClearAllPoints()
         if expanded then
             texture:SetAllPoints(btn)
         else
-            local size = btn:GetWidth() / 3
+            local size = btn:GetWidth() / 3 - 1
             texture:SetSize(size, size)
+
+            local ins = ANCHOR_INSET
+
             if pos == "TOPLEFT" then
-                texture:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, 0)
+                texture:SetPoint("TOPLEFT", btn, "TOPLEFT", ins, -ins)
             elseif pos == "TOPCENTER" then
-                texture:SetPoint("TOP", btn, "TOP", 0, 0)
+                texture:SetPoint("TOP", btn, "TOP", 0, -ins)
             elseif pos == "TOPRIGHT" then
-                texture:SetPoint("TOPRIGHT", btn, "TOPRIGHT", 0, 0)
+                texture:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -ins, -ins)
             elseif pos == "MIDLEFT" then
-                texture:SetPoint("LEFT", btn, "LEFT", 0, 0)
+                texture:SetPoint("LEFT", btn, "LEFT", ins, 0)
             elseif pos == "CENTER" then
                 texture:SetPoint("CENTER", btn, "CENTER", 0, 0)
             elseif pos == "MIDRIGHT" then
-                texture:SetPoint("RIGHT", btn, "RIGHT", 0, 0)
+                texture:SetPoint("RIGHT", btn, "RIGHT", -ins, 0)
             elseif pos == "BOTLEFT" then
-                texture:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 0, 0)
+                texture:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", ins, ins)
             elseif pos == "BOTCENTER" then
-                texture:SetPoint("BOTTOM", btn, "BOTTOM", 0, 0)
+                texture:SetPoint("BOTTOM", btn, "BOTTOM", 0, ins)
             elseif pos == "BOTRIGHT" then
-                texture:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 0, 0)
+                texture:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -ins, ins)
             end
         end
     end
 
     -- ========================================================================
-    -- Рамка вокруг якоря (API, не вызывается из Anchors.lua).
-    -- Оставлен для возможного использования в будущем.
+    -- Рамка вокруг якоря (API, не вызывается из Anchors.lua)
     -- ========================================================================
     function QuestsField:SetAnchorBorder(index, pos, visible)
         self:EnsureFrame()
@@ -147,10 +143,8 @@ NSQC4.RegisterModule("quests", function()
             anchor:SetTexCoord(0, 1, 0, 1)
             anchor:SetVertexColor(1, 1, 1, 1)
             anchor:SetAlpha(1)
-            -- слой — при каждом показе (пересоздание не собьёт)
             anchor:SetDrawLayer("ARTWORK", ANCHOR_SUBLEVEL)
             anchor:Show()
-            -- рамка НЕ вызывается (существо без рамки)
         else
             anchor:SetTexture(nil)
             anchor:Hide()
@@ -171,10 +165,8 @@ NSQC4.RegisterModule("quests", function()
             anchor:SetTexCoord(0, 1, 0, 1)
             anchor:SetVertexColor(1, 1, 1, 1)
             anchor:SetAlpha(1)
-            -- слой — при каждом показе
             anchor:SetDrawLayer("ARTWORK", ANCHOR_SUBLEVEL)
             anchor:Show()
-            -- рамка НЕ вызывается
         else
             anchor:SetTexture(nil)
             anchor:Hide()
@@ -191,7 +183,6 @@ NSQC4.RegisterModule("quests", function()
         local anchor = btn.anchors[pos]
         anchor:SetTexture(nil)
         anchor:Hide()
-        -- рамка НЕ трогается (существо без рамки)
     end
 
     -- ========================================================================

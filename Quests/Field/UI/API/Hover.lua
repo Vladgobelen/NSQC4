@@ -6,45 +6,52 @@
 -- Это использует AI/Work.lua, чтобы играть звук работы только когда
 -- мышь на существе. Тултип тоже идёт через _onEnter/_onLeave.
 --
--- BORDERLESS:
---   ResetHover (после ухода мыши) ставит рамку клетки через
---   QuestsField:IsBorderless():
---     - false (nil) → 0.25, 0.25, 0.25, 1  (рамка есть)
---     - true  (1)   → 0,    0,    0,    0  (рамки нет)
---   ApplyHover (при наведении) — если _hoverHighlight задан, ставит его
---   цвет (подсветка); иначе рамку не трогает.
+-- ПОДСВЕТКА ПРИ НАВЕДЕНИИ:
+--   ApplyHover ставит рамку клетки:
+--     - если btn._hoverHighlight задан (SetCellHoverHighlight) — его цвет;
+--     - иначе — DEFAULT_HOVER_HIGHLIGHT (жёлтый 1.0, 0.85, 0.0, 1.0).
+--   ResetHover возвращает базовый цвет рамки:
+--     - borderless = nil → 0.25, 0.25, 0.25, 1
+--     - borderless = 1   → 0,    0,    0,    0
 --
 -- ВАЖНО: QuestsField:SetCellHoverTexture — только в Textures.lua
--- (там inset зависит от IsBorderless()). Здесь дубля НЕТ — иначе
--- Hover.lua перезаписал бы версию из Textures.lua (TOC: Textures
--- до Hover) и inset был бы всегда 1 px, даже при borderless.
+-- (там inset зависит от IsBorderless()). Здесь дубля НЕТ.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
     local QuestsField = NSQC4.QuestsFieldClass
     if not QuestsField then return end
 
+    -- ========================================================================
+    -- Дефолтная подсветка при наведении (если _hoverHighlight не задан).
+    --   { R, G, B, A } — цвет рамки клетки.
+    -- ========================================================================
+    local DEFAULT_HOVER_HIGHLIGHT = { 1.0, 0.85, 0.0, 1.0 }   -- жёлтый
+
     local function ApplyHover(btn)
         if btn._hoverTexture and btn.hoverTexture then
             btn.hoverTexture:Show()
         end
-        if btn._hoverHighlight then
-            local r, g, b, a = unpack(btn._hoverHighlight)
-            btn:SetBackdropBorderColor(r, g, b, a)
-        end
+
+        -- рамка: либо заданный _hoverHighlight, либо дефолтный
+        local hl = btn._hoverHighlight or DEFAULT_HOVER_HIGHLIGHT
+        local r = hl[1] or 1.0
+        local g = hl[2] or 0.85
+        local b = hl[3] or 0.0
+        local a = hl[4] or 1.0
+        btn:SetBackdropBorderColor(r, g, b, a)
     end
 
     local function ResetHover(btn)
         if btn.hoverTexture then
             btn.hoverTexture:Hide()
         end
-        if btn._hoverHighlight then
-            -- рамка: по умолчанию 0.25 (есть), если borderless — 0 (нет)
-            if QuestsField:IsBorderless() then
-                btn:SetBackdropBorderColor(0, 0, 0, 0)
-            else
-                btn:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
-            end
+
+        -- рамка: вернуть базовый цвет (0.25 или 0 при borderless)
+        if QuestsField:IsBorderless() then
+            btn:SetBackdropBorderColor(0, 0, 0, 0)
+        else
+            btn:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
         end
     end
 
@@ -96,8 +103,5 @@ NSQC4.RegisterModule("quests", function()
     -- ========================================================================
     -- SetCellHoverTexture — НЕ здесь.
     --   Определён в Textures.lua (inset зависит от IsBorderless()).
-    --   Если продублировать здесь — Hover.lua (в TOC после Textures.lua)
-    --   перезапишет версию из Textures.lua, и inset будет всегда 1 px,
-    --   даже при borderless = 1. Поэтому здесь его нет.
     -- ========================================================================
 end)

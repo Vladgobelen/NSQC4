@@ -5,13 +5,17 @@
 -- viewMode:
 --   "detail"   — обычный вид (10×10 детальных клеток) — по умолчанию.
 --   "overview" — вид сверху (10×10 «больших» квадратов, наш этаж — 1 из 100).
---                Управляется через QuestsField:ShowOverview/HideOverview/ToggleOverview.
 --
 -- borderless:
---   nil (по умолчанию) — рамка клеток есть (0.25, 0.25, 0.25, 1).
---   1                  — рамки нет, клетки сливаются вплотную.
---   Управляется QuestsField:IsBorderless / SetBorderless (Field/Storage.lua).
---   Слэш: /ns_borderless — переключить.
+--   nil — рамка клеток есть, 1 — рамки нет (клетки вплотную).
+--   Слэш: /ns_borderless.
+--
+-- ANCHOR_INSET:
+--   Дальность крайних якорей (существо / лут) от центра клетки.
+--     0 — якоря вплотную к краю (как было)
+--     > 0 — якоря ближе к центру на N px
+--   CENTER не двигается.
+--   Используется в Anchors.lua (якорь существа) и Drops.lua (лут).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -24,6 +28,11 @@ NSQC4.RegisterModule("quests", function()
     local MAX_CELL     = 64
     local SAVE_KEY     = "questsField"
 
+    -- Дальность крайних якорей от центра (px).
+    -- 0 — вплотную к краю; > 0 — ближе к центру.
+    -- CENTER не двигается.
+    local ANCHOR_INSET = 2
+
     local QuestsField = {}
     QuestsField.__index = QuestsField
 
@@ -33,6 +42,7 @@ NSQC4.RegisterModule("quests", function()
         CELL_GAP = CELL_GAP, GRID_PADDING = GRID_PADDING,
         DEFAULT_CELL = DEFAULT_CELL, MIN_CELL = MIN_CELL, MAX_CELL = MAX_CELL,
         SAVE_KEY = SAVE_KEY,
+        ANCHOR_INSET = ANCHOR_INSET,
     }
 
     function QuestsField.new()
@@ -45,12 +55,8 @@ NSQC4.RegisterModule("quests", function()
         self.borderVisible = false
         self.cellSize      = nil
         self.saved         = nil
-        self.contextMenus  = {} -- Инициализация таблицы контекстных меню
-
-        -- Режим отображения: "detail" (обычный) | "overview" (вид сверху).
-        -- Управляется через ShowOverview/HideOverview/ToggleOverview (Overview.lua).
+        self.contextMenus  = {}
         self.viewMode      = "detail"
-
         return self
     end
 
@@ -76,9 +82,7 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- /ns_borderless — переключить рамку клеток (вкл/выкл)
-    --   nil (по умолчанию) → рамка есть
-    --   1                  → рамки нет, клетки сливаются
+    -- /ns_borderless — toggle рамки клеток
     -- ========================================================================
     SLASH_NSBORDERLESS1 = "/ns_borderless"
     SlashCmdList["NSBORDERLESS"] = function()
@@ -97,7 +101,7 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Кнопки в SlashPanel
+    -- SlashPanel-кнопки
     -- ========================================================================
     if NSQC4.SlashPanel_RegisterSectionButton then
         NSQC4.SlashPanel_RegisterSectionButton(
