@@ -6,6 +6,12 @@
 --   "detail"   — обычный вид (10×10 детальных клеток) — по умолчанию.
 --   "overview" — вид сверху (10×10 «больших» квадратов, наш этаж — 1 из 100).
 --                Управляется через QuestsField:ShowOverview/HideOverview/ToggleOverview.
+--
+-- borderless:
+--   nil (по умолчанию) — рамка клеток есть (0.25, 0.25, 0.25, 1).
+--   1                  — рамки нет, клетки сливаются вплотную.
+--   Управляется QuestsField:IsBorderless / SetBorderless (Field/Storage.lua).
+--   Слэш: /ns_borderless — переключить.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -56,6 +62,9 @@ NSQC4.RegisterModule("quests", function()
         order   = 500,
     })
 
+    -- ========================================================================
+    -- /ns_field — показать/скрыть поле
+    -- ========================================================================
     SLASH_NSFIELD1 = "/ns_field"
     SlashCmdList["NSFIELD"] = function()
         local inst = NSQC4.QuestsField
@@ -66,6 +75,30 @@ NSQC4.RegisterModule("quests", function()
         inst:Toggle()
     end
 
+    -- ========================================================================
+    -- /ns_borderless — переключить рамку клеток (вкл/выкл)
+    --   nil (по умолчанию) → рамка есть
+    --   1                  → рамки нет, клетки сливаются
+    -- ========================================================================
+    SLASH_NSBORDERLESS1 = "/ns_borderless"
+    SlashCmdList["NSBORDERLESS"] = function()
+        local inst = NSQC4.QuestsField
+        if not inst or not inst.SetBorderless then
+            print("|cffff0000[NSQC4]|r SetBorderless не загружен.")
+            return
+        end
+        if inst:IsBorderless() then
+            inst:SetBorderless(nil)
+            print("|cff00ff00[NSQC4]|r Рамка клеток: включена.")
+        else
+            inst:SetBorderless(1)
+            print("|cff00ff00[NSQC4]|r Рамка клеток: выключена (клетки вплотную).")
+        end
+    end
+
+    -- ========================================================================
+    -- Кнопки в SlashPanel
+    -- ========================================================================
     if NSQC4.SlashPanel_RegisterSectionButton then
         NSQC4.SlashPanel_RegisterSectionButton(
             "Квесты",
@@ -76,6 +109,15 @@ NSQC4.RegisterModule("quests", function()
                 { text = " " },
                 { text = "ПКМ по полю — рамка, ЛКМ — тянуть",     r = 0.85, g = 0.85, b = 0.85 },
                 { text = "Хэндл справа-снизу — размер",           r = 0.85, g = 0.85, b = 0.85 },
+            }
+        )
+        NSQC4.SlashPanel_RegisterSectionButton(
+            "Квесты",
+            "Б",
+            "/ns_borderless",
+            {
+                { text = "Рамка клеток (toggle)",                 r = 0.85, g = 0.85, b = 0.85 },
+                { text = "nil — есть, 1 — нет (вплотную)",        r = 0.65, g = 0.65, b = 0.65 },
             }
         )
     end

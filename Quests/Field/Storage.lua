@@ -2,6 +2,20 @@
 -- NSQC4 / Quests / Field / Storage
 -- Хранилище nsDbc4.quests.field + API флага и шаблона заполнения.
 -- Модуль: quests.
+--
+-- borderless:
+--   nil (по умолчанию) — рамка клеток есть (0.25, 0.25, 0.25, 1),
+--                        текстура с отступом 1 px (рамка видна).
+--   1                  — рамки нет (0, 0, 0, 0), клетки перекрываются
+--                        (gap -1), текстура на всю клетку (inset 0).
+-- Хранится в nsDbc4.quests.field.borderless. Переживает /reload.
+--
+-- SetBorderless при переключении:
+--   1. Меняет SetBackdropBorderColor у всех клеток.
+--   2. ReflowCells() — пересчитывает gap (-1 или 0).
+--   3. Terrain:Render() — перерисовывает текстуры (inset 0 или 1).
+-- Без шагов 2 и 3 клетки/текстуры останутся в старом состоянии
+-- до следующего ресайза/рендера.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -75,6 +89,49 @@ NSQC4.RegisterModule("quests", function()
         local s = self:EnsureStorage()
         s.template = tpl
         return s.template
+    end
+
+    -- ========================================================================
+    -- API: «без рамки клеток» (borderless).
+    --   nil  → рамка есть (по умолчанию)
+    --   1    → рамки нет (клетки сливаются вплотную)
+    -- Хранится в nsDbc4.quests.field.borderless.
+    -- ========================================================================
+    function QuestsField:IsBorderless()
+        local s = self:EnsureStorage()
+        return s.borderless == 1
+    end
+
+    function QuestsField:SetBorderless(v)
+        local s = self:EnsureStorage()
+        s.borderless = (v == 1) and 1 or nil
+
+        -- 1. Рамка у всех клеток
+        if self.cells then
+            local r, g, b, a
+            if s.borderless == 1 then
+                r, g, b, a = 0, 0, 0, 0
+            else
+                r, g, b, a = 0.25, 0.25, 0.25, 1
+            end
+            for i = 1, #self.cells do
+                local btn = self.cells[i]
+                if btn then
+                    btn:SetBackdropBorderColor(r, g, b, a)
+                end
+            end
+        end
+
+        -- 2. Пересчитать раскладку (gap зависит от borderless)
+        if self.frame and self.ReflowCells then
+            self:ReflowCells()
+        end
+
+        -- 3. Перерисовать текстуры (inset зависит от borderless)
+        local Terrain = NSQC4.QuestsDfTerrain
+        if Terrain and Terrain.Render then
+            Terrain:Render()
+        end
     end
 
 end)

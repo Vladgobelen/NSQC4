@@ -1,6 +1,19 @@
 -- ============================================================================
 -- NSQC4 / Quests / Field / UI / Cells
 -- Создание сетки кнопок и раскладка. Клики не вешает — это Highlight.
+--
+-- BORDERLESS:
+--   При создании клетки рамка (SetBackdropBorderColor) ставится
+--   в зависимости от QuestsField:IsBorderless():
+--     - false (nil) → 0.25, 0.25, 0.25, 1  (рамка есть)
+--     - true  (1)   → 0,    0,    0,    0  (рамки нет)
+--
+--   И в ReflowCells учитывается gap:
+--     - borderless = nil → CELL_GAP (0) — клетки вплотную (визуально
+--       разделены 1 px рамкой)
+--     - borderless = 1   → gap = -1 — клетки перекрываются на 1 px,
+--       чтобы не было даже минимального визуального зазора (рамки нет,
+--       перекрытие «склеивает» клетки)
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -17,19 +30,31 @@ NSQC4.RegisterModule("quests", function()
         return i % COLS, math.floor(i / COLS)
     end
 
+    -- ========================================================================
+    -- Актуальный gap: CELL_GAP (0) по умолчанию,
+    -- при borderless — -1 (клетки перекрываются на 1 px).
+    -- ========================================================================
+    local function EffectiveGap(self)
+        if self:IsBorderless() then return -1 end
+        return CELL_GAP
+    end
+
     function QuestsField:ReflowCells()
         local f = self.frame
         if not f then return end
         local fw, fh = f:GetWidth(), f:GetHeight()
-        local cellW = (fw - GRID_PADDING * 2 - (COLS - 1) * CELL_GAP) / COLS
-        local cellH = (fh - GRID_PADDING * 2 - (ROWS - 1) * CELL_GAP) / ROWS
+        local gap = EffectiveGap(self)
+
+        local cellW = (fw - GRID_PADDING * 2 - (COLS - 1) * gap) / COLS
+        local cellH = (fh - GRID_PADDING * 2 - (ROWS - 1) * gap) / ROWS
+
         for index, btn in pairs(self.cells) do
             local col, row = IndexToColRow(index)
             btn:ClearAllPoints()
             btn:SetSize(cellW, cellH)
             btn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT",
-                GRID_PADDING + col * (cellW + CELL_GAP),
-                GRID_PADDING + row * (cellH + CELL_GAP))
+                GRID_PADDING + col * (cellW + gap),
+                GRID_PADDING + row * (cellH + gap))
         end
     end
 
@@ -44,7 +69,13 @@ NSQC4.RegisterModule("quests", function()
             edgeSize = 1,
         })
         btn:SetBackdropColor(0, 0, 0, 0)
-        btn:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
+
+        -- рамка: по умолчанию 0.25 (есть), если borderless — 0 (нет)
+        if self:IsBorderless() then
+            btn:SetBackdropBorderColor(0, 0, 0, 0)
+        else
+            btn:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
+        end
 
         return btn
     end

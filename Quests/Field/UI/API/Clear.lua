@@ -4,11 +4,15 @@
 -- Клики НЕ трогает — их вешают/снимают модули через Mouse.
 --
 -- РАМКИ:
---   - Якорь существа (btn.anchors[pos]) — БЕЗ рамки (в Anchors.lua
---     SetAnchorBorder больше не вызывается). Здесь рамки якорей не трогаем.
+--   - Якорь существа (btn.anchors[pos]) — БЕЗ рамки.
 --   - Лут (btn._lootTextures + btn._lootBorders) — рамка вокруг каждой
---     лут-текстуры (btn._lootBorders[anchor]). Здесь скрываем и текстуры,
---     и рамки.
+--     лут-текстуры. Здесь скрываем и текстуры, и рамки.
+--
+-- BORDERLESS:
+--   Рамка клетки (SetBackdropBorderColor) выставляется через
+--   QuestsField:IsBorderless():
+--     - false (nil) → 0.25, 0.25, 0.25, 1  (рамка есть)
+--     - true  (1)   → 0,    0,    0,    0  (рамки нет)
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -46,7 +50,7 @@ NSQC4.RegisterModule("quests", function()
             btn.text_hover:Hide()
         end
 
-        -- 4. Иконки-якоря (существо) — без рамок, просто текстуры
+        -- 4. Иконки-якоря (существо) — без рамок
         if btn.anchors then
             for _, anchor in pairs(btn.anchors) do
                 anchor:SetTexture(nil)
@@ -69,8 +73,12 @@ NSQC4.RegisterModule("quests", function()
             end
         end
 
-        -- 6. Рамка кнопки — стандартный вид
-        btn:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
+        -- 6. Рамка кнопки — по IsBorderless()
+        if self:IsBorderless() then
+            btn:SetBackdropBorderColor(0, 0, 0, 0)
+        else
+            btn:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
+        end
 
         -- 7. Ховер-обработчики
         btn._onEnter = nil
