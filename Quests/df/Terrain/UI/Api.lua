@@ -21,6 +21,12 @@
 --          Осмотреть). Без этого нельзя разбудить спящее существо на клетке
 --          с лутом.
 --   - Если существ нет и лута нет — вешаем по terrain (Actions).
+--
+-- ВЫДЕЛЕНИЕ КЛЕТКИ (highlight):
+--   Цвет подсветки выделенной клетки при рендере — HIGHLIGHT_SELECTED.
+--   Сейчас { 0.7, 0.56, 0.0, 1.0 } — на 30% темнее исходного { 1.0, 0.8, 0.0 }.
+--   Применяется через ApplyTint → SetVertexColor на текстуре клетки.
+--   Void — всегда чёрный (отдельный ApplyTint после highlight).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -43,6 +49,13 @@ NSQC4.RegisterModule("quests", function()
     local function dbg(...)
         if UIApi.DEBUG then print("|cff00ffff[TUIA]|r", ...) end
     end
+
+    -- ========================================================================
+    -- Подсветка выделенной клетки (при рендере).
+    --   { R, G, B, A } — умножается на текстуру клетки (SetVertexColor).
+    --   Сейчас — на 30% темнее исходного жёлто-оранжевого {1.0, 0.8, 0.0}.
+    -- ========================================================================
+    local HIGHLIGHT_SELECTED = { 0.7, 0.56, 0.0, 1.0 }
 
     local DEFAULTS = {
         text     = nil,
@@ -102,7 +115,6 @@ NSQC4.RegisterModule("quests", function()
         local all = Drops:GetAll(index)
         if not all or #all == 0 then return nil end
 
-        -- сгруппировать по id
         local counts = {}
         local order = {}
         for _, d in ipairs(all) do
@@ -187,9 +199,6 @@ NSQC4.RegisterModule("quests", function()
         return lines
     end
 
-    -- ========================================================================
-    -- Тултип только клетки (без существа)
-    -- ========================================================================
     local function ShowCellTooltip(index, terrainId)
         local lines = CellLines(index, terrainId)
         if not lines or #lines == 0 then return end
@@ -272,7 +281,7 @@ NSQC4.RegisterModule("quests", function()
                 color     = data.color     or logic.color,
                 textSize  = data.textSize  or logic.textSize,
                 anchors   = data.anchors   or logic.anchors,
-                highlight = selected and { 1.0, 0.8, 0.0, 1.0 } or nil,
+                highlight = selected and HIGHLIGHT_SELECTED or nil,
             })
 
             -- void — чёрный квадрат (WHITE8x8 из Data, затемняем в чёрный)
@@ -303,8 +312,8 @@ NSQC4.RegisterModule("quests", function()
         -- Тултип и клики
         -- ====================================================================
         local sleeping     = entity and entity.opts and entity.opts.sleeping
-        local hasEntity    = entity ~= nil            -- активное ИЛИ спящее
-        local hasActive    = entity and not sleeping  -- только активное
+        local hasEntity    = entity ~= nil
+        local hasActive    = entity and not sleeping
         local hasLoot      = Drops and Drops:HasAny(index) or false
 
         if hasEntity then
@@ -336,9 +345,6 @@ NSQC4.RegisterModule("quests", function()
         -- ЛКМ: лут блокирует выделение (клетку с лутом не выделяем).
         if hasLoot then
             QuestsField:SetCellOnMouseClick(index, "LeftButton", nil)
-            -- ПКМ: если есть существо (даже спящее) — не снимаем,
-            -- чтобы можно было открыть меню (Разбудить/Осмотреть/Спать).
-            -- Если существа нет — снимаем.
             if not hasEntity then
                 QuestsField:SetCellOnMouseClick(index, "RightButton", nil)
                 return true
@@ -346,8 +352,6 @@ NSQC4.RegisterModule("quests", function()
         end
 
         -- Клики по terrain (Actions вешают свои обработчики).
-        -- Для клеток с существом Action-ы сами решают, показать меню
-        -- существа или нет (см. RightClickEntities.lua).
         local Actions = NSQC4.QuestsDfTerrainActions
         local T = Actions and Actions.Types and terrainId and Actions.Types[terrainId]
 
@@ -355,7 +359,6 @@ NSQC4.RegisterModule("quests", function()
             if T.LeftClickSelf then T.LeftClickSelf(index) end
             if T.RightClickEntities then T.RightClickEntities(index) end
         else
-            -- Нет Action для этого terrain — снимаем клики, если не существо
             if not hasEntity then
                 QuestsField:SetCellOnMouseClick(index, "LeftButton",  nil)
                 QuestsField:SetCellOnMouseClick(index, "RightButton", nil)
