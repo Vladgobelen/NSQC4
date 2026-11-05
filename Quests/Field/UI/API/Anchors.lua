@@ -1,24 +1,11 @@
 -- ============================================================================
 -- NSQC4 / Quests / Field / UI / API / Anchors
--- Управление иконками (маркерами) в клетке.
--- Только визуал: SetAnchorTexture, SetAnchorExpanded,
--- ClearAnchorTexture, ClearAnchorTextures.
+-- Иконки существ: OVERLAY/4.
 --
--- ANCHOR_INSET (из NSQC4.QuestsFieldConst.ANCHOR_INSET):
---   Дальность крайних якорей от центра клетки (px).
---     0 — якоря вплотную к краю (как было)
---     > 0 — якоря ближе к центру на N px
---   CENTER не двигается.
---
--- РАЗМЕР ИКОНКИ:
---   size = btn:GetWidth() / 3 - 1  (на 1 px меньше 1/3 клетки)
---
--- РЕСАЙЗ (RefreshAnchorSizes / RefreshAllAnchorSizes):
---   При изменении размера фрейма OnSizeChanged в Frame.lua зовёт
---   RefreshAllAnchorSizes() — пересчитывает SetSize у показанных якорей
---   (без пересоздания текстур и без полного Render). Дёшево.
---
--- Рамка вокруг якоря (SetAnchorBorder) — API, НЕ вызывается из этого файла.
+-- ФИКС (два anchor в одной клетке):
+--   SetAnchorExpanded / SetAnchorTexture перед установкой скрывают ВСЕ
+--   другие позиции в клетке. Раньше TOPLEFT оставался видимым при
+--   развороте в CENTER — два anchor одновременно.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -34,49 +21,96 @@ NSQC4.RegisterModule("quests", function()
         "BOTLEFT", "BOTCENTER", "BOTRIGHT",
     }
 
-    local ANCHOR_SUBLEVEL = 7
+    local ANCHOR_LAYER    = "OVERLAY"
+    local ANCHOR_SUBLEVEL = 4
 
-    -- ========================================================================
-    -- Параметры рамки (API для будущего; не вызывается)
-    -- ========================================================================
-    local BORDER_SIZE  = 1
-    local BORDER_R     = 0.0
-    local BORDER_G     = 0.0
-    local BORDER_B     = 0.0
-    local BORDER_A     = 1.0
-    local BORDER_PAD   = 1
+    local BORDER_SIZE = 1
+    local BORDER_R, BORDER_G, BORDER_B, BORDER_A = 0, 0, 0, 1
+    local BORDER_PAD = 1
 
-    -- ========================================================================
-    -- Ленивое создание якоря (текстуры)
-    -- ========================================================================
+    QuestsField._AnchorDebug = false
+
+    local function dbg(...)
+        if QuestsField._AnchorDebug then
+            print("|cff00ffff[ANCH]|r", ...)
+        end
+    end
+
     local function GetOrCreateAnchor(btn, pos)
         if not btn.anchors then btn.anchors = {} end
         local anchor = btn.anchors[pos]
+
+        if anchor then
+            local ok, layer = pcall(function() return anchor:GetDrawLayer() end)
+            if not ok or layer ~= ANCHOR_LAYER then
+                anchor:Hide()
+                anchor:SetTexture(nil)
+                anchor:ClearAllPoints()
+                anchor = nil
+                btn.anchors[pos] = nil
+            end
+        end
+
         if not anchor then
-            anchor = btn:CreateTexture(nil, "ARTWORK", nil, ANCHOR_SUBLEVEL)
+            anchor = btn:CreateTexture(nil, ANCHOR_LAYER, nil, ANCHOR_SUBLEVEL)
             btn.anchors[pos] = anchor
         end
-        anchor:SetDrawLayer("ARTWORK", ANCHOR_SUBLEVEL)
+
         return anchor
     end
 
     -- ========================================================================
-    -- Позиционирование якоря с учётом ANCHOR_INSET.
+    -- Скрыть все anchor-позиции в клетке, КРОМЕ pos.
     -- ========================================================================
-    local function ApplyAnchorPosition(texture, btn, pos, expanded)
-        texture:ClearAllPoints()
+    local function HideOtherAnchors(btn, pos)
+        if not btn or not btn.anchors then return end
+        for _, other in ipairs(ANCHOR_POSITIONS) do
+            if other ~= pos and btn.anchors[other] then
+                btn.anchors[other]:SetTexture(nil)
+                btn.anchors[other]:Hide()
+            end
+        end
+        if btn._anchorExpanded then
+            for other in pairs(btn._anchorExpanded) do
+                if other ~= pos then btn._anchorExpanded[other] = nil end
+            end
+        end
+    end
+
+    function QuestsField:GetAnchorPos(index, expanded)
+        local btn = self.cells and self.cells[index]
+        if not btn then return nil end
+        local left   = btn:GetLeft()
+        local bottom = btn:GetBottom()
+        local cw     = btn:GetWidth()
+        local ch     = btn:GetHeight()
+        if not left or not bottom or not cw or not ch then return nil end
+
         if expanded then
-            local offX = btn:GetWidth()  * 0.05
-            local offY = btn:GetHeight() * 0.05
-            texture:ClearAllPoints()
-            texture:SetPoint("TOPLEFT",     btn, "TOPLEFT",     offX, -offY)
-            texture:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -offX,  offY)
+            local w, h = cw * 0.9, ch * 0.9
+            return left + cw / 2, bottom + ch / 2, w, h, "CENTER"
         else
-            local size = btn:GetWidth() / 3 - 1
-            texture:SetSize(size, size)
+            local size = cw / 3 - 1
+            local ins  = ANCHOR_INSET
+            local cx   = left + ins + size / 2
+            local cy   = bottom + ch - ins - size / 2
+            return cx, cy, size, size, "TOPLEFT"
+        end
+    end
 
+    local function ApplyAnchorPosition(texture, btn, pos, expanded, anchorIndex)
+        texture:ClearAllPoints()
+
+        local inst = NSQC4.QuestsField
+        if not inst then return end
+        local cx, cy, w, h, apos = inst:GetAnchorPos(anchorIndex, expanded)
+        if not cx then return end
+
+        texture:SetSize(w, h)
+        if expanded then
+            texture:SetPoint("CENTER", btn, "CENTER", 0, 0)
+        else
             local ins = ANCHOR_INSET
-
             if pos == "TOPLEFT" then
                 texture:SetPoint("TOPLEFT", btn, "TOPLEFT", ins, -ins)
             elseif pos == "TOPCENTER" then
@@ -99,53 +133,37 @@ NSQC4.RegisterModule("quests", function()
         end
     end
 
-    -- ========================================================================
-    -- Публичный метод: пересчитать SetSize у показанных якорей клетки.
-    --   Вызывается из Frame.lua OnSizeChanged (RefreshAllAnchorSizes).
-    -- ========================================================================
     function QuestsField:RefreshAnchorSizes(index)
         self:EnsureFrame()
         local btn = self.cells[index]
         if not btn or not btn.anchors then return end
-
-        local size = btn:GetWidth() / 3 - 1
         for _, pos in ipairs(ANCHOR_POSITIONS) do
             local anchor = btn.anchors[pos]
             if anchor and anchor:IsShown() then
-                anchor:SetSize(size, size)
+                local expanded = btn._anchorExpanded and btn._anchorExpanded[pos]
+                ApplyAnchorPosition(anchor, btn, pos, expanded and true or false, index)
             end
         end
     end
 
     function QuestsField:RefreshAllAnchorSizes()
         local n = self.cells and #self.cells or 0
-        for i = 1, n do
-            self:RefreshAnchorSizes(i)
-        end
+        for i = 1, n do self:RefreshAnchorSizes(i) end
     end
 
-    -- ========================================================================
-    -- Рамка вокруг якоря (API, не вызывается из Anchors.lua)
-    -- ========================================================================
     function QuestsField:SetAnchorBorder(index, pos, visible)
         self:EnsureFrame()
         local btn = self.cells[index]
         if not btn then return end
         if not btn.anchors or not btn.anchors[pos] then return end
-
         local anchor = btn.anchors[pos]
-
         if not btn._anchorBorders then btn._anchorBorders = {} end
         local border = btn._anchorBorders[pos]
-
         if visible then
             if not border then
                 border = CreateFrame("Frame", nil, btn)
                 border:SetFrameLevel(btn:GetFrameLevel() + 11)
-                border:SetBackdrop({
-                    edgeFile = "Interface\\Buttons\\WHITE8x8",
-                    edgeSize = BORDER_SIZE,
-                })
+                border:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = BORDER_SIZE })
                 border:SetBackdropColor(0, 0, 0, 0)
                 border:SetBackdropBorderColor(BORDER_R, BORDER_G, BORDER_B, BORDER_A)
                 btn._anchorBorders[pos] = border
@@ -159,65 +177,58 @@ NSQC4.RegisterModule("quests", function()
         end
     end
 
-    -- ========================================================================
-    -- Визуал якоря: текстура 1/3 клетки (expanded = false)
-    -- ========================================================================
     function QuestsField:SetAnchorTexture(index, pos, texture)
         self:EnsureFrame()
         local btn = self.cells[index]
         if not btn then return end
         local anchor = GetOrCreateAnchor(btn, pos)
         if texture then
-            ApplyAnchorPosition(anchor, btn, pos, false)
+            HideOtherAnchors(btn, pos)
+            ApplyAnchorPosition(anchor, btn, pos, false, index)
+            if not btn._anchorExpanded then btn._anchorExpanded = {} end
+            btn._anchorExpanded[pos] = false
             anchor:SetTexture(texture)
             anchor:SetTexCoord(0, 1, 0, 1)
             anchor:SetVertexColor(1, 1, 1, 1)
             anchor:SetAlpha(1)
-            anchor:SetDrawLayer("ARTWORK", ANCHOR_SUBLEVEL)
             anchor:Show()
         else
-            anchor:SetTexture(nil)
-            anchor:Hide()
+            anchor:SetTexture(nil); anchor:Hide()
+            if btn._anchorExpanded then btn._anchorExpanded[pos] = nil end
         end
     end
 
-    -- ========================================================================
-    -- Визуал якоря с явным expanded (true → на всю клетку)
-    -- ========================================================================
     function QuestsField:SetAnchorExpanded(index, pos, texture, expanded)
         self:EnsureFrame()
         local btn = self.cells[index]
         if not btn then return end
         local anchor = GetOrCreateAnchor(btn, pos)
         if texture then
-            ApplyAnchorPosition(anchor, btn, pos, expanded)
+            expanded = expanded and true or false
+            HideOtherAnchors(btn, pos)
+            ApplyAnchorPosition(anchor, btn, pos, expanded, index)
+            if not btn._anchorExpanded then btn._anchorExpanded = {} end
+            btn._anchorExpanded[pos] = expanded
             anchor:SetTexture(texture)
             anchor:SetTexCoord(0, 1, 0, 1)
             anchor:SetVertexColor(1, 1, 1, 1)
             anchor:SetAlpha(1)
-            anchor:SetDrawLayer("ARTWORK", ANCHOR_SUBLEVEL)
             anchor:Show()
         else
-            anchor:SetTexture(nil)
-            anchor:Hide()
+            anchor:SetTexture(nil); anchor:Hide()
+            if btn._anchorExpanded then btn._anchorExpanded[pos] = nil end
         end
     end
 
-    -- ========================================================================
-    -- Очистка одного якоря
-    -- ========================================================================
     function QuestsField:ClearAnchorTexture(index, pos)
         self:EnsureFrame()
         local btn = self.cells[index]
         if not btn or not btn.anchors or not btn.anchors[pos] then return end
         local anchor = btn.anchors[pos]
-        anchor:SetTexture(nil)
-        anchor:Hide()
+        anchor:SetTexture(nil); anchor:Hide()
+        if btn._anchorExpanded then btn._anchorExpanded[pos] = nil end
     end
 
-    -- ========================================================================
-    -- Очистка всех якорей клетки
-    -- ========================================================================
     function QuestsField:ClearAnchorTextures(index)
         self:EnsureFrame()
         local btn = self.cells[index]
@@ -228,5 +239,12 @@ NSQC4.RegisterModule("quests", function()
                 btn.anchors[pos]:Hide()
             end
         end
+        if btn._anchorExpanded then
+            for pos in pairs(btn._anchorExpanded) do
+                btn._anchorExpanded[pos] = nil
+            end
+        end
     end
+
+    print("|cff00ffff[ANCH]|r Anchors загружен (OVERLAY/4, HideOtherAnchors)")
 end)

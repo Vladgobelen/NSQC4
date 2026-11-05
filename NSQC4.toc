@@ -102,6 +102,7 @@ Quests\Field\UI\API\Tooltip.lua
 Quests\df\Grid.lua
 Quests\df\Grid\Hardness.lua
 Quests\df\Grid\Depth.lua
+Quests\df\Grid\Buildings.lua
 Quests\df\Grid\Neighbors.lua
 
 # --- Реестр профессий (плоский список имён для known_skills) ---
@@ -115,6 +116,7 @@ Quests\df\Professions\Lumberjack.lua
 Quests\df\Professions\Stonecutter.lua
 Quests\df\Professions\Herbalist.lua
 Quests\df\Professions\Swimmer.lua
+Quests\df\Professions\Builder.lua
 
 # --- Ландшафт: данные типов ---
 Quests\df\Terrain\Data\Init.lua
@@ -160,6 +162,7 @@ Quests\df\Entities\Storage.lua
 Quests\df\Entities\Tooltip.lua
 Quests\df\Entities\UI\Api.lua
 Quests\df\Entities\UI\Animate.lua
+Quests\df\Entities\UI\Anchors.lua
 
 # --- TerrainActions (8 типов × 4 файла) ---
 Quests\df\Actions\Terrain\Init.lua

@@ -1,19 +1,7 @@
 -- ============================================================================
 -- NSQC4 / Quests / Field / UI / Cells
--- Создание сетки кнопок и раскладка. Клики не вешает — это Highlight.
---
--- BORDERLESS:
---   При создании клетки рамка (SetBackdropBorderColor) ставится
---   в зависимости от QuestsField:IsBorderless():
---     - false (nil) → 0.25, 0.25, 0.25, 1  (рамка есть)
---     - true  (1)   → 0,    0,    0,    0  (рамки нет)
---
---   И в ReflowCells учитывается gap:
---     - borderless = nil → CELL_GAP (0) — клетки вплотную (визуально
---       разделены 1 px рамкой)
---     - borderless = 1   → gap = -1 — клетки перекрываются на 1 px,
---       чтобы не было даже минимального визуального зазора (рамки нет,
---       перекрытие «склеивает» клетки)
+-- cell.bg — подложка под ladder, BACKGROUND -1 (ниже ландшафта LOW).
+--   Создаётся один раз в CreateCell. Show/Hide — из Terrain/UI/Api.lua.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -30,10 +18,6 @@ NSQC4.RegisterModule("quests", function()
         return i % COLS, math.floor(i / COLS)
     end
 
-    -- ========================================================================
-    -- Актуальный gap: CELL_GAP (0) по умолчанию,
-    -- при borderless — -1 (клетки перекрываются на 1 px).
-    -- ========================================================================
     local function EffectiveGap(self)
         if self:IsBorderless() then return -1 end
         return CELL_GAP
@@ -70,12 +54,18 @@ NSQC4.RegisterModule("quests", function()
         })
         btn:SetBackdropColor(0, 0, 0, 0)
 
-        -- рамка: по умолчанию 0.25 (есть), если borderless — 0 (нет)
         if self:IsBorderless() then
             btn:SetBackdropBorderColor(0, 0, 0, 0)
         else
             btn:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
         end
+
+        -- Подложка под ladder — BACKGROUND -1 (ниже ландшафта LOW).
+        btn.bg = btn:CreateTexture(nil, "BACKGROUND", nil, -1)
+        btn.bg:SetTexture("Interface\\Buttons\\WHITE8x8")
+        btn.bg:SetVertexColor(0, 0, 0, 1)
+        btn.bg:SetAllPoints(btn)
+        btn.bg:Hide()
 
         return btn
     end

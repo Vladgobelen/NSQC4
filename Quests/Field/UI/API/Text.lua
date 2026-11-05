@@ -1,6 +1,10 @@
 -- ============================================================================
 -- NSQC4 / Quests / Field / UI / API / Text
 -- Управление текстом клетки (основной и при наведении).
+--
+-- В WoW 3.3.5 SetDrawLayer принимает ТОЛЬКО имя слоя (без subLevel).
+-- Порядок текстов внутри одного слоя — по порядку создания:
+-- text_main создаётся первым, text_hover — вторым (значит выше).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -12,24 +16,18 @@ NSQC4.RegisterModule("quests", function()
         local btn = self.cells[index]
         if not btn then return end
 
-        -- Ленивое создание основного текста (слой OVERLAY, subLevel 1)
+        -- Основной текст (создаётся первым — ниже)
         if not btn.text_main then
             btn.text_main = btn:CreateFontString(nil, "OVERLAY")
-            btn.text_main:SetDrawLayer("OVERLAY", 1) -- жёсткая фиксация слоя
             btn.text_main:SetPoint("CENTER", 0, 0)
             btn.text_main:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
-        else
-            btn.text_main:SetDrawLayer("OVERLAY", 1)
         end
 
-        -- Ленивое создание текста при наведении (слой OVERLAY, subLevel 2 — над основным)
+        -- Текст при наведении (создаётся вторым — выше)
         if not btn.text_hover then
             btn.text_hover = btn:CreateFontString(nil, "OVERLAY")
-            btn.text_hover:SetDrawLayer("OVERLAY", 2) -- жёсткая фиксация слоя
             btn.text_hover:SetPoint("CENTER", 0, 0)
             btn.text_hover:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
-        else
-            btn.text_hover:SetDrawLayer("OVERLAY", 2)
         end
 
         -- Настройка основного текста

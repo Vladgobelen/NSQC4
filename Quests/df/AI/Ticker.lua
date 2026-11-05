@@ -3,14 +3,14 @@
 -- Один глобальный OnUpdate. Раз в INTERVAL секунд проходит по всем
 -- клеткам Grid и для каждого существа зовёт AI:TickEntity(entity).
 --
--- ВАЖНО: чтобы существа с подходящей профессией не уступали клетки
--- существам без профессии, мы делаем ДВА ПРОХОДА за тик:
---   1. Сначала тикают существа, у которых есть профессия под выделенную
---      клетку (они резервируют "свои" клетки).
---   2. Затем тикают все остальные (они берут то, что осталось).
+-- ПРИОРИТЕТ (два прохода):
+--   1. withProf — существа, у которых есть «своя» профессия:
+--        - под СТРОЙКУ (builder) — если есть недостроенные buildings;
+--        - под выделенную клетку (Find:HasProfForSelected).
+--      Они тикают ПЕРВЫМИ и резервируют «свои» клетки (buildings).
+--   2. withoutProf — все остальные. Им достаётся то, что осталось.
 --
--- ФИКС: frame:Show() в EnsureFrame — без Show OnUpdate на скрытом фрейме
--- не тикает.
+-- ФИКС: frame:Show() в EnsureFrame — без Show OnUpdate не тикает.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -54,6 +54,18 @@ NSQC4.RegisterModule("quests", function()
         local Find = NSQC4.QuestsDfAIFind
         local withProf, withoutProf = {}, {}
 
+        -- Есть ли недостроенные постройки?
+        local hasBuildings = false
+        if Grid.GetAllBuildings then
+            local b = Grid:GetAllBuildings()
+            for _, rec in pairs(b) do
+                if rec and tonumber(rec.hp) and tonumber(rec.max) and rec.hp < rec.max then
+                    hasBuildings = true
+                    break
+                end
+            end
+        end
+
         -- 1. Разделяем существ на две группы
         for i = 1, TOTAL do
             local entity = Grid:GetEntity(i)
@@ -70,7 +82,7 @@ NSQC4.RegisterModule("quests", function()
             end
         end
 
-        -- 2. Сначала тикают "профи" — они забирают свои клетки
+        -- 2. Сначала тикают «профи» — они забирают свои клетки
         for _, entity in ipairs(withProf) do
             AI:TickEntity(entity)
         end

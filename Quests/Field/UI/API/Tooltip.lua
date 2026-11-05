@@ -2,6 +2,10 @@
 -- NSQC4 / Quests / Field / UI / API / Tooltip
 -- API поля: регистрация/снятие тултипа на клетке.
 --
+-- ФИКС: SetCellTooltip кладёт tooltipFn в btn._tooltipFn. Это позволяет
+-- Hover.lua перерисовывать тултип автоматически, пока мышь на работающем
+-- существе (см. Field/UI/API/Hover.lua → RefreshTooltip).
+--
 -- Вызывающий код знает клетку и код тултипа:
 --   QuestsField:SetCellTooltip(index, function(btn)
 --       GameTooltip:AddLine("Имя", 1, 1, 0)
@@ -16,9 +20,6 @@
 --
 -- Снятие:
 --   QuestsField:ClearCellTooltip(index)
---
--- Хендлеры OnEnter/OnLeave вешаются через Hover.lua
--- (SetCellOnEnter / SetCellOnLeave) — не дублируем скрипты.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -36,6 +37,9 @@ NSQC4.RegisterModule("quests", function()
         if not btn then return false end
 
         if tooltipFn then
+            -- сохранить в btn — Hover будет звать при авто-обновлении
+            btn._tooltipFn = tooltipFn
+
             self:SetCellOnEnter(index, function(b)
                 GameTooltip:SetOwner(b, "ANCHOR_RIGHT")
                 tooltipFn(b)
@@ -45,6 +49,7 @@ NSQC4.RegisterModule("quests", function()
                 GameTooltip:Hide()
             end)
         else
+            btn._tooltipFn = nil
             self:SetCellOnEnter(index, nil)
             self:SetCellOnLeave(index, nil)
         end
@@ -60,12 +65,11 @@ NSQC4.RegisterModule("quests", function()
         local btn = self.cells and self.cells[index]
         if not btn then return false end
 
+        btn._tooltipFn = nil
         self:SetCellOnEnter(index, nil)
         self:SetCellOnLeave(index, nil)
 
-        -- На случай, если тултип был открыт в момент снятия
         GameTooltip:Hide()
-
         return true
     end
 
@@ -75,6 +79,6 @@ NSQC4.RegisterModule("quests", function()
     function QuestsField:HasCellTooltip(index)
         local btn = self.cells and self.cells[index]
         if not btn then return false end
-        return btn._onEnter ~= nil
+        return btn._tooltipFn ~= nil
     end
 end)

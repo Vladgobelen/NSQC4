@@ -1,25 +1,34 @@
 -- ============================================================================
 -- NSQC4 / Quests / df / AI / Move
--- Передвижение существа по маршруту. Скорость — по абсолютной выносливости.
+-- Движение от штатной точки к штатной точке.
 --
--- CanStepInto(nextIndex, entity):
---   - void        → нельзя
---   - water       → только если entity умеет плавать (Resolve:CanSwim)
---   - занято другим существом (не целью) → нельзя
+-- ШТАТНЫЕ ТОЧКИ (единое правило, GetAnchorPos):
+--   свёрнутая  (expanded=false) — TOPLEFT + ins + size/2   (верхний левый угол)
+--   развёрнутая (expanded=true) — центр клетки
 --
--- ФИКС: даже если клетка-цель — void, шагать в неё нельзя.
--- Раньше проверка IsPassable пропускалась для isTarget, и существо
--- уходило в void, где Grid:SetEntity молча не ставил его — существо «пропадало».
+-- ЕДИНЫЙ ИСТОЧНИК ИСТИНЫ:
+--   entity.posX / entity.posY — позиция в координатах поля.
+--   entity.opts.expanded      — флаг размера.
+--   Текстура (temp/anchor) — чистая функция от них (см. Entities/UI/Api).
 --
--- Вода: проверка через Resolve:CanSwim(entity). Если Resolve не загружен
--- (например, при раннем старте) — вода считается непроходимой (безопасно).
+-- СМЕНА expanded В ПУТИ:
+--   Пересчитываем stepStart/stepEnd по новому expanded и корректируем
+--   stepStartedAt так, чтобы posX/posY в момент смены не изменились.
+--
+-- ЗАВЕРШЕНИЕ ШАГА (t >= 1):
+--   ПОРЯДОК ВАЖЕН: сначала обновляем данные (entity.index, posX/posY,
+--   ResetStep, Grid:SetEntityName), ПОТОМ один раз перерисовываем.
+--   Раньше StopMoving(to) звался ДО SetEntityName(to) — Api:Render для `to`
+--   не находил существа и рисовал пустую клетку → иконка «пропадала на
+--   секунду» до следующего тика. Теперь — нет.
+--
+-- stepTime = 100 − 99 × (vitality / 100)  секунд на клетку.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
 
     local Move = {}
     NSQC4.QuestsDfAIMove = Move
-
     Move.DEBUG = false
 
     local function dbg(...)
@@ -32,143 +41,241 @@ NSQC4.RegisterModule("quests", function()
         return
     end
 
+    local QuestsField = NSQC4.QuestsField
+
     function Move:StepTime(entity)
         if not entity or not entity.opts then return 100 end
-        local opts = entity.opts
-
-        local vit = tonumber(opts.vitality) or 0
+        local vit = tonumber(entity.opts.vitality) or 0
         local pct = vit / 100
         if pct < 0 then pct = 0 elseif pct > 1 then pct = 1 end
-
-        local t = 100 - 99 * pct
-
-        dbg(string.format("step %s vit=%s pct=%.3f stepTime=%.2fs",
-            tostring(entity.id), tostring(vit), pct, t))
-        return t
+        return 100 - 99 * pct
     end
 
-    -- ========================================================================
-    -- Проверка: можно ли шагнуть в nextIndex (в т.ч. цель).
-    --   entity — существо, которое шагает. Нужно, чтобы:
-    --     - вода была проходима только для пловца
-    --     - «занято другим» не считалось препятствием для цели
-    -- ========================================================================
     local function CanStepInto(nextIndex, entity)
         local c = Grid:GetCell(nextIndex)
         if not c then return false end
-
-        -- void — никогда
         if c.terrain == "void" then return false end
-
-        -- water — только для пловца
         if c.terrain == "water" then
             local Resolve = NSQC4.QuestsDfProfessionsResolve
-            local canSwim = false
-            if entity and Resolve and Resolve.CanSwim then
-                canSwim = Resolve:CanSwim(entity) and true or false
-            end
+            local canSwim = Resolve and Resolve.CanSwim and Resolve:CanSwim(entity) or false
             if not canSwim then return false end
         end
+        if c.entityName then
+            local me = entity.opts and entity.opts.name
+            if not me or c.entityName ~= me then return false end
+        end
+        return true
+    end
 
+    function Move:ResetStep(entity)
+        if not entity then return end
+        entity.nextIndex     = nil
+        entity.stepStartX    = nil; entity.stepStartY = nil
+        entity.stepEndX      = nil; entity.stepEndY   = nil
+        entity.stepStartedAt = nil; entity.stepDuration = nil
+        entity.stepExpanded  = nil
+    end
+
+    local function IsExpanded(entity)
+        return entity and entity.opts and entity.opts.expanded and true or false
+    end
+
+    -- ========================================================================
+    -- Зафиксировать начало шага: точки старта/финиша по ТЕКУЩЕМУ expanded.
+    -- ========================================================================
+    local function BeginStep(entity, nextIndex, expanded)
+        local sX, sY = QuestsField:GetAnchorPos(entity.index, expanded)
+        local eX, eY = QuestsField:GetAnchorPos(nextIndex, expanded)
+        if not sX or not eX then return false end
+
+        local EntitiesApi = NSQC4.QuestsDfEntitiesUIApi
+        if EntitiesApi and EntitiesApi.HideAnchorAt then
+            EntitiesApi:HideAnchorAt(entity.index)
+        end
+
+        entity.nextIndex     = nextIndex
+        entity.stepStartX    = sX
+        entity.stepStartY    = sY
+        entity.stepEndX      = eX
+        entity.stepEndY      = eY
+        entity.stepStartedAt = GetTime()
+        entity.stepDuration  = Move:StepTime(entity)
+        entity.stepExpanded  = expanded
+        entity.posX          = sX
+        entity.posY          = sY
+        return true
+    end
+
+    -- ========================================================================
+    -- Пересчитать штатные точки шага под НОВЫЙ expanded, сохранив
+    -- текущую позицию posX/posY и долю прохождения t.
+    -- ========================================================================
+    local function RebaseStepForExpanded(entity, expanded)
+        if not entity.nextIndex then return end
+        if not entity.stepStartX then return end
+
+        local Px, Py = entity.posX, entity.posY
+        if not Px or not Py then return end
+
+        local sX, sY = QuestsField:GetAnchorPos(entity.index, expanded)
+        local eX, eY = QuestsField:GetAnchorPos(entity.nextIndex, expanded)
+        if not sX or not eX then return end
+
+        local dx, dy = (eX - sX), (eY - sY)
+        local len2 = dx * dx + dy * dy
+
+        local tNew
+        if len2 <= 0.0001 then
+            tNew = 0
+            entity.posX = sX
+            entity.posY = sY
+        else
+            local tRaw = ((Px - sX) * dx + (Py - sY) * dy) / len2
+            if tRaw < 0 then tRaw = 0 elseif tRaw > 1 then tRaw = 1 end
+            tNew = tRaw
+        end
+
+        local now = GetTime()
+        local dur = entity.stepDuration or 1
+        if dur <= 0 then dur = 1 end
+
+        entity.stepStartX    = sX
+        entity.stepStartY    = sY
+        entity.stepEndX      = eX
+        entity.stepEndY      = eY
+        entity.stepStartedAt = now - tNew * dur
+
+        entity.posX = sX + (eX - sX) * tNew
+        entity.posY = sY + (eY - sY) * tNew
+
+        dbg(string.format("rebase expanded=%s t=%.3f pos=(%.1f,%.1f)",
+            tostring(expanded), tNew, entity.posX, entity.posY))
+    end
+
+    function Move:SyncExpanded(entity)
+        if not entity or not entity.nextIndex then return false end
+        RebaseStepForExpanded(entity, IsExpanded(entity))
         return true
     end
 
     function Move:Advance(entity)
         if not entity or not entity.opts then return nil end
-
         local ai = entity.opts.ai
         if not ai or not ai.path or not ai.pathIdx then return nil end
+        if not ai.target then
+            ai.path = nil; ai.pathIdx = nil
+            return nil
+        end
 
         local path = ai.path
-        local idx  = ai.pathIdx
+        local name = entity.opts.name or entity.id
+        local now  = GetTime()
+        local EntitiesApi = NSQC4.QuestsDfEntitiesUIApi
 
-        if idx >= #path then
-            return "arrived"
-        end
+        -- --------------------------------------------------------------
+        -- Старт нового шага
+        -- --------------------------------------------------------------
+        if not entity.nextIndex then
+            if ai.pathIdx >= #path then return "arrived" end
+            if ai.nextStepAt and now < ai.nextStepAt then return "wait" end
 
-        local now = GetTime()
-        if ai.nextStepAt and now < ai.nextStepAt then
-            dbg(string.format("wait %s now=%.2f nextStepAt=%.2f left=%.2fs",
-                tostring(entity.id), now, ai.nextStepAt, ai.nextStepAt - now))
-            return "wait"
-        end
-
-        local nextIndex = path[idx + 1]
-        if not nextIndex then return nil end
-
-        local isTarget = (idx + 1 == #path)
-
-        -- ФИКС: цель тоже должна быть не-void и (для не-пловца) не-water.
-        -- entity передаём в CanStepInto — там проверка воды по Resolve:CanSwim.
-        if not CanStepInto(nextIndex, entity) then
-            dbg(string.format("blocked %s next=%d (void/water без пловца/нет клетки)",
-                tostring(entity.id), nextIndex))
-            ai.path = nil
-            ai.pathIdx = nil
-            return nil
-        end
-
-        -- Для не-цели — стандартная проверка проходимости (нет существа)
-        if not isTarget then
-            local c = Grid:GetCell(nextIndex)
-            if c and c.entityName and c.entityName ~= entity.opts.name then
-                dbg(string.format("blocked %s next=%d (occupied by %s)",
-                    tostring(entity.id), nextIndex, tostring(c.entityName)))
-                ai.path = nil
-                ai.pathIdx = nil
+            local nxt = path[ai.pathIdx + 1]
+            if not nxt then return nil end
+            if not CanStepInto(nxt, entity) then
+                ai.path = nil; ai.pathIdx = nil
                 return nil
             end
+
+            local expanded = IsExpanded(entity)
+            if not BeginStep(entity, nxt, expanded) then return nil end
+
+            dbg(string.format("%s: start %s → %s exp=%s dur=%.2f",
+                tostring(name), tostring(entity.index), tostring(nxt),
+                tostring(expanded), entity.stepDuration))
         end
 
-        local fromIndex = entity.index
-        local stepTime  = self:StepTime(entity)
+        -- --------------------------------------------------------------
+        -- СМЕНА expanded В ПУТИ: если флаг разошёлся с геометрией шага —
+        -- пересчитать концы и t без рывка.
+        -- --------------------------------------------------------------
+        local curExpanded = IsExpanded(entity)
+        if entity.stepExpanded ~= curExpanded then
+            RebaseStepForExpanded(entity, curExpanded)
+            entity.stepExpanded = curExpanded
+        end
 
-        -- 1. Данные
-        Grid:SetEntity(fromIndex, nil)
-        entity.index = nextIndex
-        Grid:SetEntity(nextIndex, entity)
+        local t = (now - entity.stepStartedAt) / entity.stepDuration
+        if t >= 1 then t = 1 end
 
-        -- Страховка: если SetEntity не записал (например, terrain стал void
-        -- между проверкой и записью) — откатываем.
-        if not Grid:GetEntity(nextIndex) then
-            entity.index = fromIndex
-            if fromIndex then
-                Grid:SetEntity(fromIndex, entity)
+        local x = entity.stepStartX + (entity.stepEndX - entity.stepStartX) * t
+        local y = entity.stepStartY + (entity.stepEndY - entity.stepStartY) * t
+        entity.posX = x
+        entity.posY = y
+
+        if EntitiesApi and EntitiesApi.MoveAnchor then
+            EntitiesApi:MoveAnchor(entity, x, y)
+        end
+
+        -- --------------------------------------------------------------
+        -- ЗАВЕРШЕНИЕ ШАГА
+        -- Порядок: СНАЧАЛА данные, ПОТОМ рендер.
+        -- --------------------------------------------------------------
+        if t >= 1 then
+            local from = entity.index
+            local to   = entity.nextIndex
+
+            -- 1. Данные: позиция, сброс шага, имена в Grid.
+            entity.index = to
+            entity.posX  = entity.stepEndX
+            entity.posY  = entity.stepEndY
+            self:ResetStep(entity)   -- nextIndex=nil, step*=nil, stepExpanded=nil
+
+            Grid:SetEntityName(from, nil)
+            Grid:SetEntityName(to, entity.opts and entity.opts.name)
+
+            ai.pathIdx    = ai.pathIdx + 1
+            ai.nextStepAt = nil
+
+            -- 2. Рендер: StopMoving видит согласованное состояние
+            --    (entity.index=to, nextIndex=nil, Grid:GetEntity(to)=entity)
+            --    и рисует anchor в `to`, а не пустую клетку.
+            if EntitiesApi and EntitiesApi.StopMoving then
+                EntitiesApi:StopMoving(entity, to)
             end
-            ai.path = nil
-            ai.pathIdx = nil
-            dbg(string.format("rollback %s: SetEntity(%d) не записал", tostring(entity.id), nextIndex))
-            return nil
+            -- `from` гарантированно очистить (на случай, если там остался
+            -- temp/anchor от предыдущего шага).
+            if EntitiesApi and EntitiesApi.RenderCellFromStorage then
+                EntitiesApi:RenderCellFromStorage(from)
+            end
+
+            local Stats = NSQC4.QuestsDfAIStats
+            if Stats and Stats.TryUpVitality then Stats:TryUpVitality(entity) end
+
+            if ai.pathIdx >= #path then return "arrived" end
+            return "moved"
         end
 
-        -- 2. Анимация
-        local Animate = NSQC4.QuestsDfEntitiesAnimate
-        if Animate and fromIndex and nextIndex then
-            Animate:Start(entity.id, {
-                icon     = entity.opts.icon or entity.opts.texture,
-                anchor   = "TOPLEFT",
-                expanded = entity.opts.expanded,
-                alpha    = entity.opts.alpha,
-            }, fromIndex, nextIndex, stepTime)
-        end
-
-        -- 3. Путь и таймер
-        ai.pathIdx    = idx + 1
-        ai.nextStepAt = now + stepTime
-
-        -- 4. Прокачка живучести при шаге
-        local Stats = NSQC4.QuestsDfAIStats
-        if Stats and Stats.TryUpVitality then
-            Stats:TryUpVitality(entity)
-        end
-
-        dbg(string.format("move %s %d -> %d  stepTime=%.2fs",
-            tostring(entity.id), fromIndex or 0, nextIndex, stepTime))
-
-        if ai.pathIdx >= #path then
-            return "arrived"
-        end
-        return "moved"
+        return "moving"
     end
 
+    SLASH_NSMOVE1 = "/ns_move"
+    SlashCmdList["NSMOVE"] = function(msg)
+        local cmd = (msg or ""):lower():match("^(%S*)")
+        if cmd == "" or cmd == "on" then Move.DEBUG = true; print("[MOVE] DEBUG = true")
+        elseif cmd == "off" then Move.DEBUG = false; print("[MOVE] DEBUG = false")
+        elseif cmd == "dump" then
+            local Entities = NSQC4.QuestsDfEntities
+            if not Entities then return end
+            for _, e in ipairs(Entities:GetAll()) do
+                local ai = e.opts and e.opts.ai
+                if ai then
+                    print(string.format("[MOVE] %s idx=%s next=%s pos=(%.1f,%.1f) exp=%s state=%s",
+                        tostring(e.opts.name), tostring(e.index), tostring(e.nextIndex),
+                        e.posX or -1, e.posY or -1, tostring(e.opts.expanded), tostring(ai.state)))
+                end
+            end
+        else print("[MOVE] /ns_move on | off | dump") end
+    end
+
+    print("|cff00ffff[MOVE]|r Move загружен (штатные точки, rebase при смене expanded, без пропадания на финише)")
 end)

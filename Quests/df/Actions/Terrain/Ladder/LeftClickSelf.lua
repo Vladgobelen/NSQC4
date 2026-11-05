@@ -1,10 +1,11 @@
 -- ============================================================================
 -- NSQC4 / Quests / df / Actions / Terrain / Ladder / LeftClickSelf
 -- ЛКМ по ladder:
---   1. Есть активное существо → LeftClickEntities
---   2. Иначе:
---      - есть лут → ничего
---      - нет лута → toggle выделения ladder
+--   1. Активное существо → LeftClickEntities (развернуть/свернуть).
+--   2. Лут → не выделяем.
+--   3. Toggle выделения. Сообщение — по hp/max:
+--        hp >= max → готова
+--        hp <  max → задача на постройку
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -31,6 +32,7 @@ NSQC4.RegisterModule("quests", function()
             local entity = Grid and Grid:GetEntity(idx)
             local sleeping = entity and entity.opts and entity.opts.sleeping
 
+            -- 1. Активное существо → ему
             if entity and not sleeping then
                 local T = NSQC4.QuestsDfTerrainActions
                           and NSQC4.QuestsDfTerrainActions.Types
@@ -41,11 +43,11 @@ NSQC4.RegisterModule("quests", function()
                 return false
             end
 
+            -- 2. Лут блокирует выделение
             local hasLoot = Drops and Drops:HasAny(idx) or false
-            if hasLoot then
-                return false
-            end
+            if hasLoot then return false end
 
+            -- 3. Toggle выделения + сообщение по hp/max
             local cell = QuestsField.cells and QuestsField.cells[idx]
             if not Grid then return false end
 
@@ -56,13 +58,25 @@ NSQC4.RegisterModule("quests", function()
                 if cell and cell.texture then
                     cell.texture:SetVertexColor(1, 1, 1, 1)
                 end
-                print("|cffff8800[NSQC4]|r Снято выделение ladder в клетке " .. idx)
+                print("|cffff8800[NSQC4]|r Снято выделение ladder в клетке " .. idx ..
+                      " — не трогают.")
             else
                 Grid:SetTerrainSelected(idx, "ladder", true)
                 if cell and cell.texture then
                     cell.texture:SetVertexColor(0.5, 0.5, 0.5, 1)
                 end
-                print("|cff00ff00[NSQC4]|r Выделено ladder в клетке " .. idx)
+
+                local b   = Grid:GetBuilding(idx)
+                local hp  = b and tonumber(b.hp)  or 0
+                local max = b and tonumber(b.max) or 1000
+
+                if hp >= max then
+                    print("|cff00ff00[NSQC4]|r Выделено ladder в клетке " .. idx ..
+                          " — готова (спуск/подъём).")
+                else
+                    print("|cff00ff00[NSQC4]|r Выделено ladder в клетке " .. idx ..
+                          " — задача на ПОСТРОЙКУ (hp < max).")
+                end
             end
 
             return true

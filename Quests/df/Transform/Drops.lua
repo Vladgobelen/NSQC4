@@ -1,30 +1,19 @@
 -- ============================================================================
 -- NSQC4 / Quests / df / Transform / Drops
--- Лут в клетке: хранение в лут-якорях (все 9, кроме TOPLEFT) + рендер.
+-- Лут: слой OVERLAY.
 --
---   cell.loot = { [anchor] = { id, icon }, ... }   -- занятые лут-якоря
+-- ЕДИНОЕ ПРАВИЛО: у всех лут-якорей одна логика размера/слоя/позиции.
+-- Текстура берётся по d.id из таблицы ICON_BY_ID (fallback → d.icon → nil).
 --
--- TOPLEFT — под существо, лут туда НЕ кладётся.
+-- ПОРЯДОК СЛОЁВ (все — текстуры на btn, один frame level btn+10):
+--   sublevel 2 — бордер лута (4 тонкие текстуры)
+--   sublevel 3 — иконка лута
+--   sublevel 4 — anchor существа (Anchors.lua)
+--   sublevel 5 — temp существа (Entities/UI/Api.lua)
 --
--- ANCHOR_INSET (из NSQC4.QuestsFieldConst.ANCHOR_INSET):
---   Дальность крайних лут-якорей от центра клетки (px).
---   CENTER не двигается.
---
--- РАЗМЕР ИКОНКИ ЛУТА:
---   size = btn:GetWidth() / 3 - 2  (на 2 px меньше 1/3 клетки)
---
--- РЕСАЙЗ (RefreshAllLootSizes):
---   При изменении размера фрейма OnSizeChanged в Frame.lua зовёт
---   RefreshAllLootSizes() — пересчитывает SetSize у показанных лут-текстур
---   (без пересоздания, без полного Render). Дёшево.
---
--- РАМКА ВОКРУГ ЛУТ-ЯКОРЯ:
---   Каждый лут (ARTWORK/7) обёрнут рамкой (Frame с backdrop WHITE8x8,
---   edgeSize = BORDER_SIZE). Создаётся в btn._lootBorders[anchor] — вокруг
---   лут-текстуры (tex).
---
--- ОТЛАДКА:
---   /ns_drops on | off | dump | params
+-- РАНЬШЕ бордер лута был ФРЕЙМОМ btn+11 — выше любых текстур btn+10,
+-- поэтому существа оказывались ПОД дропами. Теперь бордер — текстуры
+-- с sublevel 2, и всё в одном frame level: лут < anchor < temp.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -33,60 +22,51 @@ NSQC4.RegisterModule("quests", function()
     NSQC4.QuestsDfTransformDrops = Drops
 
     local QuestsField = NSQC4.QuestsField
-    if not QuestsField then
-        print("|cffff0000[NSQC4]|r Transform/Drops: поле не загружено.")
-        return
-    end
+    if not QuestsField then return end
 
     local Grid = NSQC4.QuestsDfGrid
-    if not Grid then
-        print("|cffff0000[NSQC4]|r Transform/Drops: Grid не загружен.")
-        return
-    end
+    if not Grid then return end
 
     local CONST = NSQC4.QuestsFieldConst
     local TOTAL = CONST and (CONST.COLS * CONST.ROWS) or 100
-
     local ANCHOR_INSET = CONST and CONST.ANCHOR_INSET or 0
+
+    local IMG = "Interface\\AddOns\\NSQC4\\Media\\Images\\"
+
+    -- Единая таблица иконок по id дропа
+    local ICON_BY_ID = {
+        wood  = IMG .. "00t",
+        stone = IMG .. "0ka",
+        herb  = IMG .. "00f",
+        earth = IMG .. "00z",
+    }
 
     local LOOT_ANCHORS = {
         "TOPCENTER", "TOPRIGHT",
         "MIDLEFT",   "CENTER",    "MIDRIGHT",
         "BOTLEFT",   "BOTCENTER", "BOTRIGHT",
     }
-
     Drops.LOOT_ANCHORS = LOOT_ANCHORS
 
-    -- ========================================================================
-    -- Параметры рамки вокруг лут-текстуры (константы — как у тебя)
-    -- ========================================================================
-    local LOOT_SUBLEVEL  = 7
-    local BORDER_SIZE    = 1
-    local BORDER_R       = 0.0
-    local BORDER_G       = 0.0
-    local BORDER_B       = 0.0
-    local BORDER_A       = 1.0
-    local BORDER_PAD     = 1
+    local LOOT_LAYER    = "OVERLAY"
+    local LOOT_SUBLEVEL = 3
 
-    -- ========================================================================
-    -- Отладка
-    -- ========================================================================
+    local BORDER_LAYER    = "OVERLAY"
+    local BORDER_SUBLEVEL = 2      -- ниже лута(3), anchor(4), temp(5)
+    local BORDER_SIZE     = 1
+
     Drops.DEBUG = false
 
     local function dbg(...)
         if Drops.DEBUG then print("|cff00ffff[DROPS]|r", ...) end
     end
 
-    local function dbgAlways(...)
-        print("|cff00ffff[DROPS]|r", ...)
-    end
-
-    local function DumpParams()
-        dbgAlways(string.format(
-            "params: ANCHOR_INSET=%s  LOOT_SUBLEVEL=%d  BORDER_SIZE=%s  BORDER_PAD=%s  BORDER_RGBA=%s,%s,%s,%s",
-            tostring(ANCHOR_INSET),
-            LOOT_SUBLEVEL, tostring(BORDER_SIZE), tostring(BORDER_PAD),
-            tostring(BORDER_R), tostring(BORDER_G), tostring(BORDER_B), tostring(BORDER_A)))
+    -- Единый резолвер иконки: ICON_BY_ID[id] → d.icon → nil
+    local function ResolveIcon(d)
+        if not d then return nil end
+        if d.id and ICON_BY_ID[d.id] then return ICON_BY_ID[d.id] end
+        if d.icon then return d.icon end
+        return nil
     end
 
     local function EnsureLoot(index)
@@ -96,9 +76,6 @@ NSQC4.RegisterModule("quests", function()
         return c.loot
     end
 
-    -- ========================================================================
-    -- Свободные лут-якоря клетки
-    -- ========================================================================
     function Drops:FreeAnchors(index)
         local c = Grid:GetCell(index)
         if not c then return {} end
@@ -126,19 +103,51 @@ NSQC4.RegisterModule("quests", function()
         return n
     end
 
-    function Drops:Add(index, id, icon)
+    function Drops:CountAllById(id)
+        if not id then return 0 end
+        local n = 0
+        for i = 1, TOTAL do
+            local c = Grid:GetCell(i)
+            if c and c.loot then
+                for _, d in pairs(c.loot) do
+                    if d.id == id then n = n + 1 end
+                end
+            end
+        end
+        return n
+    end
+
+    function Drops:TakeFromAnywhere(id)
+        if not id then return false end
+        for i = 1, TOTAL do
+            local c = Grid:GetCell(i)
+            if c and c.loot then
+                for anchor, d in pairs(c.loot) do
+                    if d.id == id then
+                        c.loot[anchor] = nil
+                        local anyLeft = false
+                        for _ in pairs(c.loot) do anyLeft = true; break end
+                        if not anyLeft then c.loot = nil end
+                        self:Render(i)
+                        return true
+                    end
+                end
+            end
+        end
+        return false
+    end
+
+    -- Add теперь принимает только id. Иконка — из ICON_BY_ID.
+    function Drops:Add(index, id)
         index = tonumber(index) or 0
         if index < 1 or index > TOTAL then return nil end
         if not id then return nil end
-
         local free = self:FreeAnchors(index)
         if #free == 0 then return nil end
-
         local anchor = free[1]
         local loot = EnsureLoot(index)
         if not loot then return nil end
-
-        loot[anchor] = { id = id, icon = icon }
+        loot[anchor] = { id = id }
         self:Render(index)
         return anchor
     end
@@ -156,7 +165,7 @@ NSQC4.RegisterModule("quests", function()
         for _, a in ipairs(LOOT_ANCHORS) do
             local d = c.loot[a]
             if d then
-                list[#list + 1] = { anchor = a, id = d.id, icon = d.icon }
+                list[#list + 1] = { anchor = a, id = d.id }
             end
         end
         return list
@@ -171,15 +180,24 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Очистить визуал лута (текстуры + рамки)
+    -- Очистка текстур лута и его бордеров
     -- ========================================================================
+    local function ClearLootBorders(btn)
+        if not btn._lootBorders then return end
+        for _, sides in pairs(btn._lootBorders) do
+            for _, tex in ipairs(sides) do
+                tex:Hide()
+                tex:ClearAllPoints()
+                tex:SetTexture(nil)
+            end
+        end
+        btn._lootBorders = nil
+    end
+
     local function ClearLootTextures(index)
         local btn = QuestsField.cells and QuestsField.cells[index]
         if not btn then return end
-
         if btn._lootTextures then
-            dbg(string.format("cell %d: clear %d loot textures",
-                index, (function() local n=0 for _ in pairs(btn._lootTextures) do n=n+1 end return n end)()))
             for _, tex in pairs(btn._lootTextures) do
                 tex:Hide()
                 tex:ClearAllPoints()
@@ -187,130 +205,110 @@ NSQC4.RegisterModule("quests", function()
             end
             btn._lootTextures = nil
         end
-
-        if btn._lootBorders then
-            dbg(string.format("cell %d: hide %d loot borders",
-                index, (function() local n=0 for _ in pairs(btn._lootBorders) do n=n+1 end return n end)()))
-            for _, border in pairs(btn._lootBorders) do
-                border:Hide()
-            end
-        end
+        ClearLootBorders(btn)
     end
 
     -- ========================================================================
-    -- Создать/обновить рамку вокруг лут-текстуры tex
+    -- Бордер лута: 4 тонкие текстуры на btn с sublevel 2.
     -- ========================================================================
-    local function SetLootBorder(index, anchor, tex)
+    local function SetLootBorder(index, anchor, lootTex)
         local btn = QuestsField.cells and QuestsField.cells[index]
-        if not btn or not tex then return end
-
+        if not btn or not lootTex then return end
         if not btn._lootBorders then btn._lootBorders = {} end
-        local border = btn._lootBorders[anchor]
-
-        local created = false
-        if not border then
-            border = CreateFrame("Frame", nil, btn)
-            border:SetFrameLevel(btn:GetFrameLevel() + 11)
-            border:SetBackdrop({
-                edgeFile = "Interface\\Buttons\\WHITE8x8",
-                edgeSize = BORDER_SIZE,
-            })
-            border:SetBackdropColor(0, 0, 0, 0)
-            border:SetBackdropBorderColor(BORDER_R, BORDER_G, BORDER_B, BORDER_A)
-            btn._lootBorders[anchor] = border
-            created = true
+        local sides = btn._lootBorders[anchor]
+        if not sides then
+            sides = {}
+            for i = 1, 4 do
+                local t = btn:CreateTexture(nil, BORDER_LAYER, nil, BORDER_SUBLEVEL)
+                t:SetTexture("Interface\\Buttons\\WHITE8x8")
+                t:SetVertexColor(0, 0, 0, 1)
+                sides[i] = t
+            end
+            btn._lootBorders[anchor] = sides
         end
 
-        border:ClearAllPoints()
-        border:SetPoint("TOPLEFT",     tex, "TOPLEFT",     -BORDER_PAD,  BORDER_PAD)
-        border:SetPoint("BOTTOMRIGHT", tex, "BOTTOMRIGHT",  BORDER_PAD, -BORDER_PAD)
-        border:Show()
+        local top, bottom, left, right = sides[1], sides[2], sides[3], sides[4]
 
-        if Drops.DEBUG then
-            local texW, texH = tex:GetWidth(), tex:GetHeight()
-            local bw, bh = border:GetWidth(), border:GetHeight()
-            dbg(string.format(
-                "cell %d anchor %s: %s border  PAD=%s SIZE=%s  tex=%sx%s  border=%sx%s  edge=%s",
-                index, anchor, created and "CREATE" or "UPDATE",
-                tostring(BORDER_PAD), tostring(BORDER_SIZE),
-                tostring(texW), tostring(texH),
-                tostring(bw), tostring(bh),
-                tostring(border:GetBackdrop() and border:GetBackdrop().edgeSize or "?")))
+        top:ClearAllPoints()
+        top:SetPoint("TOPLEFT",  lootTex, "TOPLEFT",  -BORDER_SIZE,  BORDER_SIZE)
+        top:SetPoint("TOPRIGHT", lootTex, "TOPRIGHT",  BORDER_SIZE,  BORDER_SIZE)
+        top:SetHeight(BORDER_SIZE)
+        top:Show()
+
+        bottom:ClearAllPoints()
+        bottom:SetPoint("BOTTOMLEFT",  lootTex, "BOTTOMLEFT",  -BORDER_SIZE, -BORDER_SIZE)
+        bottom:SetPoint("BOTTOMRIGHT", lootTex, "BOTTOMRIGHT",  BORDER_SIZE, -BORDER_SIZE)
+        bottom:SetHeight(BORDER_SIZE)
+        bottom:Show()
+
+        left:ClearAllPoints()
+        left:SetPoint("TOPLEFT",    lootTex, "TOPLEFT",    -BORDER_SIZE, -BORDER_SIZE)
+        left:SetPoint("BOTTOMLEFT", lootTex, "BOTTOMLEFT", -BORDER_SIZE,  BORDER_SIZE)
+        left:SetWidth(BORDER_SIZE)
+        left:Show()
+
+        right:ClearAllPoints()
+        right:SetPoint("TOPRIGHT",    lootTex, "TOPRIGHT",    BORDER_SIZE, -BORDER_SIZE)
+        right:SetPoint("BOTTOMRIGHT", lootTex, "BOTTOMRIGHT", BORDER_SIZE,  BORDER_SIZE)
+        right:SetWidth(BORDER_SIZE)
+        right:Show()
+    end
+
+    -- Единое правило позиции для всех анкоров
+    local function AnchorPoint(tex, btn, anchor)
+        local ins = ANCHOR_INSET
+        if anchor == "TOPCENTER" then
+            tex:SetPoint("TOP", btn, "TOP", 0, -ins)
+        elseif anchor == "TOPRIGHT" then
+            tex:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -ins, -ins)
+        elseif anchor == "MIDLEFT" then
+            tex:SetPoint("LEFT", btn, "LEFT", ins, 0)
+        elseif anchor == "CENTER" then
+            tex:SetPoint("CENTER", btn, "CENTER", 0, 0)
+        elseif anchor == "MIDRIGHT" then
+            tex:SetPoint("RIGHT", btn, "RIGHT", -ins, 0)
+        elseif anchor == "BOTLEFT" then
+            tex:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", ins, ins)
+        elseif anchor == "BOTCENTER" then
+            tex:SetPoint("BOTTOM", btn, "BOTTOM", 0, ins)
+        elseif anchor == "BOTRIGHT" then
+            tex:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -ins, ins)
         end
     end
 
-    -- ========================================================================
-    -- Рендер лута клетки
-    -- ========================================================================
     function Drops:Render(index)
         index = tonumber(index) or 0
         if index < 1 or index > TOTAL then return false end
-
         local btn = QuestsField.cells and QuestsField.cells[index]
         if not btn then return false end
-
         ClearLootTextures(index)
-
         local c = Grid:GetCell(index)
         if not c or not c.loot then return true end
-
         btn._lootTextures = {}
-
         for anchor, d in pairs(c.loot) do
-            local tex = btn:CreateTexture(nil, "ARTWORK", nil, LOOT_SUBLEVEL)
-            tex:SetDrawLayer("ARTWORK", LOOT_SUBLEVEL)
-            tex:SetTexture(d.icon)
+            local icon = ResolveIcon(d)
+            local tex = btn:CreateTexture(nil, LOOT_LAYER, nil, LOOT_SUBLEVEL)
+            tex:SetTexture(icon)
             tex:SetTexCoord(0, 1, 0, 1)
-
-            -- размер иконки лута: на 2 px меньше 1/3 клетки (как у тебя)
             local size = btn:GetWidth() / 3 - 2
             tex:SetSize(size, size)
-
-            local ins = ANCHOR_INSET
-            if anchor == "TOPCENTER" then
-                tex:SetPoint("TOP", btn, "TOP", 0, -ins)
-            elseif anchor == "TOPRIGHT" then
-                tex:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -ins, -ins)
-            elseif anchor == "MIDLEFT" then
-                tex:SetPoint("LEFT", btn, "LEFT", ins, 0)
-            elseif anchor == "CENTER" then
-                tex:SetPoint("CENTER", btn, "CENTER", 0, 0)
-            elseif anchor == "MIDRIGHT" then
-                tex:SetPoint("RIGHT", btn, "RIGHT", -ins, 0)
-            elseif anchor == "BOTLEFT" then
-                tex:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", ins, ins)
-            elseif anchor == "BOTCENTER" then
-                tex:SetPoint("BOTTOM", btn, "BOTTOM", 0, ins)
-            elseif anchor == "BOTRIGHT" then
-                tex:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -ins, ins)
-            end
+            AnchorPoint(tex, btn, anchor)
             tex:Show()
             btn._lootTextures[anchor] = tex
-
-            if Drops.DEBUG then
-                dbg(string.format("cell %d anchor %s: tex created %sx%s at (%s,%s)",
-                    index, anchor, tostring(tex:GetWidth()), tostring(tex:GetHeight()),
-                    tostring(tex:GetLeft()), tostring(tex:GetBottom())))
-            end
-
             SetLootBorder(index, anchor, tex)
         end
-
         return true
     end
 
-    -- ========================================================================
-    -- Публичный метод: пересчитать SetSize у показанных лут-текстур (все клетки).
-    --   Вызывается из Frame.lua OnSizeChanged (без полного Render — дёшево).
-    -- ========================================================================
     function Drops:RefreshAllLootSizes()
         for i = 1, TOTAL do
             local btn = QuestsField.cells and QuestsField.cells[i]
             if btn and btn._lootTextures then
                 local size = btn:GetWidth() / 3 - 2
-                for _, tex in pairs(btn._lootTextures) do
+                for anchor, tex in pairs(btn._lootTextures) do
                     if tex:IsShown() then
                         tex:SetSize(size, size)
+                        SetLootBorder(i, anchor, tex)
                     end
                 end
             end
@@ -323,44 +321,20 @@ NSQC4.RegisterModule("quests", function()
         end
     end
 
-    -- ========================================================================
-    -- Слэш-команда
-    -- ========================================================================
     SLASH_NSDROPS1 = "/ns_drops"
     SlashCmdList["NSDROPS"] = function(msg)
         local cmd = (msg or ""):lower():match("^(%S*)")
         if cmd == "" or cmd == "on" then
             Drops.DEBUG = true
             print("[DROPS] DEBUG = true")
-            DumpParams()
         elseif cmd == "off" then
             Drops.DEBUG = false
             print("[DROPS] DEBUG = false")
-        elseif cmd == "params" then
-            DumpParams()
-        elseif cmd == "dump" then
-            print("[DROPS] dump:")
-            DumpParams()
-            for i = 1, TOTAL do
-                local btn = QuestsField.cells and QuestsField.cells[i]
-                if btn and btn._lootBorders then
-                    for anchor, border in pairs(btn._lootBorders) do
-                        local bw, bh = border:GetWidth(), border:GetHeight()
-                        local shown = border:IsShown()
-                        local bd = border:GetBackdrop()
-                        print(string.format(
-                            "  cell %d anchor %s: border=%sx%s shown=%s edgeSize=%s",
-                            i, anchor, tostring(bw), tostring(bh), tostring(shown),
-                            tostring(bd and bd.edgeSize or "?")))
-                    end
-                end
-            end
         else
-            print("[DROPS] /ns_drops on | off | params | dump")
+            print("[DROPS] /ns_drops on | off")
         end
     end
 
-    print("|cff00ffff[DROPS]|r Drops загружен (DEBUG=" .. tostring(Drops.DEBUG) .. ")")
-    DumpParams()
+    print("|cff00ffff[DROPS]|r Drops загружен (бордер лута — текстуры sublevel 2, существа выше).")
 
 end)

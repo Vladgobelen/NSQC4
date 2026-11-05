@@ -3,8 +3,12 @@
 -- Короткие звуки событий: работа по terrain, старт к цели по kind.
 -- Без стопов — короткие, накладываются.
 --
--- Sound:PlayTerrain(terrainId)
--- Sound:PlayKind(kind)          -- "goblin" → gob.ogg, "dwarf" → gom.ogg
+-- Sound:PlayTerrain(terrainId)  — звук работы по типу ландшафта.
+-- Sound:PlayKind(kind)          — "goblin" → gob.ogg, "dwarf" → gom.ogg
+--
+-- ladder → временно stone (файла lad.ogg нет).
+-- pool   → временно water/stone (файла нет).
+-- water  → нет файла, звук не играет.
 --
 -- Отладка: /run NSQC4.QuestsDfAISound.DEBUG = true
 -- ============================================================================
@@ -19,12 +23,15 @@ NSQC4.RegisterModule("quests", function()
 
     local IMG_PATH = "Interface\\AddOns\\NSQC4\\Media\\Sounds\\"
 
+    -- terrainId → файл. ladder/pool — временные мапы (файлов нет).
     local TERRAIN_SOUND = {
-        earth = "0uz.ogg",
-        grass = "00f.ogg",
-        stone = "0ka.ogg",
-        tree  = "00t.ogg",
-        -- pool — пока нет
+        earth  = "0uz.ogg",
+        grass  = "00f.ogg",
+        stone  = "0ka.ogg",
+        tree   = "00t.ogg",
+        ladder = "0ka.ogg",   -- временно: звук камня (стройка/лом)
+        pool   = "0uz.ogg",   -- временно: звук земли
+        -- water — файла нет, не играем
     }
 
     local KIND_SOUND = {

@@ -1,31 +1,19 @@
 -- ============================================================================
 -- NSQC4 / Quests / Field / UI / API / Textures
--- Управление основной текстурой и ховер-текстурой клетки.
--- Основная текстура (ландшафт): BACKGROUND / subLevel 0 — самый низ.
--- Ховер-текстура:              BORDER     / subLevel 2 — над ландшафтом, под иконками.
---
--- ОТСТУП ТЕКСТУРЫ (TEXTURE_INSET):
---   - borderless = nil (рамка есть) → inset = 1 px, чтобы текстура не
---     перекрывала 1 px рамки (рамка видна по краю кнопки).
---   - borderless = 1 (рамки нет)    → inset = 0, текстура на всю кнопку,
---     соседние клетки сливаются без просвета.
+-- Слои (задаются при CreateTexture, SetDrawLayer не используем):
+--   LOW     ← cell.texture (ландшафт)
+--   MEDIUM  ← cell.build   (строение: лестница)
+--   OVERLAY ← cell.hoverTexture (ховер — самый верх)
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
     local QuestsField = NSQC4.QuestsFieldClass
     if not QuestsField then return end
 
-    -- ========================================================================
-    -- Отступ текстуры от края кнопки:
-    --   1 — есть рамка (borderless = nil), 0 — нет (borderless = 1).
-    -- ========================================================================
     local function TextureInset()
         return QuestsField:IsBorderless() and 0 or 1
     end
 
-    -- ========================================================================
-    -- Основная текстура (ландшафт) — самый низкий слой текстур.
-    -- ========================================================================
     function QuestsField:SetCellTexture(index, texture, alpha)
         self:EnsureFrame()
         local btn = self.cells[index]
@@ -33,15 +21,10 @@ NSQC4.RegisterModule("quests", function()
 
         local inset = TextureInset()
 
-        -- Ленивое создание: BACKGROUND, subLevel 0
         if not btn.texture then
-            btn.texture = btn:CreateTexture(nil, "BACKGROUND", nil, 0)
-            btn.texture:SetPoint("TOPLEFT", btn, "TOPLEFT", inset, -inset)
-            btn.texture:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -inset, inset)
+            btn.texture = btn:CreateTexture(nil, "LOW", nil, 0)
         end
 
-        -- При каждом вызове — обновить слой и точки (inset мог измениться)
-        btn.texture:SetDrawLayer("BACKGROUND", 0)
         btn.texture:ClearAllPoints()
         btn.texture:SetPoint("TOPLEFT", btn, "TOPLEFT", inset, -inset)
         btn.texture:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -inset, inset)
@@ -58,9 +41,35 @@ NSQC4.RegisterModule("quests", function()
         end
     end
 
-    -- ========================================================================
-    -- Ховер-текстура — над ландшафтом, под иконками.
-    -- ========================================================================
+    function QuestsField:SetCellBuild(index, texture, alpha)
+        self:EnsureFrame()
+        local btn = self.cells[index]
+        if not btn then return end
+
+        local inset = TextureInset()
+
+        if not btn.build then
+            btn.build = btn:CreateTexture(nil, "MEDIUM", nil, 0)
+            btn.build:Hide()
+        end
+
+        btn.build:ClearAllPoints()
+        btn.build:SetPoint("TOPLEFT", btn, "TOPLEFT", inset, -inset)
+        btn.build:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -inset, inset)
+
+        if texture then
+            btn.build:SetTexture(texture)
+            btn.build:SetTexCoord(0, 1, 0, 1)
+            btn.build:SetVertexColor(1, 1, 1, 1)
+            btn.build:SetAlpha(alpha or 1.0)
+            btn.build:Show()
+        else
+            btn.build:SetTexture(nil)
+            btn.build:Hide()
+        end
+    end
+
+    -- Ховер — самый верхний слой
     function QuestsField:SetCellHoverTexture(index, texture, alpha)
         self:EnsureFrame()
         local btn = self.cells[index]
@@ -68,15 +77,11 @@ NSQC4.RegisterModule("quests", function()
 
         local inset = TextureInset()
 
-        -- Ленивое создание: BORDER, subLevel 2
         if not btn.hoverTexture then
-            btn.hoverTexture = btn:CreateTexture(nil, "BORDER", nil, 2)
-            btn.hoverTexture:SetPoint("TOPLEFT", btn, "TOPLEFT", inset, -inset)
-            btn.hoverTexture:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -inset, inset)
+            btn.hoverTexture = btn:CreateTexture(nil, "OVERLAY", nil, 0)
             btn.hoverTexture:Hide()
         end
 
-        btn.hoverTexture:SetDrawLayer("BORDER", 2)
         btn.hoverTexture:ClearAllPoints()
         btn.hoverTexture:SetPoint("TOPLEFT", btn, "TOPLEFT", inset, -inset)
         btn.hoverTexture:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -inset, inset)
