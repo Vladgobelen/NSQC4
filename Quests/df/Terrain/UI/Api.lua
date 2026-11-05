@@ -2,9 +2,18 @@
 -- NSQC4 / Quests / df / Terrain / UI / Api
 -- Ландшафт — владелец клетки.
 --
--- opts._landscape для тултипа: { index, terrainId, hardness, maxHardness }.
--- hardness в тултипе читается заново (Tooltip.Build → Grid:GetHardness),
--- поэтому здесь важно передать index и terrainId.
+-- Тултип клетки:
+--   - тип ландшафта, hardness (если есть)
+--   - лут в клетке (список)
+--   - если в клетке не спящее существо — его тултип + в конце клетка+лут
+--   - если существо спит — только клетка+лут
+--
+-- Клики:
+--   - если в клетке есть лут и нет активного (не спящего) существа
+--     → клики по клетке не вешаются (SetCellOnMouseClick nil).
+--   - иначе — как обычно (Actions вешают клики по terrain/существу).
+--
+-- opts._landscape для тултипа существа: { index, terrainId }.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -70,6 +79,125 @@ NSQC4.RegisterModule("quests", function()
         return nil
     end
 
+    -- ========================================================================
+    -- Лут: строки для тултипа
+    -- ========================================================================
+    local LOOT_NAMES = {
+        earth = "Земля",
+        wood  = "Дерево",
+        stone = "Камень",
+        herb  = "Трава",
+    }
+
+    local function LootLines(index)
+        local Drops = NSQC4.QuestsDfTransformDrops
+        if not Drops then return nil end
+        local all = Drops:GetAll(index)
+        if not all or #all == 0 then return nil end
+
+        -- сгруппировать по id
+        local counts = {}
+        local order = {}
+        for _, d in ipairs(all) do
+            local id = d.id or "?"
+            if not counts[id] then
+                counts[id] = 0
+                order[#order + 1] = id
+            end
+            counts[id] = counts[id] + 1
+        end
+
+        local parts = {}
+        for _, id in ipairs(order) do
+            local name = LOOT_NAMES[id] or id
+            parts[#parts + 1] = string.format("%s ×%d", name, counts[id])
+        end
+        return table.concat(parts, ", ")
+    end
+
+    -- ========================================================================
+    -- Строка клетки: terrain, hardness, лут
+    -- ========================================================================
+    local function CellLines(index, terrainId)
+        local Grid = NSQC4.QuestsDfGrid
+        local Data = NSQC4.QuestsDfTerrainData
+        if not Grid then return nil end
+
+        local lines = {}
+
+        local tname = terrainId or "?"
+        local tcolor = { 0.85, 0.85, 0.85 }
+        if Data then
+            local def = terrainId and Data:Get(terrainId)
+            if def and def.color then tcolor = def.color end
+        end
+        lines[#lines + 1] = {
+            text = "Клетка: " .. tname,
+            r = tcolor[1] or 0.85, g = tcolor[2] or 0.85, b = tcolor[3] or 0.85,
+        }
+
+        -- hardness
+        if terrainId and terrainId ~= "void" then
+            local curH = Grid:GetHardness(index)
+            local maxH = nil
+            if Data then
+                local def = Data:Get(terrainId)
+                maxH = def and def.hardness
+            end
+            if curH and maxH and maxH > 0 then
+                local pct = (curH / maxH) * 100
+                lines[#lines + 1] = {
+                    text = string.format("Прочность: %d / %d (%.0f%%)",
+                        math.floor(curH + 0.5), math.floor(maxH + 0.5), pct),
+                    r = 0.85, g = 0.85, b = 0.85,
+                }
+            end
+        end
+
+        -- лут
+        local loot = LootLines(index)
+        if loot then
+            lines[#lines + 1] = {
+                text = "Лут: " .. loot,
+                r = 0.8, g = 1.0, b = 0.8,
+            }
+        end
+
+        return lines
+    end
+
+    -- ========================================================================
+    -- Тултип только клетки (без существа)
+    -- ========================================================================
+    local function ShowCellTooltip(index, terrainId)
+        local lines = CellLines(index, terrainId)
+        if not lines or #lines == 0 then return end
+        GameTooltip:AddLine(lines[1].text, lines[1].r, lines[1].g, lines[1].b)
+        for i = 2, #lines do
+            GameTooltip:AddLine(lines[i].text, lines[i].r, lines[i].g, lines[i].b)
+        end
+        GameTooltip:Show()
+    end
+
+    -- ========================================================================
+    -- Тултип существа + (в конце) клетка и лут
+    -- ========================================================================
+    local function ShowEntityTooltip(entity, tooltipFn, index, terrainId)
+        tooltipFn(entity and nil)
+        -- в конце — клетка и лут
+        local lines = CellLines(index, terrainId)
+        if lines and #lines > 0 then
+            GameTooltip:AddLine(" ")
+            for _, ln in ipairs(lines) do
+                GameTooltip:AddLine(ln.text, ln.r, ln.g, ln.b)
+            end
+        end
+        GameTooltip:Show()
+    end
+
+    -- ========================================================================
+    -- Render (визуал клетки)
+    -- ========================================================================
     function UIApi:Render(index, opts)
         index = tonumber(index) or 0
         if index < 1 or index > TOTAL then return false end
@@ -106,6 +234,9 @@ NSQC4.RegisterModule("quests", function()
         return true
     end
 
+    -- ========================================================================
+    -- RenderCellFromStorage
+    -- ========================================================================
     function UIApi:RenderCellFromStorage(index)
         index = tonumber(index) or 0
         if index < 1 or index > TOTAL then return false end
@@ -154,23 +285,52 @@ NSQC4.RegisterModule("quests", function()
             EntitiesApi:Render(index, nil)
         end
 
-        -- Тултип: отдаём index и terrainId, hardness читается в OnEnter заново
-        if entity and entity.opts and not entity.opts.sleeping then
-            entity.opts._landscape = {
-                index     = index,
-                terrainId = terrainId,
-            }
+        -- Лут: перерисовать
+        local Drops = NSQC4.QuestsDfTransformDrops
+        if Drops then Drops:Render(index) end
+
+        -- Тултип и клики
+        local sleeping = entity and entity.opts and entity.opts.sleeping
+        local hasLoot  = Drops and Drops:HasAny(index) or false
+        local hasActiveEntity = entity and not sleeping
+
+        if hasActiveEntity then
+            -- тултип существа + клетка/лут
+            entity.opts._landscape = { index = index, terrainId = terrainId }
 
             local tooltipFn = ResolveTooltip(entity)
             if tooltipFn then
-                QuestsField:SetCellTooltip(index, tooltipFn)
+                QuestsField:SetCellTooltip(index, function(btn)
+                    tooltipFn(btn)
+                    local lines = CellLines(index, terrainId)
+                    if lines and #lines > 0 then
+                        GameTooltip:AddLine(" ")
+                        for _, ln in ipairs(lines) do
+                            GameTooltip:AddLine(ln.text, ln.r, ln.g, ln.b)
+                        end
+                    end
+                end)
             else
-                QuestsField:ClearCellTooltip(index)
+                QuestsField:SetCellTooltip(index, function(btn)
+                    ShowCellTooltip(index, terrainId)
+                end)
             end
+            -- клики по существу — как обычно (Actions)
         else
-            QuestsField:ClearCellTooltip(index)
+            -- нет активного существа → тултип только клетки/лута
+            QuestsField:SetCellTooltip(index, function(btn)
+                ShowCellTooltip(index, terrainId)
+            end)
+
+            -- если есть лут — клики по клетке не вешаем
+            if hasLoot then
+                QuestsField:SetCellOnMouseClick(index, "LeftButton",  nil)
+                QuestsField:SetCellOnMouseClick(index, "RightButton", nil)
+                return true
+            end
         end
 
+        -- Клики по terrain (как раньше)
         local Actions = NSQC4.QuestsDfTerrainActions
         local T = Actions and Actions.Types and terrainId and Actions.Types[terrainId]
 

@@ -1,11 +1,9 @@
 -- ============================================================================
 -- NSQC4 / Quests / df / Actions / Terrain / Earth / RightClickEntities
--- ПКМ по существу в клетке с "earth".
--- Вызывается из Check.lua, когда есть существо (не спит).
---
--- Регистрирует ПКМ на клетке через Mouse. При клике:
---   - есть существо → меню существа (Спать/Разбудить/Осмотреть)
---   - нет существа  → ничего
+-- ПКМ по earth:
+--   1. Есть лут и нет активного существа → меню не показываем
+--   2. Есть активное существо → меню существа (Спать/Осмотреть)
+--   3. Иначе (нет существа / спит, лута нет) → меню клетки: Постройка бассейна
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -28,44 +26,43 @@ NSQC4.RegisterModule("quests", function()
         if index < 1 then return false end
 
         QuestsField:SetCellOnMouseClick(index, "RightButton", function(btn, button, idx)
-            -- 1. Есть ли существо?
+            local Drops  = NSQC4.QuestsDfTransformDrops
             local entity = Grid and Grid:GetEntity(idx)
-            if not entity or not entity.opts then
-                return false   -- нет — ничего
+            local sleeping = entity and entity.opts and entity.opts.sleeping
+            local hasActive = entity and not sleeping
+            local hasLoot = Drops and Drops:HasAny(idx) or false
+
+            if hasLoot and not hasActive then
+                return false
             end
 
-            -- 2. Меню существа
-            local opts = entity.opts
-            local menuItems = {}
-
-            if opts.sleeping then
-                menuItems[#menuItems + 1] = {
-                    text = "Разбудить",
-                    func = function()
-                        opts.sleeping = false
-                        local Entities = NSQC4.QuestsDfEntities
-                        if Entities then Entities:Spawn(entity.id, idx, opts) end
-                    end
-                }
-            else
-                menuItems[#menuItems + 1] = {
-                    text = "Спать",
-                    func = function()
+            if hasActive then
+                local opts = entity.opts
+                local menuItems = {
+                    { text = "Спать", func = function()
                         opts.sleeping = true
                         local Entities = NSQC4.QuestsDfEntities
                         if Entities then Entities:Spawn(entity.id, idx, opts) end
-                    end
+                    end },
+                    { text = "Осмотреть", func = function()
+                        print("|cff00ff00[NSQC4]|r Вы осмотрели " ..
+                              (opts.name or "существо") .. ".")
+                    end },
                 }
+                QuestsField:ShowContextMenu(menuItems, btn)
+                return true
             end
 
-            menuItems[#menuItems + 1] = {
-                text = "Осмотреть",
-                func = function()
-                    print("|cff00ff00[NSQC4]|r Вы осмотрели " ..
-                          (opts.name or "существо") .. ".")
-                end
+            -- меню клетки
+            local menuItems = {
+                { text = "Постройка бассейна", func = function()
+                    local Terrain = NSQC4.QuestsDfTerrain
+                    if Terrain and Terrain.SetTerrain then
+                        Terrain:SetTerrain(idx, "pool")
+                    end
+                    print("|cff00ff00[NSQC4]|r Бассейн построен (заглушка) в клетке " .. idx)
+                end },
             }
-
             QuestsField:ShowContextMenu(menuItems, btn)
             return true
         end)

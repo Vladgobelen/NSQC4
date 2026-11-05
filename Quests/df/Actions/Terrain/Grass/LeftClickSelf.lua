@@ -1,8 +1,10 @@
 -- ============================================================================
 -- NSQC4 / Quests / df / Actions / Terrain / Grass / LeftClickSelf
--- ЛКМ по ландшафту "grass" (свой клик).
---   - существо есть (не спит) → LeftClickEntities
---   - существа нет / спит     → toggle выделения ландшафта
+-- ЛКМ по grass:
+--   1. Есть активное существо → LeftClickEntities
+--   2. Нет существа / спит:
+--      - есть лут → ничего (не выделяем)
+--      - нет лута → toggle выделения grass
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -25,7 +27,8 @@ NSQC4.RegisterModule("quests", function()
         if index < 1 then return false end
 
         QuestsField:SetCellOnMouseClick(index, "LeftButton", function(btn, button, idx)
-            local entity   = Grid and Grid:GetEntity(idx)
+            local Drops  = NSQC4.QuestsDfTransformDrops
+            local entity = Grid and Grid:GetEntity(idx)
             local sleeping = entity and entity.opts and entity.opts.sleeping
 
             if entity and not sleeping then
@@ -35,6 +38,11 @@ NSQC4.RegisterModule("quests", function()
                 if T and T.LeftClickEntities then
                     return T.LeftClickEntities(idx)
                 end
+                return false
+            end
+
+            local hasLoot = Drops and Drops:HasAny(idx) or false
+            if hasLoot then
                 return false
             end
 

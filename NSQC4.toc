@@ -118,6 +118,8 @@ Quests\df\Terrain\Data\Grass.lua
 Quests\df\Terrain\Data\Stone.lua
 Quests\df\Terrain\Data\Tree.lua
 Quests\df\Terrain\Data\Pool.lua
+Quests\df\Terrain\Data\Void.lua
+Quests\df\Terrain\Data\Ladder.lua
 
 # --- Ландшафт: ядро и логика ---
 Quests\df\Terrain\Init.lua
@@ -129,6 +131,14 @@ Quests\df\Terrain\Logic\Grass.lua
 Quests\df\Terrain\Logic\Stone.lua
 Quests\df\Terrain\Logic\Tree.lua
 Quests\df\Terrain\Logic\Pool.lua
+Quests\df\Terrain\Logic\Void.lua
+Quests\df\Terrain\Logic\Ladder.lua
+
+# --- Transform: реестр преобразований, лут, void ---
+Quests\df\Transform\Init.lua
+Quests\df\Transform\Data.lua
+Quests\df\Transform\Drops.lua
+Quests\df\Transform\Void.lua
 
 # --- живые существа (база) ---
 Quests\df\Entities\Init.lua
@@ -137,7 +147,7 @@ Quests\df\Entities\Tooltip.lua
 Quests\df\Entities\UI\Api.lua
 Quests\df\Entities\UI\Animate.lua
 
-# --- TerrainActions (5 типов × 4 файла) ---
+# --- TerrainActions (7 типов × 4 файла) ---
 Quests\df\Actions\Terrain\Init.lua
 
 Quests\df\Actions\Terrain\Earth\Check.lua
@@ -164,6 +174,16 @@ Quests\df\Actions\Terrain\Pool\Check.lua
 Quests\df\Actions\Terrain\Pool\LeftClickSelf.lua
 Quests\df\Actions\Terrain\Pool\LeftClickEntities.lua
 Quests\df\Actions\Terrain\Pool\RightClickEntities.lua
+
+Quests\df\Actions\Terrain\Void\Check.lua
+Quests\df\Actions\Terrain\Void\LeftClickSelf.lua
+Quests\df\Actions\Terrain\Void\LeftClickEntities.lua
+Quests\df\Actions\Terrain\Void\RightClickEntities.lua
+
+Quests\df\Actions\Terrain\Ladder\Check.lua
+Quests\df\Actions\Terrain\Ladder\LeftClickSelf.lua
+Quests\df\Actions\Terrain\Ladder\LeftClickEntities.lua
+Quests\df\Actions\Terrain\Ladder\RightClickEntities.lua
 
 # --- AI: реестр поведений (до Tick.lua!) ---
 Quests\df\AI\Behavior\Init.lua
