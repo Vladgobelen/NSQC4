@@ -20,10 +20,11 @@ NSQC4.RegisterModule("quests", function()
 
     function Gods:GetKinship(name)
         if type(name) ~= "string" or name == "" then return 0 end
+        local lower = string.lower(name)
         local k = 0
-        if name:find("Ы", 1, true) then k = k + 1 end
-        if name:find("У", 1, true) then k = k + 2 end
-        if name:find("О", 1, true) then k = k + 4 end
+        if lower:find("ы", 1, true) then k = k + 1 end
+        if lower:find("у", 1, true) then k = k + 2 end
+        if lower:find("о", 1, true) then k = k + 4 end
         return k
     end
 

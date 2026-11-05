@@ -1,6 +1,6 @@
 ======================================================================
  LUA DUMP: /home/diver/Games/wc/CircleL/Interface/AddOns/NSQC4/Quests
- Date: 2026-11-06 02:33:36
+ Date: 2026-11-06 03:08:59
 ======================================================================
 
 ======================================================================
@@ -706,25 +706,32 @@ end)
 
 -- ============================================================================
 -- NSQC4 / Quests / Field / UI / API / Hover
--- Ховер: подсветка клетки при наведении мыши.
+-- Ховер: подсветка + звук работы + авто-обновление тултипа.
 --
--- Отладка: /run NSQC4.QuestsField._HoverDebug = true
---   На OnEnter/OnLeave печатает:
---     [HOVER] enter cell=N btn=... tex=created|exists shown=...
---     [HOVER] leave cell=N
---     [HOVER] ensure: create tex for cell=N
+-- ФИКС: QuestsField здесь — ИНСТАНС (NSQC4.QuestsField), а не класс.
+-- Раньше было NSQC4.QuestsFieldClass — у класса нет .cells (это поле
+-- инстанса), поэтому RefreshTooltip получал QuestsField.cells == nil
+-- и печатал «tooltip refresh cell=N — нет btn».
 --
--- Если _HoverDebug = true, при каждом наведении ещё печатает состояние:
---     [HOVER] state cell=N hoverTexture=userdata/ nil  IsShown=...
+-- ОТЛАДКА:
+--   /ns_hover on            — включить
+--   /ns_hover off           — выключить
+--   /ns_hover test <idx>    — вручную навесить ховер на клетку
+--   /ns_hover clear         — сбросить
+--   /ns_hover dump          — состояние
+--   /ns_hover tt <idx>      — разово перерисовать тултип клетки
+--   /ns_hover ttinfo <idx>  — что в btn._tooltipFn / _onEnter / ai
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
-    local QuestsField = NSQC4.QuestsFieldClass
-    if not QuestsField then return end
+    local QuestsField = NSQC4.QuestsField   -- ИНСТАНС, не класс
+    if not QuestsField then
+        print("|cffff0000[NSQC4]|r Hover: NSQC4.QuestsField не создан (Field/Init.lua не загружен?)")
+        return
+    end
 
     local DEFAULT_HOVER_HIGHLIGHT = { 1.0, 0.85, 0.0, 1.0 }
 
-    -- Отладка (по умолчанию выключена)
     QuestsField._HoverDebug = false
 
     local function dbg(...)
@@ -733,20 +740,142 @@ NSQC4.RegisterModule("quests", function()
         end
     end
 
-    local function dbgState(btn, index)
-        if not QuestsField._HoverDebug then return end
-        local tex = btn.hoverTexture
-        if tex then
-            print(string.format("|cff00ffff[HOVER]|r state cell=%s hoverTexture=userdata IsShown=%s alpha=%s",
-                tostring(index),
-                tostring(tex:IsShown()),
-                tostring(tex:GetAlpha())))
+    -- ========================================================================
+    -- Тикер
+    -- ========================================================================
+    local SOUND_INTERVAL   = 1.5
+    local TOOLTIP_INTERVAL = 0.5
+
+    local tickFrame    = nil
+    local soundAccum   = 0
+    local tooltipAccum = 0
+    local hoveredWork  = {}
+
+    local function IsWorking(entity)
+        if not entity or not entity.opts then return false end
+        local ai = entity.opts.ai
+        return ai and ai.state == "working"
+    end
+
+    local function TerrainForSound(entity)
+        if not entity or not entity.opts then return nil end
+        local ai = entity.opts.ai
+        return ai and ai.terrainId or nil
+    end
+
+    local function AnyHoveredWorking()
+        for _ in pairs(hoveredWork) do return true end
+        return false
+    end
+
+    local function RefreshTooltip(index)
+        local btn = QuestsField.cells and QuestsField.cells[index]
+        if not btn then
+            dbg("tooltip refresh cell=" .. tostring(index) .. " — нет btn")
+            return
+        end
+        local fn = btn._tooltipFn
+        if not fn then
+            dbg("tooltip refresh cell=" .. tostring(index) .. " — нет _tooltipFn")
+            return
+        end
+
+        GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
+        GameTooltip:ClearLines()
+        local ok, err = pcall(fn, btn)
+        if ok then
+            GameTooltip:Show()
+            local lines = GameTooltip:NumLines() or 0
+            dbg(string.format("tooltip refresh cell=%s ok=true lines=%d", tostring(index), lines))
         else
-            print(string.format("|cff00ffff[HOVER]|r state cell=%s hoverTexture=nil", tostring(index)))
+            dbg(string.format("tooltip refresh cell=%s ERROR: %s", tostring(index), tostring(err)))
         end
     end
 
-    -- Ленивое создание/обновление hover-текстуры
+    local function Tick(elapsed)
+        if not AnyHoveredWorking() then return end
+
+        soundAccum = soundAccum + elapsed
+        if soundAccum >= SOUND_INTERVAL then
+            soundAccum = 0
+            local Sound = NSQC4.QuestsDfAISound
+            if Sound and Sound.PlayTerrain then
+                for index, rec in pairs(hoveredWork) do
+                    dbg(string.format("sound tick: cell=%s terrain=%s", tostring(index), tostring(rec.terrainId)))
+                    Sound:PlayTerrain(rec.terrainId)
+                end
+            end
+        end
+
+        tooltipAccum = tooltipAccum + elapsed
+        if tooltipAccum >= TOOLTIP_INTERVAL then
+            tooltipAccum = 0
+            for index in pairs(hoveredWork) do
+                local btn = QuestsField.cells and QuestsField.cells[index]
+                dbg(string.format("tooltip tick: cell=%s fn=%s",
+                    tostring(index),
+                    tostring(btn and btn._tooltipFn and "yes" or "no")))
+                RefreshTooltip(index)
+            end
+        end
+    end
+
+    local function EnsureTickFrame()
+        if tickFrame then return tickFrame end
+        tickFrame = CreateFrame("Frame")
+        tickFrame:SetScript("OnUpdate", function(_, elapsed)
+            Tick(elapsed)
+        end)
+        tickFrame:Show()
+        dbg("tick frame created")
+        return tickFrame
+    end
+
+    local function RegisterHoverWork(index)
+        local Grid = NSQC4.QuestsDfGrid
+        local entity = Grid and Grid:GetEntity(index)
+
+        dbg(string.format("register cell=%s entity=%s",
+            tostring(index),
+            tostring(entity and (entity.opts and entity.opts.name or entity.id))))
+
+        if not entity then
+            dbg("  → нет существа")
+            return
+        end
+        if not entity.opts then
+            dbg("  → нет opts")
+            return
+        end
+        local ai = entity.opts.ai
+        dbg(string.format("  ai.state=%s ai.terrainId=%s",
+            tostring(ai and ai.state), tostring(ai and ai.terrainId)))
+
+        if not IsWorking(entity) then
+            dbg("  → не working")
+            return
+        end
+        local t = TerrainForSound(entity)
+        if not t then
+            dbg("  → нет terrainId")
+            return
+        end
+
+        hoveredWork[index] = { terrainId = t, entity = entity }
+        soundAccum   = SOUND_INTERVAL
+        tooltipAccum = TOOLTIP_INTERVAL
+        EnsureTickFrame()
+        dbg(string.format("  → registered cell=%s terrain=%s", tostring(index), t))
+    end
+
+    local function UnregisterHoverWork(index)
+        hoveredWork[index] = nil
+        dbg(string.format("unregister cell=%s", tostring(index)))
+    end
+
+    -- ========================================================================
+    -- Подсветка
+    -- ========================================================================
     local function EnsureHoverTexture(btn, index)
         if not btn.hoverTexture then
             btn.hoverTexture = btn:CreateTexture(nil, "OVERLAY", nil, 0)
@@ -756,7 +885,6 @@ NSQC4.RegisterModule("quests", function()
             btn.hoverTexture:SetPoint("TOPLEFT",     btn, "TOPLEFT",     0, 0)
             btn.hoverTexture:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 0, 0)
             btn.hoverTexture:Hide()
-            dbg("ensure: create tex for cell=" .. tostring(index))
         end
         return btn.hoverTexture
     end
@@ -764,43 +892,39 @@ NSQC4.RegisterModule("quests", function()
     local function ApplyHover(btn, index)
         local tex = EnsureHoverTexture(btn, index)
         tex:Show()
-
         local hl = btn._hoverHighlight or DEFAULT_HOVER_HIGHLIGHT
         btn:SetBackdropBorderColor(hl[1] or 1.0, hl[2] or 0.85, hl[3] or 0.0, hl[4] or 1.0)
-
-        dbg(string.format("enter cell=%s tex=shown", tostring(index)))
-        dbgState(btn, index)
     end
 
     local function ResetHover(btn, index)
         if btn.hoverTexture then
             btn.hoverTexture:Hide()
         end
-
-        local inst = NSQC4.QuestsField
-        if inst and inst:IsBorderless() then
+        if QuestsField:IsBorderless() then
             btn:SetBackdropBorderColor(0, 0, 0, 0)
         else
             btn:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
         end
-
-        dbg(string.format("leave cell=%s", tostring(index)))
     end
 
-    function QuestsField:InitCellHover(index)
+    function QuestsFieldClass_InitCellHover(self, index)
         self:EnsureFrame()
         local btn = self.cells[index]
         if not btn then return end
 
         if not btn._hoverInitialized then
             btn:SetScript("OnEnter", function(self2)
+                dbg("enter cell=" .. tostring(index))
                 self2._hovered = true
                 ApplyHover(self2, index)
+                RegisterHoverWork(index)
                 if self2._onEnter then self2._onEnter(self2, index) end
             end)
             btn:SetScript("OnLeave", function(self2)
+                dbg("leave cell=" .. tostring(index))
                 self2._hovered = false
                 ResetHover(self2, index)
+                UnregisterHoverWork(index)
                 if self2._onLeave then self2._onLeave(self2, index) end
             end)
             btn._hoverInitialized = true
@@ -808,7 +932,11 @@ NSQC4.RegisterModule("quests", function()
         end
     end
 
-    function QuestsField:SetCellOnEnter(index, fn)
+    -- Определяем метод на классе, чтобы все инстансы получили
+    local Class = NSQC4.QuestsFieldClass
+    Class.InitCellHover = QuestsFieldClass_InitCellHover
+
+    function Class:SetCellOnEnter(index, fn)
         self:EnsureFrame()
         local btn = self.cells[index]
         if not btn then return end
@@ -816,7 +944,7 @@ NSQC4.RegisterModule("quests", function()
         self:InitCellHover(index)
     end
 
-    function QuestsField:SetCellOnLeave(index, fn)
+    function Class:SetCellOnLeave(index, fn)
         self:EnsureFrame()
         local btn = self.cells[index]
         if not btn then return end
@@ -824,7 +952,7 @@ NSQC4.RegisterModule("quests", function()
         self:InitCellHover(index)
     end
 
-    function QuestsField:SetCellHoverHighlight(index, r, g, b, a)
+    function Class:SetCellHoverHighlight(index, r, g, b, a)
         self:EnsureFrame()
         local btn = self.cells[index]
         if not btn then return end
@@ -833,7 +961,7 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Ручной тест подсветки (без мыши)
+    -- Слэш
     -- ========================================================================
     SLASH_NSHOVER1 = "/ns_hover"
     SlashCmdList["NSHOVER"] = function(msg)
@@ -843,9 +971,13 @@ NSQC4.RegisterModule("quests", function()
         if cmd == "" or cmd == "on" then
             QuestsField._HoverDebug = true
             print("[HOVER] DEBUG = true")
+            print("  tickFrame:", tickFrame and (tickFrame:IsShown() and "shown" or "hidden") or "nil")
+            print("  hovered total:", (function() local n=0 for _ in pairs(hoveredWork) do n=n+1 end return n end)())
+
         elseif cmd == "off" then
             QuestsField._HoverDebug = false
             print("[HOVER] DEBUG = false")
+
         elseif cmd == "test" then
             local idx = tonumber(arg) or 1
             local btn = QuestsField.cells and QuestsField.cells[idx]
@@ -855,19 +987,84 @@ NSQC4.RegisterModule("quests", function()
             end
             QuestsField:InitCellHover(idx)
             ApplyHover(btn, idx)
-            print("[HOVER] test: ApplyHover на клетке " .. idx .. " (должна быть подсветка)")
+            RegisterHoverWork(idx)
+            print("[HOVER] test: клетка " .. idx)
+
         elseif cmd == "clear" then
             for i = 1, (QuestsField.cells and #QuestsField.cells or 0) do
                 local btn = QuestsField.cells[i]
                 if btn then ResetHover(btn, i) end
+                UnregisterHoverWork(i)
             end
             print("[HOVER] clear: сброшено")
+
+        elseif cmd == "dump" then
+            print("[HOVER] dump:")
+            print("  debug:", QuestsField._HoverDebug)
+            print("  tickFrame:", tickFrame and (tickFrame:IsShown() and "shown" or "hidden") or "nil")
+            print("  soundAccum:", string.format("%.2f", soundAccum))
+            print("  tooltipAccum:", string.format("%.2f", tooltipAccum))
+            local n = 0
+            for index, rec in pairs(hoveredWork) do
+                n = n + 1
+                local btn = QuestsField.cells and QuestsField.cells[index]
+                print(string.format("  cell=%s terrain=%s _tooltipFn=%s _onEnter=%s",
+                    tostring(index), tostring(rec.terrainId),
+                    tostring(btn and btn._tooltipFn and "yes" or "no"),
+                    tostring(btn and btn._onEnter and "yes" or "no")))
+            end
+            print("  hovered total:", n)
+
+        elseif cmd == "tt" then
+            local idx = tonumber(arg) or 1
+            local btn = QuestsField.cells and QuestsField.cells[idx]
+            if not btn then
+                print("[HOVER] tt: нет клетки " .. tostring(idx))
+                return
+            end
+            print(string.format("[HOVER] tt cell=%s _tooltipFn=%s _onEnter=%s",
+                tostring(idx),
+                tostring(btn._tooltipFn and "yes" or "no"),
+                tostring(btn._onEnter and "yes" or "no")))
+            if btn._tooltipFn then
+                local ok, err = pcall(btn._tooltipFn, btn)
+                if ok then
+                    print("[HOVER] tt: _tooltipFn выполнен без ошибок")
+                else
+                    print("[HOVER] tt: ERROR " .. tostring(err))
+                end
+            end
+            RefreshTooltip(idx)
+
+        elseif cmd == "ttinfo" then
+            local idx = tonumber(arg) or 1
+            local btn = QuestsField.cells and QuestsField.cells[idx]
+            if not btn then
+                print("[HOVER] ttinfo: нет клетки " .. tostring(idx))
+                return
+            end
+            print(string.format("[HOVER] ttinfo cell=%s", tostring(idx)))
+            print("  _tooltipFn:", tostring(btn._tooltipFn))
+            print("  _onEnter:  ", tostring(btn._onEnter))
+            print("  _onLeave:  ", tostring(btn._onLeave))
+            print("  _hovered:  ", tostring(btn._hovered))
+            local Grid = NSQC4.QuestsDfGrid
+            local entity = Grid and Grid:GetEntity(idx)
+            if entity then
+                local ai = entity.opts and entity.opts.ai
+                print("  entity:", tostring(entity.opts and entity.opts.name))
+                print("  ai.state:", tostring(ai and ai.state))
+                print("  ai.terrainId:", tostring(ai and ai.terrainId))
+            else
+                print("  entity: (нет)")
+            end
+
         else
-            print("[HOVER] /ns_hover on|off|test <idx>|clear")
+            print("[HOVER] /ns_hover on|off|test <idx>|clear|dump|tt <idx>|ttinfo <idx>")
         end
     end
 
-    print("|cff00ffff[HOVER]|r Hover загружен (debug=" .. tostring(QuestsField._HoverDebug) .. ")")
+    print("|cff00ffff[HOVER]|r Hover загружен (инстанс, debug off; sound+tooltip on hover work)")
 end)
 
 
@@ -1135,6 +1332,10 @@ end)
 -- NSQC4 / Quests / Field / UI / API / Tooltip
 -- API поля: регистрация/снятие тултипа на клетке.
 --
+-- ФИКС: SetCellTooltip кладёт tooltipFn в btn._tooltipFn. Это позволяет
+-- Hover.lua перерисовывать тултип автоматически, пока мышь на работающем
+-- существе (см. Field/UI/API/Hover.lua → RefreshTooltip).
+--
 -- Вызывающий код знает клетку и код тултипа:
 --   QuestsField:SetCellTooltip(index, function(btn)
 --       GameTooltip:AddLine("Имя", 1, 1, 0)
@@ -1149,9 +1350,6 @@ end)
 --
 -- Снятие:
 --   QuestsField:ClearCellTooltip(index)
---
--- Хендлеры OnEnter/OnLeave вешаются через Hover.lua
--- (SetCellOnEnter / SetCellOnLeave) — не дублируем скрипты.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -1169,6 +1367,9 @@ NSQC4.RegisterModule("quests", function()
         if not btn then return false end
 
         if tooltipFn then
+            -- сохранить в btn — Hover будет звать при авто-обновлении
+            btn._tooltipFn = tooltipFn
+
             self:SetCellOnEnter(index, function(b)
                 GameTooltip:SetOwner(b, "ANCHOR_RIGHT")
                 tooltipFn(b)
@@ -1178,6 +1379,7 @@ NSQC4.RegisterModule("quests", function()
                 GameTooltip:Hide()
             end)
         else
+            btn._tooltipFn = nil
             self:SetCellOnEnter(index, nil)
             self:SetCellOnLeave(index, nil)
         end
@@ -1193,12 +1395,11 @@ NSQC4.RegisterModule("quests", function()
         local btn = self.cells and self.cells[index]
         if not btn then return false end
 
+        btn._tooltipFn = nil
         self:SetCellOnEnter(index, nil)
         self:SetCellOnLeave(index, nil)
 
-        -- На случай, если тултип был открыт в момент снятия
         GameTooltip:Hide()
-
         return true
     end
 
@@ -1208,7 +1409,7 @@ NSQC4.RegisterModule("quests", function()
     function QuestsField:HasCellTooltip(index)
         local btn = self.cells and self.cells[index]
         if not btn then return false end
-        return btn._onEnter ~= nil
+        return btn._tooltipFn ~= nil
     end
 end)
 
@@ -3388,10 +3589,27 @@ end)
 
 -- ============================================================================
 -- NSQC4 / Quests / df / AI / Move
--- Движение от якоря к якорю. Позиция — GetAnchorPos (единая точка).
---   Свёрнутая: TOPLEFT + ins + size/2 (1/3).
---   Развёрнутая: ТА ЖЕ точка, размер 90%.
---   Центр развёрнутой на якоре, не в центре клетки.
+-- Движение от штатной точки к штатной точке.
+--
+-- ШТАТНЫЕ ТОЧКИ (единое правило, GetAnchorPos):
+--   свёрнутая  (expanded=false) — TOPLEFT + ins + size/2   (верхний левый угол)
+--   развёрнутая (expanded=true) — центр клетки
+--
+-- ЕДИНЫЙ ИСТОЧНИК ИСТИНЫ:
+--   entity.posX / entity.posY — позиция в координатах поля.
+--   entity.opts.expanded      — флаг размера.
+--   Текстура (temp/anchor) — чистая функция от них (см. Entities/UI/Api).
+--
+-- СМЕНА expanded В ПУТИ:
+--   Пересчитываем stepStart/stepEnd по новому expanded и корректируем
+--   stepStartedAt так, чтобы posX/posY в момент смены не изменились.
+--
+-- ЗАВЕРШЕНИЕ ШАГА (t >= 1):
+--   ПОРЯДОК ВАЖЕН: сначала обновляем данные (entity.index, posX/posY,
+--   ResetStep, Grid:SetEntityName), ПОТОМ один раз перерисовываем.
+--   Раньше StopMoving(to) звался ДО SetEntityName(to) — Api:Render для `to`
+--   не находил существа и рисовал пустую клетку → иконка «пропадала на
+--   секунду» до следующего тика. Теперь — нет.
 --
 -- stepTime = 100 − 99 × (vitality / 100)  секунд на клетку.
 -- ============================================================================
@@ -3444,6 +3662,89 @@ NSQC4.RegisterModule("quests", function()
         entity.stepStartX    = nil; entity.stepStartY = nil
         entity.stepEndX      = nil; entity.stepEndY   = nil
         entity.stepStartedAt = nil; entity.stepDuration = nil
+        entity.stepExpanded  = nil
+    end
+
+    local function IsExpanded(entity)
+        return entity and entity.opts and entity.opts.expanded and true or false
+    end
+
+    -- ========================================================================
+    -- Зафиксировать начало шага: точки старта/финиша по ТЕКУЩЕМУ expanded.
+    -- ========================================================================
+    local function BeginStep(entity, nextIndex, expanded)
+        local sX, sY = QuestsField:GetAnchorPos(entity.index, expanded)
+        local eX, eY = QuestsField:GetAnchorPos(nextIndex, expanded)
+        if not sX or not eX then return false end
+
+        local EntitiesApi = NSQC4.QuestsDfEntitiesUIApi
+        if EntitiesApi and EntitiesApi.HideAnchorAt then
+            EntitiesApi:HideAnchorAt(entity.index)
+        end
+
+        entity.nextIndex     = nextIndex
+        entity.stepStartX    = sX
+        entity.stepStartY    = sY
+        entity.stepEndX      = eX
+        entity.stepEndY      = eY
+        entity.stepStartedAt = GetTime()
+        entity.stepDuration  = Move:StepTime(entity)
+        entity.stepExpanded  = expanded
+        entity.posX          = sX
+        entity.posY          = sY
+        return true
+    end
+
+    -- ========================================================================
+    -- Пересчитать штатные точки шага под НОВЫЙ expanded, сохранив
+    -- текущую позицию posX/posY и долю прохождения t.
+    -- ========================================================================
+    local function RebaseStepForExpanded(entity, expanded)
+        if not entity.nextIndex then return end
+        if not entity.stepStartX then return end
+
+        local Px, Py = entity.posX, entity.posY
+        if not Px or not Py then return end
+
+        local sX, sY = QuestsField:GetAnchorPos(entity.index, expanded)
+        local eX, eY = QuestsField:GetAnchorPos(entity.nextIndex, expanded)
+        if not sX or not eX then return end
+
+        local dx, dy = (eX - sX), (eY - sY)
+        local len2 = dx * dx + dy * dy
+
+        local tNew
+        if len2 <= 0.0001 then
+            tNew = 0
+            entity.posX = sX
+            entity.posY = sY
+        else
+            local tRaw = ((Px - sX) * dx + (Py - sY) * dy) / len2
+            if tRaw < 0 then tRaw = 0 elseif tRaw > 1 then tRaw = 1 end
+            tNew = tRaw
+        end
+
+        local now = GetTime()
+        local dur = entity.stepDuration or 1
+        if dur <= 0 then dur = 1 end
+
+        entity.stepStartX    = sX
+        entity.stepStartY    = sY
+        entity.stepEndX      = eX
+        entity.stepEndY      = eY
+        entity.stepStartedAt = now - tNew * dur
+
+        entity.posX = sX + (eX - sX) * tNew
+        entity.posY = sY + (eY - sY) * tNew
+
+        dbg(string.format("rebase expanded=%s t=%.3f pos=(%.1f,%.1f)",
+            tostring(expanded), tNew, entity.posX, entity.posY))
+    end
+
+    function Move:SyncExpanded(entity)
+        if not entity or not entity.nextIndex then return false end
+        RebaseStepForExpanded(entity, IsExpanded(entity))
+        return true
     end
 
     function Move:Advance(entity)
@@ -3458,9 +3759,11 @@ NSQC4.RegisterModule("quests", function()
         local path = ai.path
         local name = entity.opts.name or entity.id
         local now  = GetTime()
-        local expanded = entity.opts.expanded and true or false
         local EntitiesApi = NSQC4.QuestsDfEntitiesUIApi
 
+        -- --------------------------------------------------------------
+        -- Старт нового шага
+        -- --------------------------------------------------------------
         if not entity.nextIndex then
             if ai.pathIdx >= #path then return "arrived" end
             if ai.nextStepAt and now < ai.nextStepAt then return "wait" end
@@ -3472,28 +3775,22 @@ NSQC4.RegisterModule("quests", function()
                 return nil
             end
 
-            -- позиция фиксируется на старте шага (по текущему expanded)
-            local sX, sY = QuestsField:GetAnchorPos(entity.index, expanded)
-            local eX, eY = QuestsField:GetAnchorPos(nxt, expanded)
-            if not sX or not eX then return nil end
+            local expanded = IsExpanded(entity)
+            if not BeginStep(entity, nxt, expanded) then return nil end
 
-            if EntitiesApi and EntitiesApi.HideAnchorAt then
-                EntitiesApi:HideAnchorAt(entity.index)
-            end
-
-            entity.nextIndex     = nxt
-            entity.stepStartX    = sX
-            entity.stepStartY    = sY
-            entity.stepEndX      = eX
-            entity.stepEndY      = eY
-            entity.stepStartedAt = now
-            entity.stepDuration  = self:StepTime(entity)
-            entity.posX          = sX
-            entity.posY          = sY
-
-            dbg(string.format("%s: start %s → %s (%.1f,%.1f)→(%.1f,%.1f) exp=%s dur=%.2f",
+            dbg(string.format("%s: start %s → %s exp=%s dur=%.2f",
                 tostring(name), tostring(entity.index), tostring(nxt),
-                sX, sY, eX, eY, tostring(expanded), entity.stepDuration))
+                tostring(expanded), entity.stepDuration))
+        end
+
+        -- --------------------------------------------------------------
+        -- СМЕНА expanded В ПУТИ: если флаг разошёлся с геометрией шага —
+        -- пересчитать концы и t без рывка.
+        -- --------------------------------------------------------------
+        local curExpanded = IsExpanded(entity)
+        if entity.stepExpanded ~= curExpanded then
+            RebaseStepForExpanded(entity, curExpanded)
+            entity.stepExpanded = curExpanded
         end
 
         local t = (now - entity.stepStartedAt) / entity.stepDuration
@@ -3508,24 +3805,37 @@ NSQC4.RegisterModule("quests", function()
             EntitiesApi:MoveAnchor(entity, x, y)
         end
 
+        -- --------------------------------------------------------------
+        -- ЗАВЕРШЕНИЕ ШАГА
+        -- Порядок: СНАЧАЛА данные, ПОТОМ рендер.
+        -- --------------------------------------------------------------
         if t >= 1 then
             local from = entity.index
             local to   = entity.nextIndex
 
-            if EntitiesApi and EntitiesApi.StopMoving then
-                EntitiesApi:StopMoving(entity, to)
-            end
-
+            -- 1. Данные: позиция, сброс шага, имена в Grid.
             entity.index = to
             entity.posX  = entity.stepEndX
             entity.posY  = entity.stepEndY
-            self:ResetStep(entity)
+            self:ResetStep(entity)   -- nextIndex=nil, step*=nil, stepExpanded=nil
 
             Grid:SetEntityName(from, nil)
             Grid:SetEntityName(to, entity.opts and entity.opts.name)
 
             ai.pathIdx    = ai.pathIdx + 1
             ai.nextStepAt = nil
+
+            -- 2. Рендер: StopMoving видит согласованное состояние
+            --    (entity.index=to, nextIndex=nil, Grid:GetEntity(to)=entity)
+            --    и рисует anchor в `to`, а не пустую клетку.
+            if EntitiesApi and EntitiesApi.StopMoving then
+                EntitiesApi:StopMoving(entity, to)
+            end
+            -- `from` гарантированно очистить (на случай, если там остался
+            -- temp/anchor от предыдущего шага).
+            if EntitiesApi and EntitiesApi.RenderCellFromStorage then
+                EntitiesApi:RenderCellFromStorage(from)
+            end
 
             local Stats = NSQC4.QuestsDfAIStats
             if Stats and Stats.TryUpVitality then Stats:TryUpVitality(entity) end
@@ -3556,7 +3866,7 @@ NSQC4.RegisterModule("quests", function()
         else print("[MOVE] /ns_move on | off | dump") end
     end
 
-    print("|cff00ffff[MOVE]|r Move загружен (якорь→якорь, единая точка)")
+    print("|cff00ffff[MOVE]|r Move загружен (штатные точки, rebase при смене expanded, без пропадания на финише)")
 end)
 
 
@@ -3843,8 +4153,12 @@ end)
 -- Короткие звуки событий: работа по terrain, старт к цели по kind.
 -- Без стопов — короткие, накладываются.
 --
--- Sound:PlayTerrain(terrainId)
--- Sound:PlayKind(kind)          -- "goblin" → gob.ogg, "dwarf" → gom.ogg
+-- Sound:PlayTerrain(terrainId)  — звук работы по типу ландшафта.
+-- Sound:PlayKind(kind)          — "goblin" → gob.ogg, "dwarf" → gom.ogg
+--
+-- ladder → временно stone (файла lad.ogg нет).
+-- pool   → временно water/stone (файла нет).
+-- water  → нет файла, звук не играет.
 --
 -- Отладка: /run NSQC4.QuestsDfAISound.DEBUG = true
 -- ============================================================================
@@ -3859,12 +4173,15 @@ NSQC4.RegisterModule("quests", function()
 
     local IMG_PATH = "Interface\\AddOns\\NSQC4\\Media\\Sounds\\"
 
+    -- terrainId → файл. ladder/pool — временные мапы (файлов нет).
     local TERRAIN_SOUND = {
-        earth = "0uz.ogg",
-        grass = "00f.ogg",
-        stone = "0ka.ogg",
-        tree  = "00t.ogg",
-        -- pool — пока нет
+        earth  = "0uz.ogg",
+        grass  = "00f.ogg",
+        stone  = "0ka.ogg",
+        tree   = "00t.ogg",
+        ladder = "0ka.ogg",   -- временно: звук камня (стройка/лом)
+        pool   = "0uz.ogg",   -- временно: звук земли
+        -- water — файла нет, не играем
     }
 
     local KIND_SOUND = {
@@ -4847,7 +5164,7 @@ end)
 --   hpPerMaterial = 100 (из TerrainData:GetLadderParams(material)).
 --
 --   1. Если stored <= 0:
---        return false, "need_material"   -- НЕ DONE, существо идёт за материалом
+--        return false, "need_material"
 --   2. Иначе строим:
 --        clicksTotal = CalcClicks("builder", "agility", totalHP, entity)
 --        stepDamage  = totalHP / clicksTotal
@@ -4855,14 +5172,13 @@ end)
 --          hp += stepDamage
 --          накопленный счётчик HP за этот материал += stepDamage
 --          если >= hpPerMaterial:
---             Grid:TakeStored(bIdx, 1)     -- материал «израсходован»
+--             Grid:TakeStored(bIdx, 1)
 --             hpSinceMaterial = 0
---   3. DONE только когда hp >= max:
---        Grid:SetHardness(bIdx, totalHP); b.hp = totalHP
---        ai.work = nil
---        return true
+--   3. DONE только когда hp >= max.
 --
--- DEMOLISH и BREAK — без изменений.
+-- ЗВУК РАБОТЫ:
+--   Убран из тика. Теперь звук — в Hover.lua (при наведении на работающее
+--   существо, раз в SOUND_INTERVAL секунд). См. Field/UI/API/Hover.lua.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -4940,10 +5256,6 @@ NSQC4.RegisterModule("quests", function()
 
     -- ========================================================================
     -- BUILD: порциями по 1 материалу.
-    --   Возвращает:
-    --     true                   — готово (hp >= max)
-    --     false                  — строим дальше
-    --     false, "need_material" — в клетке нет материала, нужно идти за ним
     -- ========================================================================
     local function TickBuild(entity, ai, bIndex)
         local b = Grid:GetBuilding(bIndex)
@@ -4955,7 +5267,6 @@ NSQC4.RegisterModule("quests", function()
         local hpPer    = LadderParams(material)
         local stored   = Grid.GetStored and Grid:GetStored(bIndex) or 0
 
-        -- уже готово?
         if totalHP > 0 and curH >= totalHP then
             Grid:SetHardness(bIndex, totalHP)
             b.hp = totalHP
@@ -4967,15 +5278,13 @@ NSQC4.RegisterModule("quests", function()
             return true
         end
 
-        -- нет материала → не DONE, а «нужен материал»
         if stored <= 0 then
-            ai.work = nil   -- сбросим прогресс порции
+            ai.work = nil
             dbg(string.format("TickBuild cell=%d: stored=0 → need_material (hp=%d/%d)",
                 bIndex, math.floor(curH + 0.5), totalHP))
             return false, "need_material"
         end
 
-        -- инициализация ворка
         local w = ai.work
         if not w or w.kind ~= "build" then
             local total = CalcClicks("builder", "agility", totalHP, entity)
@@ -4984,12 +5293,11 @@ NSQC4.RegisterModule("quests", function()
                 kind             = "build",
                 total            = total,
                 stepDamage       = stepDamage,
-                hpSinceMaterial  = 0,     -- сколько HP снято с текущего материала
+                hpSinceMaterial  = 0,
             }
             ai.work = w
         end
 
-        -- один клик
         w.hpSinceMaterial = w.hpSinceMaterial + w.stepDamage
         local newH = curH + w.stepDamage
         if newH > totalHP then newH = totalHP end
@@ -4997,7 +5305,6 @@ NSQC4.RegisterModule("quests", function()
         b.hp = newH
         if b.by == nil then b.by = entity.id end
 
-        -- материал «израсходовался»?
         if w.hpSinceMaterial >= hpPer then
             Grid:TakeStored(bIndex, 1)
             w.hpSinceMaterial = w.hpSinceMaterial - hpPer
@@ -5009,14 +5316,6 @@ NSQC4.RegisterModule("quests", function()
         local Stats = NSQC4.QuestsDfAIStats
         if Stats and Stats.TryUpStat then Stats:TryUpStat(entity, "agility") end
 
-        local QF = NSQC4.QuestsField
-        local cell = QF and QF.cells and QF.cells[entity.index]
-        if cell and cell._hovered then
-            local Sound = NSQC4.QuestsDfAISound
-            if Sound then Sound:PlayTerrain("ladder") end
-        end
-
-        -- готово?
         if totalHP > 0 and newH >= totalHP then
             Grid:SetHardness(bIndex, totalHP)
             b.hp = totalHP
@@ -5028,7 +5327,6 @@ NSQC4.RegisterModule("quests", function()
             return true
         end
 
-        -- материал кончился в процессе клика → попросим новый
         if Grid:GetStored(bIndex) <= 0 then
             ai.work = nil
             dbg(string.format("TickBuild cell=%d: stored кончился → need_material (hp=%d/%d)",
@@ -5040,7 +5338,7 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- DEMOLISH: без изменений.
+    -- DEMOLISH
     -- ========================================================================
     local function TickDemolish(entity, ai, bIndex)
         local b = Grid:GetBuilding(bIndex)
@@ -5099,7 +5397,7 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- BREAK: без изменений.
+    -- BREAK
     -- ========================================================================
     local function TickBreak(entity, ai)
         local curH = Grid:GetHardness(ai.target)
@@ -8684,6 +8982,12 @@ NSQC4.RegisterModule("quests", function()
         local Animate = NSQC4.QuestsDfEntitiesAnimate
         local byName = ByName()
 
+        -- Скрыть все фреймы существ (Api._entityFrames) — они не привязаны к byName
+        local EntApi = NSQC4.QuestsDfEntitiesUIApi
+        if EntApi and EntApi.ClearAllVisuals then
+            EntApi:ClearAllVisuals()
+        end
+
         for name, e in pairs(byName) do
             if Animate and e.id then Animate:Stop(e.id) end
             if Grid.ClearSelection then
@@ -8935,8 +9239,25 @@ end)
 
 -- ============================================================================
 -- NSQC4 / Quests / df / Entities / UI / Animate
--- temp (иконка в движении) — OVERLAY/5 (выше лута OVERLAY/3 и anchor OVERLAY/4).
--- Слой задаётся при CreateTexture. SetDrawLayer НЕ используем.
+-- Тонкая обёртка над Entities/UI/Api. НЕ ведёт свою интерполяцию.
+--
+-- ПОЧЕМУ:
+--   Раньше Animate был вторым независимым интегратором позиции: он двигал
+--   temp по своим from/to и своему t, а Move в это же время двигал ту же
+--   temp по posX/posY. Два источника — рывки и «не туда».
+--
+-- ТЕПЕРЬ:
+--   Единственный интегратор — Move:Advance (пишет entity.posX/posY).
+--   Единственный рендер — Entities/UI/Api (RefreshTempAt / Render).
+--   Animate отвечает только за:
+--     - флаг «существо в движении» (IsAnimating),
+--     - смену expanded во время движения (через Move:SyncExpanded),
+--     - Stop/StopAll (сброс временных текстур — на самом деле это делает Api).
+--
+-- Совместимость: старые вызовы Animate:Start(id, opts, from, to, dur)
+-- не используются новым кодом (Move сам стартует шаг). Оставлены как
+-- no-op / прокси к Api, чтобы не падали старые места, если где-то ещё
+-- зовут Start/Stop.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -8956,256 +9277,136 @@ NSQC4.RegisterModule("quests", function()
         return
     end
 
-    local active = {}
-    local frame  = nil
+    local Api = NSQC4.QuestsDfEntitiesUIApi
 
-    local TEMP_LAYER    = "OVERLAY"
-    local TEMP_SUBLEVEL = 5
-
-    local function CellGeom(index)
-        local f = QuestsField.frame
-        local btn = QuestsField.cells and QuestsField.cells[index]
-        if not f or not btn then return nil end
-        local fL, fB = f:GetLeft() or 0, f:GetBottom() or 0
-        local bL, bB = btn:GetLeft() or 0, btn:GetBottom() or 0
-        local w, h   = btn:GetWidth() or 0, btn:GetHeight() or 0
-        return (bL - fL), (bB - fB), w, h
-    end
-
-    local function LayoutFor(anchorPos, expanded, left, bottom, cellW, cellH)
-        if expanded then
-            return "CENTER", left + cellW / 2, bottom + cellH / 2, cellW, cellH
-        end
-        local w, h = cellW / 3, cellH / 3
-        local point, px, py
-        if anchorPos == "TOPLEFT" then
-            point, px, py = "TOPLEFT", left, bottom + cellH
-        elseif anchorPos == "TOPCENTER" then
-            point, px, py = "TOP", left + cellW / 2, bottom + cellH
-        elseif anchorPos == "TOPRIGHT" then
-            point, px, py = "TOPRIGHT", left + cellW, bottom + cellH
-        elseif anchorPos == "MIDLEFT" then
-            point, px, py = "LEFT", left, bottom + cellH / 2
-        elseif anchorPos == "CENTER" then
-            point, px, py = "CENTER", left + cellW / 2, bottom + cellH / 2
-        elseif anchorPos == "MIDRIGHT" then
-            point, px, py = "RIGHT", left + cellW, bottom + cellH / 2
-        elseif anchorPos == "BOTLEFT" then
-            point, px, py = "BOTTOMLEFT", left, bottom
-        elseif anchorPos == "BOTCENTER" then
-            point, px, py = "BOTTOM", left + cellW / 2, bottom
-        elseif anchorPos == "BOTRIGHT" then
-            point, px, py = "BOTTOMRIGHT", left + cellW, bottom
-        else
-            point, px, py = "TOPLEFT", left, bottom + cellH
-        end
-        return point, px, py, w, h
-    end
-
-    local function EnsureFrame()
-        if frame then return frame end
-        frame = CreateFrame("Frame")
-        frame:SetScript("OnUpdate", function() Animate:Tick() end)
-        frame:Show()
-        dbg("EnsureFrame: created and shown")
-        return frame
-    end
-
-    local function RenderCell(index)
-        if not index then return end
-        local TerrainApi = NSQC4.QuestsDfTerrainUIApi
-        if TerrainApi and TerrainApi.RenderCellFromStorage then
-            TerrainApi:RenderCellFromStorage(index)
-        end
-    end
-
-    local function RenderBoth(fromIndex, toIndex)
-        if fromIndex and toIndex and fromIndex == toIndex then
-            RenderCell(toIndex)
-            return
-        end
-        RenderCell(fromIndex)
-        RenderCell(toIndex)
-    end
-
-    local function HostFor(toIndex)
-        local btn = QuestsField.cells and QuestsField.cells[toIndex]
-        return btn or QuestsField.frame
-    end
-
-    function Animate:Start(id, opts, fromIndex, toIndex, duration)
-        if not id or not opts or not opts.icon or not toIndex then
-            dbg("Start: bad args", tostring(id), tostring(opts and opts.icon), tostring(toIndex))
-            return false
-        end
-        if not duration or duration <= 0 then duration = 1 end
-
-        if active[id] then
-            if active[id].temp then active[id].temp:Hide() end
-            active[id] = nil
-        end
-
-        local fromL, fromB, fromW, fromH = CellGeom(fromIndex)
-        local toL,   toB,   toW,   toH   = CellGeom(toIndex)
-        if not fromL or not toL then
-            dbg("Start: CellGeom nil", tostring(fromIndex), tostring(toIndex))
-            return false
-        end
-
-        local anchorPos = opts.anchor or "TOPLEFT"
-        local expanded  = opts.expanded and true or false
-
-        local fromPoint, fromX, fromY, fromSizeW, fromSizeH =
-            LayoutFor(anchorPos, expanded, fromL, fromB, fromW, fromH)
-        local toPoint, toX, toY, toSizeW, toSizeH =
-            LayoutFor(anchorPos, expanded, toL, toB, toW, toH)
-
-        local host = HostFor(toIndex)
-        local temp = host:CreateTexture(nil, TEMP_LAYER, nil, TEMP_SUBLEVEL)
-        temp:SetTexture(opts.icon)
-        temp:SetTexCoord(0, 1, 0, 1)
-        temp:SetVertexColor(1, 1, 1, 1)
-        temp:SetAlpha(opts.alpha or 1)
-        temp:SetSize(fromSizeW, fromSizeH)
-        temp:SetPoint(fromPoint, QuestsField.frame, "BOTTOMLEFT", fromX, fromY)
-        temp:Show()
-
-        active[id] = {
-            temp      = temp,
-            icon      = opts.icon,
-            alpha     = opts.alpha or 1,
-            expanded  = expanded,
-            anchorPos = anchorPos,
-            point     = fromPoint,
-            fromX = fromX, fromY = fromY,
-            toX   = toX,   toY   = toY,
-            sizeW = fromSizeW, sizeH = fromSizeH,
-            toSizeW = toSizeW, toSizeH = toSizeH,
-            duration  = duration,
-            startedAt = GetTime(),
-            fromIndex = fromIndex,
-            toIndex   = toIndex,
-        }
-
-        local cell = QuestsField.cells and QuestsField.cells[fromIndex]
-        if cell and cell.anchors and cell.anchors[anchorPos] then
-            cell.anchors[anchorPos]:Hide()
-        end
-
-        EnsureFrame()
-        dbg("Start", tostring(id), fromIndex, "->", toIndex, "dur", duration)
-        return true
-    end
-
-    function Animate:SetExpanded(id, expanded)
-        local a = active[id]
-        if not a then return false end
-        expanded = expanded and true or false
-        if a.expanded == expanded then return true end
-
-        local fromL, fromB, fromW, fromH = CellGeom(a.fromIndex)
-        local toL,   toB,   toW,   toH   = CellGeom(a.toIndex)
-        if not fromL or not toL then return false end
-
-        local fromPoint, fromX, fromY, fromSizeW, fromSizeH =
-            LayoutFor(a.anchorPos, expanded, fromL, fromB, fromW, fromH)
-        local toPoint, toX, toY, toSizeW, toSizeH =
-            LayoutFor(a.anchorPos, expanded, toL, toB, toW, toH)
-
-        a.expanded = expanded
-        a.point = fromPoint
-        a.fromX, a.fromY = fromX, fromY
-        a.toX,   a.toY   = toX,   toY
-        a.sizeW, a.sizeH = fromSizeW, fromSizeH
-        a.toSizeW, a.toSizeH = toSizeW, toSizeH
-
-        if a.temp then a.temp:SetSize(fromSizeW, fromSizeH) end
-
-        local t = (GetTime() - a.startedAt) / a.duration
-        if t > 1 then t = 1 end
-        if a.temp then
-            local x = a.fromX + (a.toX - a.fromX) * t
-            local y = a.fromY + (a.toY - a.fromY) * t
-            a.temp:ClearAllPoints()
-            a.temp:SetPoint(a.point, QuestsField.frame, "BOTTOMLEFT", x, y)
-        end
-        dbg("SetExpanded", tostring(id), expanded)
-        return true
-    end
-
-    function Animate:Stop(id)
-        local a = active[id]
-        if not a then return false end
-        local fromIndex, toIndex = a.fromIndex, a.toIndex
-        if a.temp then
-            a.temp:Hide()
-            a.temp:ClearAllPoints()
-            a.temp:SetTexture(nil)
-        end
-        active[id] = nil
-        RenderBoth(fromIndex, toIndex)
-        dbg("Stop", tostring(id), fromIndex, "->", toIndex)
-        return true
-    end
-
-    function Animate:StopAll()
-        local ids = {}
-        for id in pairs(active) do ids[#ids + 1] = id end
-        for _, id in ipairs(ids) do
-            self:Stop(id)
-        end
-        if Animate.DEBUG then
-            print("|cff00ffff[ANIM]|r StopAll:", #ids, "анимаций остановлено")
-        end
-        return #ids
-    end
-
+    -- ========================================================================
+    -- IsAnimating: существо в пути?
+    --   Определяется по entity.nextIndex (Move выставил) — это и есть
+    --   «в движении». Не по внутренней таблице Animate.
+    -- ========================================================================
     function Animate:IsAnimating(id)
-        return id and active[id] ~= nil
+        if not id then return false end
+        local Entities = NSQC4.QuestsDfEntities
+        if not Entities then return false end
+        local entity = Entities:Get(id)
+        if not entity then return false end
+        return entity.nextIndex ~= nil
     end
 
-    function Animate:Tick()
-        local now = GetTime()
-        for id, a in pairs(active) do
-            local t = (now - a.startedAt) / a.duration
-            if t >= 1 then
-                local fromIndex, toIndex = a.fromIndex, a.toIndex
-                if a.temp then
-                    a.temp:Hide()
-                    a.temp:ClearAllPoints()
-                    a.temp:SetTexture(nil)
-                end
-                active[id] = nil
-                RenderBoth(fromIndex, toIndex)
-                dbg("Tick done", tostring(id), fromIndex, "->", toIndex)
-            else
-                local x = a.fromX + (a.toX - a.fromX) * t
-                local y = a.fromY + (a.toY - a.fromY) * t
-                local w = a.sizeW + (a.toSizeW - a.sizeW) * t
-                local h = a.sizeH + (a.toSizeH - a.sizeH) * t
-                if a.temp then
-                    a.temp:ClearAllPoints()
-                    a.temp:SetPoint(a.point, QuestsField.frame, "BOTTOMLEFT", x, y)
-                    a.temp:SetSize(w, h)
-                end
+    -- ========================================================================
+    -- SetExpanded: сменить флаг размера во время движения.
+    --   Делегируем в Move:SyncExpanded — он пересчитает концы шага и
+    --   скорректирует t, чтобы posX/posY не прыгнули. Затем — перерисовать
+    --   temp по новой геометрии через Api.
+    -- ========================================================================
+    function Animate:SetExpanded(id, expanded)
+        local Entities = NSQC4.QuestsDfEntities
+        if not Entities then return false end
+        local entity = Entities:Get(id)
+        if not entity then return false end
+
+        entity.opts.expanded = expanded and true or false
+
+        -- если в пути — пересчитать геометрию шага без рывка
+        local Move = NSQC4.QuestsDfAIMove
+        if Move and Move.SyncExpanded and entity.nextIndex then
+            Move:SyncExpanded(entity)
+        end
+
+        -- перерисовать: Api сам разберётся (temp в пути / anchor в покое)
+        if Api and Api.RenderCellFromStorage then
+            Api:RenderCellFromStorage(entity.index)
+        end
+
+        dbg("SetExpanded", tostring(id), tostring(expanded))
+        return true
+    end
+
+    -- ========================================================================
+    -- Stop: сбросить «временную» текстуру существа и перерисовать клетку.
+    --   Реально это делает Api:StopMoving / RenderCellFromStorage.
+    -- ========================================================================
+    function Animate:Stop(id)
+        local Entities = NSQC4.QuestsDfEntities
+        if not Entities then return false end
+        local entity = Entities:Get(id)
+        if not entity then return false end
+
+        local index = entity.nextIndex or entity.index
+        if Api and Api.StopMoving then
+            Api:StopMoving(entity, index)
+        elseif Api and Api.RenderCellFromStorage then
+            Api:RenderCellFromStorage(entity.index)
+        end
+
+        dbg("Stop", tostring(id))
+        return true
+    end
+
+    -- ========================================================================
+    -- StopAll: остановить все «временные» текстуры существ.
+    -- ========================================================================
+    function Animate:StopAll()
+        local Entities = NSQC4.QuestsDfEntities
+        if not Entities then return 0 end
+        local n = 0
+        for _, e in ipairs(Entities:GetAll()) do
+            if e.id and e.nextIndex then
+                self:Stop(e.id)
+                n = n + 1
             end
         end
+        dbg("StopAll:", n)
+        return n
     end
 
-    function Animate:Dump()
-        local n = 0
-        for id, a in pairs(active) do
-            n = n + 1
-            print(string.format("[ANIM] %s: %s→%s  t=%.2f  temp=%s",
-                tostring(id), tostring(a.fromIndex), tostring(a.toIndex),
-                (GetTime() - a.startedAt) / a.duration,
-                a.temp and (a.temp:IsShown() and "shown" or "hidden") or "nil"))
+    -- ========================================================================
+    -- Start: СОВМЕСТИМОСТЬ.
+    --   Новый код не должен звать Start — шаг стартует Move:Advance.
+    --   Если где-то остался старый вызов — просто перерисуем клетку и
+    --   вернём true, чтобы не падало.
+    -- ========================================================================
+    function Animate:Start(id, opts, fromIndex, toIndex, duration)
+        if Animate.DEBUG then
+            print(string.format("[ANIM] Start(%s) — устаревший вызов, перерисовка клетки %s",
+                tostring(id), tostring(toIndex)))
         end
-        print("[ANIM] active:", n,
-              "frame:", frame and (frame:IsShown() and "shown" or "hidden") or "nil")
+        if Api and Api.RenderCellFromStorage and toIndex then
+            Api:RenderCellFromStorage(toIndex)
+        end
+        return true
     end
 
-    print("|cff00ffff[ANIM]|r Animate загружен (temp OVERLAY/5)")
+    -- ========================================================================
+    -- Tick: пусто. Интерполяцию ведёт Move:Advance (вызывается из AI:Tick).
+    --   Оставлено для совместимости (кто-то мог дёргать Animate:Tick).
+    -- ========================================================================
+    function Animate:Tick()
+        -- no-op
+    end
+
+    -- ========================================================================
+    -- Dump: диагностика.
+    -- ========================================================================
+    function Animate:Dump()
+        local Entities = NSQC4.QuestsDfEntities
+        if not Entities then
+            print("[ANIM] Entities не загружен")
+            return
+        end
+        local n = 0
+        for _, e in ipairs(Entities:GetAll()) do
+            if e.nextIndex then
+                n = n + 1
+                print(string.format("[ANIM] %s: %s→%s pos=(%.1f,%.1f) exp=%s",
+                    tostring(e.id), tostring(e.index), tostring(e.nextIndex),
+                    e.posX or -1, e.posY or -1, tostring(e.opts and e.opts.expanded)))
+            end
+        end
+        print("[ANIM] в движении:", n)
+    end
+
+    print("|cff00ffff[ANIM]|r Animate загружен (тонкая обёртка над Api, без своей интерполяции)")
 end)
 
 
@@ -9217,15 +9418,13 @@ end)
 -- NSQC4 / Quests / df / Entities / UI / Api
 -- ОДИН визуал: в пути temp, в покое anchor.
 --
--- ФИКС свёрнутой в центре:
---   RefreshTempAt ставит SetPoint("CENTER", host, "BOTTOMLEFT", x-hL, y-hB),
---   где x,y — центр anchor-иконки из Move.AnchorPos.
---   Для свёрнутой x,y = TOPLEFT + ins + size/2 — temp 1/3 в TOPLEFT.
---   НЕ центр клетки.
+-- СЛОИ: btn+20 — фрейм существа (anchor/temp внутри). Выше лута (btn+10).
 --
--- ФИКС копии в центре при развороте:
---   Render при IsBetweenCells НЕ зовёт ApplyAnchor. Только RefreshTempAt.
---   Anchor скрыт HideAnchorAt на старте шага. Один визуал — temp.
+-- ПЕРЕКЛЮЧЕНИЕ ЭТАЖА:
+--   UIApi._entityFrames[id] живёт независимо от byName/Grid. При смене
+--   этажа старые фреймы НЕ чистятся сами — нужен явный ClearAllVisuals().
+--   Вызывается из Entities:Clear(), Floors:LoadFloor, Floors:Generate,
+--   Floors:Switch (RenderAll).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -9249,8 +9448,7 @@ NSQC4.RegisterModule("quests", function()
     end
 
     local DEFAULT_ALPHA  = 1.0
-    local TEMP_LAYER     = "OVERLAY"
-    local TEMP_SUBLEVEL  = 5
+    local ENTITY_LEVEL_OFFSET = 20
 
     local function Valid(index)
         index = tonumber(index) or 0
@@ -9263,39 +9461,69 @@ NSQC4.RegisterModule("quests", function()
         return btn or QuestsField.frame
     end
 
-    local function EnsureTempTexture(entity)
-        if not entity or not entity.id then return nil end
+    local function EnsureEntityFrame(entity)
+        if not entity or not entity.id then return nil, nil end
         local host = HostFor(entity)
-        if not host then return nil end
+        if not host then return nil, nil end
 
-        if not UIApi._movingTextures then UIApi._movingTextures = {} end
-        local tex = UIApi._movingTextures[entity.id]
+        if not UIApi._entityFrames then UIApi._entityFrames = {} end
+        local rec = UIApi._entityFrames[entity.id]
 
-        if tex and tex:GetParent() ~= host then
-            tex:Hide(); tex:ClearAllPoints(); tex:SetTexture(nil)
-            UIApi._movingTextures[entity.id] = nil
-            tex = nil
+        if rec and rec.frame and rec.frame:GetParent() ~= host then
+            rec.frame:Hide()
+            rec.tex:SetTexture(nil)
+            rec.frame:ClearAllPoints()
+            UIApi._entityFrames[entity.id] = nil
+            rec = nil
         end
-        if tex then return tex end
 
-        tex = host:CreateTexture(nil, TEMP_LAYER, nil, TEMP_SUBLEVEL)
-        tex:SetTexture(nil); tex:SetTexCoord(0, 1, 0, 1)
-        tex:SetVertexColor(1, 1, 1, 1)
-        tex:SetAlpha(DEFAULT_ALPHA); tex:Hide()
-        UIApi._movingTextures[entity.id] = tex
-        return tex
+        if not rec then
+            local f = CreateFrame("Frame", nil, host)
+            f:SetFrameLevel(host:GetFrameLevel() + ENTITY_LEVEL_OFFSET)
+            f:EnableMouse(false)
+            f:Hide()
+
+            local tex = f:CreateTexture(nil, "OVERLAY", nil, 0)
+            tex:SetTexture(nil)
+            tex:SetTexCoord(0, 1, 0, 1)
+            tex:SetVertexColor(1, 1, 1, 1)
+            tex:SetAlpha(DEFAULT_ALPHA)
+            tex:SetAllPoints(f)
+            tex:Hide()
+
+            rec = { frame = f, tex = tex }
+            UIApi._entityFrames[entity.id] = rec
+        end
+        return rec.frame, rec.tex
     end
 
-    local function HideTempTexture(entity)
+    local function HideEntityVisual(entity)
         if not entity or not entity.id then return end
-        if not UIApi._movingTextures then return end
-        local tex = UIApi._movingTextures[entity.id]
-        if tex then tex:Hide(); tex:ClearAllPoints(); tex:SetTexture(nil) end
+        if not UIApi._entityFrames then return end
+        local rec = UIApi._entityFrames[entity.id]
+        if rec then
+            if rec.frame then rec.frame:Hide() end
+            if rec.tex then rec.tex:SetTexture(nil) end
+        end
     end
 
-    function UIApi:HideAnchorAt(index)
-        if not index then return end
-        QuestsField:ClearAnchorTextures(index)
+    -- ========================================================================
+    -- ClearAllVisuals: скрыть ВСЕ фреймы существ и очистить реестр.
+    -- Вызывается при смене этажа (Entities:Clear, Floors:LoadFloor/Generate/Switch).
+    -- ========================================================================
+    function UIApi:ClearAllVisuals()
+        if not UIApi._entityFrames then return end
+        for id, rec in pairs(UIApi._entityFrames) do
+            if rec.frame then
+                rec.frame:Hide()
+                rec.frame:ClearAllPoints()
+            end
+            if rec.tex then
+                rec.tex:SetTexture(nil)
+            end
+        end
+        UIApi._entityFrames = {}
+        dbg("ClearAllVisuals: все фреймы существ скрыты")
     end
 
     local function TempSize(entity)
@@ -9316,41 +9544,67 @@ NSQC4.RegisterModule("quests", function()
 
     local function RefreshTempAt(entity, x, y)
         if not entity or not entity.opts then return end
-        local tex = EnsureTempTexture(entity)
-        if not tex then return end
+        local frame, tex = EnsureEntityFrame(entity)
+        if not frame or not tex then return end
 
         local opts = entity.opts
         local w, h = TempSize(entity)
+
+        frame:ClearAllPoints()
+        frame:SetSize(w, h)
+        frame:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x, y)
+        frame:Show()
 
         tex:SetTexture(opts.icon or opts.texture)
         tex:SetTexCoord(0, 1, 0, 1)
         tex:SetVertexColor(1, 1, 1, 1)
         tex:SetAlpha(opts.alpha or DEFAULT_ALPHA)
-        tex:SetSize(w, h)
-
-        local host = tex:GetParent()
-        if not host then return end
-        local hL, hB = host:GetLeft() or 0, host:GetBottom() or 0
-
-        tex:ClearAllPoints()
-        tex:SetPoint("CENTER", host, "BOTTOMLEFT", (x - hL), (y - hB))
         tex:Show()
     end
 
-    -- anchor в клетку index (только в покое)
     local function ApplyAnchor(index, opts)
         if not opts or not opts.icon then
-            QuestsField:ClearAnchorTextures(index)
+            local Grid = NSQC4.QuestsDfGrid
+            local entity = Grid and Grid:GetEntity(index)
+            if entity then HideEntityVisual(entity) end
             return
         end
-        -- Свёрнутая всегда TOPLEFT, развёрнутая CENTER.
-        local pos = opts.expanded and "CENTER" or "TOPLEFT"
-        local expanded = opts.expanded and true or false
-        local alpha    = opts.alpha    or DEFAULT_ALPHA
-        QuestsField:SetAnchorExpanded(index, pos, opts.icon, expanded)
-        local cell = QuestsField.cells and QuestsField.cells[index]
-        local tex  = cell and cell.anchors and cell.anchors[pos]
-        if tex then tex:SetAlpha(alpha) end
+
+        local Grid = NSQC4.QuestsDfGrid
+        local entity = Grid and Grid:GetEntity(index)
+        if not entity then return end
+
+        local frame, tex = EnsureEntityFrame(entity)
+        if not frame or not tex then return end
+
+        local btn = QuestsField.cells and QuestsField.cells[index]
+        if not btn then return end
+
+        local w, h = TempSize(entity)
+
+        frame:ClearAllPoints()
+        frame:SetSize(w, h)
+
+        if opts.expanded then
+            frame:SetPoint("CENTER", btn, "CENTER", 0, 0)
+        else
+            local ins = CONST.ANCHOR_INSET or 0
+            frame:SetPoint("CENTER", btn, "TOPLEFT", ins + w / 2, -(ins + h / 2))
+        end
+        frame:Show()
+
+        tex:SetTexture(opts.icon)
+        tex:SetTexCoord(0, 1, 0, 1)
+        tex:SetVertexColor(1, 1, 1, 1)
+        tex:SetAlpha(opts.alpha or DEFAULT_ALPHA)
+        tex:Show()
+    end
+
+    function UIApi:HideAnchorAt(index)
+        if not index then return end
+        local Grid = NSQC4.QuestsDfGrid
+        local entity = Grid and Grid:GetEntity(index)
+        if entity then HideEntityVisual(entity) end
     end
 
     function UIApi:Render(index, opts)
@@ -9361,18 +9615,16 @@ NSQC4.RegisterModule("quests", function()
         local entity = Grid and Grid:GetEntity(index)
 
         if entity and entity.nextIndex then
-            -- в пути: только temp. Anchor скрыт HideAnchorAt.
             if opts and opts.icon then
                 RefreshTempAt(entity, entity.posX or 0, entity.posY or 0)
             else
-                HideTempTexture(entity)
+                HideEntityVisual(entity)
             end
             return true
         end
 
-        -- в покое: только anchor.
         if not opts then
-            QuestsField:ClearAnchorTextures(index)
+            if entity then HideEntityVisual(entity) end
             return true
         end
         ApplyAnchor(index, opts)
@@ -9385,10 +9637,21 @@ NSQC4.RegisterModule("quests", function()
         local Grid = NSQC4.QuestsDfGrid
         if not Grid then return false end
         local entity = Grid:GetEntity(index)
+
         if not entity or not entity.opts then
-            self:Render(index, nil)
+            -- Скрыть все фреймы, привязанные к этой клетке (btn)
+            if UIApi._entityFrames then
+                local btn = QuestsField.cells and QuestsField.cells[index]
+                for id, rec in pairs(UIApi._entityFrames) do
+                    if rec.frame and rec.frame:GetParent() == btn then
+                        rec.frame:Hide()
+                        rec.tex:SetTexture(nil)
+                    end
+                end
+            end
             return true
         end
+
         local opts = entity.opts
         self:Render(index, {
             icon     = opts.icon or opts.texture,
@@ -9407,7 +9670,6 @@ NSQC4.RegisterModule("quests", function()
 
     function UIApi:StopMoving(entity, index)
         if not entity then return false end
-        HideTempTexture(entity)
         if index then
             self:RenderCellFromStorage(index)
         else
@@ -9427,18 +9689,28 @@ NSQC4.RegisterModule("quests", function()
         local cmd = (msg or ""):lower():match("^(%S*)")
         if cmd == "" or cmd == "on" then UIApi.DEBUG = true; print("[ENT-UI] DEBUG = true")
         elseif cmd == "off" then UIApi.DEBUG = false; print("[ENT-UI] DEBUG = false")
-        elseif cmd == "moving" then
-            local n = 0
-            if UIApi._movingTextures then
-                for id, tex in pairs(UIApi._movingTextures) do
-                    if tex:IsShown() then n = n + 1 end
+        elseif cmd == "clear" then
+            UIApi:ClearAllVisuals()
+            print("[ENT-UI] clear: все фреймы скрыты")
+        elseif cmd == "layers" then
+            local Entities = NSQC4.QuestsDfEntities
+            if not Entities then return end
+            for _, e in ipairs(Entities:GetAll()) do
+                local rec = UIApi._entityFrames and UIApi._entityFrames[e.id]
+                if rec then
+                    print(string.format("[ENT-UI] %s idx=%s frameLevel=%s parent=%s",
+                        tostring(e.opts and e.opts.name), tostring(e.index),
+                        tostring(rec.frame:GetFrameLevel()),
+                        tostring(rec.frame:GetParent() and rec.frame:GetParent():GetName() or "?")))
+                else
+                    print(string.format("[ENT-UI] %s idx=%s — нет фрейма",
+                        tostring(e.opts and e.opts.name), tostring(e.index)))
                 end
             end
-            print(string.format("[ENT-UI] movingTextures shown: %d", n))
-        else print("[ENT-UI] /ns_entui on | off | moving") end
+        else print("[ENT-UI] /ns_entui on | off | clear | layers") end
     end
 
-    print("|cff00ffff[ENT-UI]|r Entities/UI/Api загружен (temp в пути, anchor в покое)")
+    print("|cff00ffff[ENT-UI]|r Entities/UI/Api загружен (фрейм btn+20, ClearAllVisuals)")
 end)
 
 
@@ -9460,16 +9732,29 @@ end)
 --   Floors:ApplyWaterFromAbove(n) берёт снимок этажа n+1 (если есть) и
 --   для каждой клетки, где на этаже n+1 вода с depth >= 1, ставит на этаж n
 --   тоже воду с depth = depth - 1. Где depth - 1 == 0 — ставит earth (дно).
---   Это даёт «проваливание» реки/озера с этажа 0 вниз на глубину.
+--
+-- БЛОКИРОВКА ПОВТОРНОЙ ГЕНЕРАЦИИ:
+--   Раньше блокировали по s.visited[n]. Это несогласованно: visited мог
+--   быть true, а snapshots[n] — nil (например, после /reload, если visited
+--   сохранился, а snapshots — нет). Тогда Generate не звался, LoadFloor
+--   падал (нет снимка), и на этаже оставались существа с другого этажа.
+--
+--   Теперь блокируем по s.snapshots[n]: visited — производное от snapshots.
+--   Если снимка нет — генерируем, даже если visited[n] == true.
+--
+-- ОЧИСТКА СУЩЕСТВ:
+--   Для n ~= 0 зовём Entities:Clear() ДО ClearGrid(), чтобы RenderCell
+--   при очистке byName не находил существ (entityName ещё стоит, но
+--   byName уже пуст → Grid:GetEntity вернёт nil).
 --
 -- 0. Animate:StopAll() — чтобы temp-текстуры старого этажа не остались.
--- 1. Очистить клетки (terrain=nil, hardness=nil, entityName=nil, loot=nil,
---    depth=nil) и выделения (terrain_types, reserved).
--- 2. Для n < 0 — заполнить earth/stone.
--- 3. ApplyWaterFromAbove(n) — вода с этажа n+1, если есть снимок.
--- 4. SeedRiver/SeedLake — обычная генерация воды (если доступна).
--- 5. Пометить visited[n] = true, обновить min/max.
--- 6. Сохранить снимок (SaveFloor).
+-- 1. Entities:Clear() (для n ~= 0) — очистить существ.
+-- 2. ClearGrid() — очистить клетки + выделения + depth.
+-- 3. Для n < 0 — FillRandom({earth, stone}).
+-- 4. ApplyWaterFromAbove(n) — вода с этажа n+1, если есть снимок.
+-- 5. SeedRiver/SeedLake — обычная генерация воды (если доступна).
+-- 6. Пометить visited[n] = true, обновить min/max.
+-- 7. SaveFloor(n) — сохранить снимок (пустые существа для n < 0).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -9517,7 +9802,6 @@ NSQC4.RegisterModule("quests", function()
                 c.depth      = nil
             end
         end
-        -- выделения: свои на каждом этаже, новый этаж — без выделений
         if Grid.ClearAllSelections then
             Grid:ClearAllSelections("terrain")
             Grid:ClearAllSelections("reserved")
@@ -9532,24 +9816,11 @@ NSQC4.RegisterModule("quests", function()
         end
     end
 
-    -- ========================================================================
-    -- Вода с этажа n+1 (если есть снимок). Делает:
-    --   - клетка над нами water depth>=2 → у нас water, depth-1
-    --   - клетка над нами water depth==1 → у нас earth (дно)
-    --   - клетка над нами не water        → не трогаем (останется earth/stone)
-    -- ========================================================================
     local function ApplyWaterFromAbove(n)
         if not Floors.ApplyWaterFromAbove then return 0 end
         return Floors:ApplyWaterFromAbove(n)
     end
 
-    -- ========================================================================
-    -- Обычная генерация воды на этаже (река/озеро).
-    -- Вызывается только если у этажа нет «воды сверху», либо в дополнение
-    -- к ней (по желанию). Сейчас: если ApplyWaterFromAbove ничего не
-    -- поставил — пробуем SeedRiver/SeedLake. Если поставил — не добавляем,
-    -- чтобы не перекрывать «провалившуюся» воду.
-    -- ========================================================================
     local function SeedWaterOnFloor(n, placedFromAbove)
         if placedFromAbove > 0 then
             return 0
@@ -9575,7 +9846,10 @@ NSQC4.RegisterModule("quests", function()
         n = tonumber(n) or 0
 
         local s = EnsureStorage()
-        if s.visited[n] and n ~= 0 then
+
+        -- БЛОКИРОВКА ПО СНИМКУ, а не по visited:
+        -- если снимок есть — этаж уже сгенерирован.
+        if s.snapshots[n] then
             return false
         end
 
@@ -9590,21 +9864,23 @@ NSQC4.RegisterModule("quests", function()
             Animate:StopAll()
         end
 
-        -- существ убираем на любом этаже (кроме 0 — там текущая карта)
+        -- 1. Существ убираем ДО ClearGrid, чтобы RenderCell при очистке
+        --    byName не находил существ (entityName ещё стоит, byName пуст).
         if n ~= 0 and Entities and Entities.Clear then
             Entities:Clear()
         end
 
+        -- 2. Очистить клетки + выделения + depth
         ClearGrid()
 
         if n < 0 then
-            -- 2. База: земля/камень
+            -- 3. База: земля/камень
             FillRandom({ "earth", "stone" })
 
-            -- 3. Вода «сверху» (если этаж n+1 уже сгенерирован)
+            -- 4. Вода «сверху» (если этаж n+1 уже сгенерирован)
             local placedAbove = ApplyWaterFromAbove(n)
 
-            -- 4. Обычная генерация воды — только если сверху ничего не пришло
+            -- 5. Обычная генерация воды — только если сверху ничего не пришло
             local placedSeed = SeedWaterOnFloor(n, placedAbove)
 
             if placedAbove > 0 or placedSeed > 0 then
@@ -9620,6 +9896,7 @@ NSQC4.RegisterModule("quests", function()
         if n < s.min then s.min = n end
         if n > s.max then s.max = n end
 
+        -- 6. Сохранить снимок (для n < 0 — пустые существа)
         if Floors.SaveFloor then
             Floors:SaveFloor(n)
         end
@@ -9640,29 +9917,15 @@ end)
 
 -- ============================================================================
 -- NSQC4 / Quests / df / Floors / Init
--- Реестр этажей.
+-- Реестр этажей. ТОЛЬКО базовое: Get/Set/IsVisited/CanSwitch/EnsureStorage.
 --
--- Модель:
---   nsDbc4.quests.df.floors = {
---     current = 0,
---     min     = -N,   -- самый нижний сгенерированный этаж
---     max     = 0,    -- выше нулевого нельзя
---     visited = { [0] = true, [-1] = true, ... },
---   }
+-- Generate / Clear / Switch здесь НЕ определяются:
+--   - Generate — в Floors/Generate.lua
+--   - Switch   — в Floors/Switch.lua
+--   - SaveFloor / LoadFloor / ApplyWaterFromAbove / GetSnapshot — в Floors/Storage.lua
 --
--- API:
---   Floors:Get()           → текущий этаж
---   Floors:Set(n)          → установить (без генерации)
---   Floors:CanSwitch(to)   → true/false + причина
---   Floors:Switch(to)      → переключить (с проверкой)
---   Floors:Generate(n)     → сгенерировать этаж n (если ещё нет)
---   Floors:Clear(n)        → очистить этаж n
---   Floors:IsVisited(n)    → true, если этаж уже сгенерирован
---
--- Логика переключения:
---   - бесплатно только 0 → -1
---   - дальше — только если PercentVoid() >= 0.6 (60% выкопано)
---   - выше 0 нельзя
+-- Если Generate.lua или Switch.lua не загрузятся — будет честная ошибка
+-- «attempt to call method 'Generate' (a nil value)», а не тихий баг.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -9684,10 +9947,11 @@ NSQC4.RegisterModule("quests", function()
         nsDbc4.quests.df.floors = nsDbc4.quests.df.floors or {}
 
         local s = nsDbc4.quests.df.floors
-        s.current = s.current or 0
-        s.min     = s.min or 0
-        s.max     = s.max or 0
-        s.visited = s.visited or { [0] = true }
+        s.current   = s.current or 0
+        s.min       = s.min or 0
+        s.max       = s.max or 0
+        s.visited   = s.visited or { [0] = true }
+        s.snapshots = s.snapshots or {}
         return s
     end
 
@@ -9749,7 +10013,6 @@ NSQC4.RegisterModule("quests", function()
 
         -- вверх
         if to > cur then
-            -- возврат на посещённый этаж — бесплатно
             if s.visited[to] then
                 return true
             end
@@ -9757,54 +10020,6 @@ NSQC4.RegisterModule("quests", function()
         end
 
         return false, "?"
-    end
-
-    -- ========================================================================
-    -- Generate(n) — сгенерировать этаж (заглушка: пока просто помечаем visited;
-    -- реальная генерация — в Floors/Generate.lua)
-    -- ========================================================================
-    function Floors:Generate(n)
-        n = tonumber(n) or 0
-        local s = EnsureStorage()
-        if s.visited[n] then return false end
-        s.visited[n] = true
-        if n < s.min then s.min = n end
-        return true
-    end
-
-    -- ========================================================================
-    -- Clear(n) — очистить этаж (заглушка)
-    -- ========================================================================
-    function Floors:Clear(n)
-        n = tonumber(n) or 0
-        local s = EnsureStorage()
-        s.visited[n] = nil
-        return true
-    end
-
-    -- ========================================================================
-    -- Switch(to) — переключить (с проверкой CanSwitch)
-    -- ========================================================================
-    function Floors:Switch(to)
-        to = tonumber(to) or 0
-        local ok, reason = self:CanSwitch(to)
-        if not ok then
-            print("|cffff0000[NSQC4]|r Нельзя переключить этаж: " .. tostring(reason))
-            return false
-        end
-
-        -- сохранить текущий этаж (позже — Storage)
-        local s = EnsureStorage()
-        local from = s.current
-
-        -- сгенерировать целевой этаж, если ещё нет
-        if not s.visited[to] then
-            self:Generate(to)
-        end
-
-        s.current = to
-        print(string.format("|cff00ff00[NSQC4]|r Этаж: %d → %d", from, to))
-        return true
     end
 
 end)
@@ -9821,23 +10036,28 @@ end)
 -- snapshots[n] = {
 --     grid       = { [i] = { terrain, hardness, entityName, loot, depth } },
 --     selections = { terrain_types = {...}, reserved = {...} },
---     entities   = { { name, id, index, kind, opts = deep copy }, ... },
+--     entities   = { {
+--         name, id, index, kind, opts = deep copy,
+--         -- состояние шага (для продолжения движения):
+--         nextIndex, posX, posY,
+--         stepStartX, stepStartY, stepEndX, stepEndY,
+--         stepDuration, stepExpanded, stepT,
+--     }, ... },
 -- }
 --
--- depth — глубина воды (1..10), см. df/Grid/Depth.lua.
+-- СОХРАНЕНИЕ ШАГА:
+--   stepT = (now - stepStartedAt) / stepDuration — доля прохождения шага
+--   на момент снимка. При загрузке:
+--     stepStartedAt = GetTime() - stepT * stepDuration
+--   Тогда t = (now - stepStartedAt) / stepDuration == stepT, и Move:Advance
+--   продолжит интерполяцию с той же точки, а не начнёт заново.
 --
--- ВОДА ПО ЭТАЖАМ:
---   Если на этаже n+1 клетка i — water с depth >= 1, то на этаже n
---   в клетке i тоже вода, но depth = depth - 1 (вода «проваливается» вниз).
---   depth = 0 на этаже n → не вода (дно).
---
---   Floors:ApplyWaterFromAbove(n) — применяет это правило к этажу n
---   по снимку этажа n+1. Вызывается из Floors:Generate(n) после FillRandom,
---   до SaveFloor(n).
+-- LOADFLOOR БЕЗ СНИМКА:
+--   Если снимка нет — чистим Entities + Grid, чтобы не остались «висящие»
+--   существа с другого этажа. Возвращаем false.
 --
 -- ДУБЛЬ IsVisited: единственное определение Floors:IsVisited — в
--- Floors/Init.lua. Здесь его НЕТ (раньше было — Storage.lua грузится позже
--- Init.lua и перезаписывал версию из Init.lua; убрано).
+-- Floors/Init.lua. Здесь его НЕТ.
 --
 -- Отладка:
 --   /ns_floors on | off | dump | snap <n>
@@ -9964,10 +10184,14 @@ NSQC4.RegisterModule("quests", function()
 
     -- ========================================================================
     -- Снимок существ этажа (byName + Grid)
+    --   Сохраняет и состояние шага (nextIndex/posX/posY/step*/stepT),
+    --   чтобы при загрузке продолжить движение, а не начинать заново.
     -- ========================================================================
     local function SnapshotEntities()
         local list = {}
         local byName = ByName()
+        local now = GetTime()
+
         for name, e in pairs(byName) do
             if e and e.opts then
                 local onGrid = false
@@ -9979,12 +10203,32 @@ NSQC4.RegisterModule("quests", function()
                     end
                 end
                 if onGrid then
+                    -- доля прохождения шага на момент снимка
+                    local t = nil
+                    if e.nextIndex and e.stepStartedAt and e.stepDuration
+                       and e.stepDuration > 0 then
+                        t = (now - e.stepStartedAt) / e.stepDuration
+                        if t < 0 then t = 0 elseif t > 1 then t = 1 end
+                    end
+
                     list[#list + 1] = {
                         name  = name,
                         id    = e.id,
                         index = e.index,
                         kind  = e.kind,
                         opts  = CopyOpts(e.opts),
+
+                        -- состояние шага (nil, если существо в покое)
+                        nextIndex    = e.nextIndex,
+                        posX         = e.posX,
+                        posY         = e.posY,
+                        stepStartX   = e.stepStartX,
+                        stepStartY   = e.stepStartY,
+                        stepEndX     = e.stepEndX,
+                        stepEndY     = e.stepEndY,
+                        stepDuration = e.stepDuration,
+                        stepExpanded = e.stepExpanded,
+                        stepT        = t,
                     }
                 end
             end
@@ -10051,7 +10295,9 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Восстановить существ из снимка
+    -- Восстановить существ из снимка.
+    --   Восстанавливает и состояние шага: nextIndex/posX/posY/step*/stepT.
+    --   stepStartedAt = now - stepT * stepDuration, чтобы t был тот же.
     -- ========================================================================
     local function RestoreEntities(snapList)
         local E = NSQC4.QuestsDfEntities
@@ -10065,6 +10311,7 @@ NSQC4.RegisterModule("quests", function()
 
         if not snapList then return end
 
+        local now = GetTime()
         for _, rec in ipairs(snapList) do
             local name = rec.name
             local opts = rec.opts and CopyOpts(rec.opts) or {}
@@ -10074,6 +10321,23 @@ NSQC4.RegisterModule("quests", function()
                 opts  = opts,
                 kind  = rec.kind or opts.kind or "generic",
             }
+
+            -- восстановить шаг, если существо было в пути
+            if rec.nextIndex then
+                entity.nextIndex     = rec.nextIndex
+                entity.posX          = rec.posX
+                entity.posY          = rec.posY
+                entity.stepStartX    = rec.stepStartX
+                entity.stepStartY    = rec.stepStartY
+                entity.stepEndX      = rec.stepEndX
+                entity.stepEndY      = rec.stepEndY
+                entity.stepDuration  = rec.stepDuration
+                entity.stepExpanded  = rec.stepExpanded
+                local t = rec.stepT or 0
+                if t < 0 then t = 0 elseif t > 1 then t = 1 end
+                entity.stepStartedAt = now - t * (rec.stepDuration or 1)
+            end
+
             byName[name] = entity
             if rec.index and Grid then
                 Grid:SetEntityName(rec.index, name)
@@ -10096,11 +10360,6 @@ NSQC4.RegisterModule("quests", function()
     -- Берёт снимок этажа n+1 (если есть). Для каждой клетки:
     --   - если над нами water с depth >= 1 → у нас тоже water, depth = depth - 1
     --   - если depth - 1 == 0 → не вода (дно), ставим землю (earth)
-    --
-    -- Ставится через Terrain:SetAt (чтобы корректно сбросить hardness/selection)
-    -- и Grid:SetDepth (глубина на новом этаже).
-    --
-    -- Возвращает число клеток воды, поставленных «сверху».
     -- ========================================================================
     function Floors:ApplyWaterFromAbove(n)
         n = tonumber(n) or 0
@@ -10121,14 +10380,12 @@ NSQC4.RegisterModule("quests", function()
                 if upDepth >= 1 then
                     local newDepth = upDepth - 1
                     if newDepth >= 1 then
-                        -- вода «провалилась» на этаж n
                         Terrain:SetAt(i, "water")
                         if Grid and Grid.SetDepth then
                             Grid:SetDepth(i, newDepth)
                         end
                         placed = placed + 1
                     else
-                        -- дно: вода закончилась, ставим землю
                         Terrain:SetAt(i, "earth")
                         if Grid and Grid.ClearDepth then
                             Grid:ClearDepth(i)
@@ -10164,8 +10421,18 @@ NSQC4.RegisterModule("quests", function()
         n = tonumber(n) or 0
         local s = EnsureStorage()
         local snap = s.snapshots[n]
+
+        -- Скрыть все фреймы существ старого этажа ДО восстановления нового
+        local EntApi = NSQC4.QuestsDfEntitiesUIApi
+        if EntApi and EntApi.ClearAllVisuals then
+            EntApi:ClearAllVisuals()
+        end
+
         if not snap then
-            dbg(string.format("LoadFloor(%d): нет снимка", n))
+            dbg(string.format("LoadFloor(%d): нет снимка → очищаю этаж", n))
+            local E = NSQC4.QuestsDfEntities
+            if E and E.Clear then E:Clear() end
+            if Grid and Grid.ClearAll then Grid:ClearAll() end
             return false
         end
         RestoreGrid(snap.grid)
@@ -10224,14 +10491,17 @@ NSQC4.RegisterModule("quests", function()
         if snap.entities then
             for _, rec in ipairs(snap.entities) do
                 local ai = rec.opts and rec.opts.ai
-                print(string.format("  entity %s idx=%s kind=%s state=%s target=%s",
+                print(string.format(
+                    "  entity %s idx=%s kind=%s state=%s target=%s next=%s pos=(%s,%s) stepT=%s",
                     tostring(rec.name), tostring(rec.index), tostring(rec.kind),
-                    tostring(ai and ai.state), tostring(ai and ai.target)))
+                    tostring(ai and ai.state), tostring(ai and ai.target),
+                    tostring(rec.nextIndex),
+                    tostring(rec.posX), tostring(rec.posY),
+                    tostring(rec.stepT)))
             end
         else
             print("  entities: nil")
         end
-        -- Карта воды: где depth и сколько
         if snap.grid then
             local parts = {}
             for i = 1, TOTAL do
@@ -10315,11 +10585,18 @@ NSQC4.RegisterModule("quests", function()
         local Entities = NSQC4.QuestsDfEntities
         local Drops    = NSQC4.QuestsDfTransformDrops
         local QuestsField = NSQC4.QuestsField
+        local EntApi = NSQC4.QuestsDfEntitiesUIApi
 
         dbg("Render: Terrain=" .. tostring(Terrain and "ok" or "nil") ..
             " Entities=" .. tostring(Entities and "ok" or "nil") ..
             " Drops=" .. tostring(Drops and "ok" or "nil") ..
             " Field=" .. tostring(QuestsField and "ok" or "nil"))
+
+        -- Скрыть все фреймы существ (Api._entityFrames) — старый этаж
+        if EntApi and EntApi.ClearAllVisuals then
+            EntApi:ClearAllVisuals()
+            dbg("Render: ClearAllVisuals done")
+        end
 
         -- Скрыть все якоря существ на всех клетках (старый этаж)
         if QuestsField and QuestsField.ClearAnchorTextures then
@@ -10331,29 +10608,9 @@ NSQC4.RegisterModule("quests", function()
             dbg("Render: ClearAnchorTextures all")
         end
 
-        -- Ландшафт
-        if Terrain and Terrain.Render then
-            Terrain:Render()
-            dbg("Render: Terrain:Render done")
-        else
-            dbg("Render: Terrain:Render SKIPPED")
-        end
-
-        -- Существа
-        if Entities and Entities.Render then
-            Entities:Render()
-            dbg("Render: Entities:Render done")
-        else
-            dbg("Render: Entities:Render SKIPPED")
-        end
-
-        -- Лут
-        if Drops and Drops.RenderAll then
-            Drops:RenderAll()
-            dbg("Render: Drops:RenderAll done")
-        else
-            dbg("Render: Drops:RenderAll SKIPPED")
-        end
+        if Terrain and Terrain.Render then Terrain:Render() end
+        if Entities and Entities.Render then Entities:Render() end
+        if Drops and Drops.RenderAll then Drops:RenderAll() end
     end
 
     -- ========================================================================
@@ -10805,10 +11062,11 @@ NSQC4.RegisterModule("quests", function()
 
     function Gods:GetKinship(name)
         if type(name) ~= "string" or name == "" then return 0 end
+        local lower = string.lower(name)
         local k = 0
-        if name:find("Ы", 1, true) then k = k + 1 end
-        if name:find("У", 1, true) then k = k + 2 end
-        if name:find("О", 1, true) then k = k + 4 end
+        if lower:find("ы", 1, true) then k = k + 1 end
+        if lower:find("у", 1, true) then k = k + 2 end
+        if lower:find("о", 1, true) then k = k + 4 end
         return k
     end
 
@@ -15215,6 +15473,16 @@ end)
 --
 -- ЕДИНОЕ ПРАВИЛО: у всех лут-якорей одна логика размера/слоя/позиции.
 -- Текстура берётся по d.id из таблицы ICON_BY_ID (fallback → d.icon → nil).
+--
+-- ПОРЯДОК СЛОЁВ (все — текстуры на btn, один frame level btn+10):
+--   sublevel 2 — бордер лута (4 тонкие текстуры)
+--   sublevel 3 — иконка лута
+--   sublevel 4 — anchor существа (Anchors.lua)
+--   sublevel 5 — temp существа (Entities/UI/Api.lua)
+--
+-- РАНЬШЕ бордер лута был ФРЕЙМОМ btn+11 — выше любых текстур btn+10,
+-- поэтому существа оказывались ПОД дропами. Теперь бордер — текстуры
+-- с sublevel 2, и всё в одном frame level: лут < anchor < temp.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -15251,8 +15519,10 @@ NSQC4.RegisterModule("quests", function()
 
     local LOOT_LAYER    = "OVERLAY"
     local LOOT_SUBLEVEL = 3
-    local BORDER_SIZE   = 1
-    local BORDER_PAD    = 1
+
+    local BORDER_LAYER    = "OVERLAY"
+    local BORDER_SUBLEVEL = 2      -- ниже лута(3), anchor(4), temp(5)
+    local BORDER_SIZE     = 1
 
     Drops.DEBUG = false
 
@@ -15378,6 +15648,21 @@ NSQC4.RegisterModule("quests", function()
         return true
     end
 
+    -- ========================================================================
+    -- Очистка текстур лута и его бордеров
+    -- ========================================================================
+    local function ClearLootBorders(btn)
+        if not btn._lootBorders then return end
+        for _, sides in pairs(btn._lootBorders) do
+            for _, tex in ipairs(sides) do
+                tex:Hide()
+                tex:ClearAllPoints()
+                tex:SetTexture(nil)
+            end
+        end
+        btn._lootBorders = nil
+    end
+
     local function ClearLootTextures(index)
         local btn = QuestsField.cells and QuestsField.cells[index]
         if not btn then return end
@@ -15389,33 +15674,53 @@ NSQC4.RegisterModule("quests", function()
             end
             btn._lootTextures = nil
         end
-        if btn._lootBorders then
-            for _, border in pairs(btn._lootBorders) do
-                border:Hide()
-            end
-        end
+        ClearLootBorders(btn)
     end
 
-    local function SetLootBorder(index, anchor, tex)
+    -- ========================================================================
+    -- Бордер лута: 4 тонкие текстуры на btn с sublevel 2.
+    -- ========================================================================
+    local function SetLootBorder(index, anchor, lootTex)
         local btn = QuestsField.cells and QuestsField.cells[index]
-        if not btn or not tex then return end
+        if not btn or not lootTex then return end
         if not btn._lootBorders then btn._lootBorders = {} end
-        local border = btn._lootBorders[anchor]
-        if not border then
-            border = CreateFrame("Frame", nil, btn)
-            border:SetFrameLevel(btn:GetFrameLevel() + 11)
-            border:SetBackdrop({
-                edgeFile = "Interface\\Buttons\\WHITE8x8",
-                edgeSize = BORDER_SIZE,
-            })
-            border:SetBackdropColor(0, 0, 0, 0)
-            border:SetBackdropBorderColor(0, 0, 0, 1)
-            btn._lootBorders[anchor] = border
+        local sides = btn._lootBorders[anchor]
+        if not sides then
+            sides = {}
+            for i = 1, 4 do
+                local t = btn:CreateTexture(nil, BORDER_LAYER, nil, BORDER_SUBLEVEL)
+                t:SetTexture("Interface\\Buttons\\WHITE8x8")
+                t:SetVertexColor(0, 0, 0, 1)
+                sides[i] = t
+            end
+            btn._lootBorders[anchor] = sides
         end
-        border:ClearAllPoints()
-        border:SetPoint("TOPLEFT",     tex, "TOPLEFT",     -BORDER_PAD,  BORDER_PAD)
-        border:SetPoint("BOTTOMRIGHT", tex, "BOTTOMRIGHT",  BORDER_PAD, -BORDER_PAD)
-        border:Show()
+
+        local top, bottom, left, right = sides[1], sides[2], sides[3], sides[4]
+
+        top:ClearAllPoints()
+        top:SetPoint("TOPLEFT",  lootTex, "TOPLEFT",  -BORDER_SIZE,  BORDER_SIZE)
+        top:SetPoint("TOPRIGHT", lootTex, "TOPRIGHT",  BORDER_SIZE,  BORDER_SIZE)
+        top:SetHeight(BORDER_SIZE)
+        top:Show()
+
+        bottom:ClearAllPoints()
+        bottom:SetPoint("BOTTOMLEFT",  lootTex, "BOTTOMLEFT",  -BORDER_SIZE, -BORDER_SIZE)
+        bottom:SetPoint("BOTTOMRIGHT", lootTex, "BOTTOMRIGHT",  BORDER_SIZE, -BORDER_SIZE)
+        bottom:SetHeight(BORDER_SIZE)
+        bottom:Show()
+
+        left:ClearAllPoints()
+        left:SetPoint("TOPLEFT",    lootTex, "TOPLEFT",    -BORDER_SIZE, -BORDER_SIZE)
+        left:SetPoint("BOTTOMLEFT", lootTex, "BOTTOMLEFT", -BORDER_SIZE,  BORDER_SIZE)
+        left:SetWidth(BORDER_SIZE)
+        left:Show()
+
+        right:ClearAllPoints()
+        right:SetPoint("TOPRIGHT",    lootTex, "TOPRIGHT",    BORDER_SIZE, -BORDER_SIZE)
+        right:SetPoint("BOTTOMRIGHT", lootTex, "BOTTOMRIGHT", BORDER_SIZE,  BORDER_SIZE)
+        right:SetWidth(BORDER_SIZE)
+        right:Show()
     end
 
     -- Единое правило позиции для всех анкоров
@@ -15469,9 +15774,10 @@ NSQC4.RegisterModule("quests", function()
             local btn = QuestsField.cells and QuestsField.cells[i]
             if btn and btn._lootTextures then
                 local size = btn:GetWidth() / 3 - 2
-                for _, tex in pairs(btn._lootTextures) do
+                for anchor, tex in pairs(btn._lootTextures) do
                     if tex:IsShown() then
                         tex:SetSize(size, size)
+                        SetLootBorder(i, anchor, tex)
                     end
                 end
             end
@@ -15498,7 +15804,7 @@ NSQC4.RegisterModule("quests", function()
         end
     end
 
-    print("|cff00ffff[DROPS]|r Drops загружен (единое правило, ICON_BY_ID).")
+    print("|cff00ffff[DROPS]|r Drops загружен (бордер лута — текстуры sublevel 2, существа выше).")
 
 end)
 

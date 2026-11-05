@@ -1,18 +1,14 @@
 -- ============================================================================
 -- NSQC4 / Quests / Field / UI / API / Clear
 -- Полная очистка визуала клетки и всего поля.
--- Клики НЕ трогает — их вешают/снимают модули через Mouse.
 --
--- РАМКИ:
---   - Якорь существа (btn.anchors[pos]) — БЕЗ рамки.
---   - Лут (btn._lootTextures + btn._lootBorders) — рамка вокруг каждой
---     лут-текстуры. Здесь скрываем и текстуры, и рамки.
+-- ФИКС: btn._lootBorders[anchor] — массив из 4 текстур (sides), а не один
+-- фрейм. Раньше было border:Hide() на массиве → "attempt to call method
+-- 'Hide' (a nil value)". Теперь цикл по sides.
 --
--- BORDERLESS:
---   Рамка клетки (SetBackdropBorderColor) выставляется через
---   QuestsField:IsBorderless():
---     - false (nil) → 0.25, 0.25, 0.25, 1  (рамка есть)
---     - true  (1)   → 0,    0,    0,    0  (рамки нет)
+-- ФИКС: сбрасываем btn._tooltipFn / _lastStateKey / _hoverInitialized —
+-- иначе после ClearCell остаются «висящие» ссылки, и Hover:RefreshTooltip
+-- может звать tooltipFn на пустой клетке.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -68,9 +64,14 @@ NSQC4.RegisterModule("quests", function()
             btn._lootTextures = nil
         end
         if btn._lootBorders then
-            for _, border in pairs(btn._lootBorders) do
-                border:Hide()
+            for _, sides in pairs(btn._lootBorders) do
+                for _, tex in ipairs(sides) do
+                    tex:Hide()
+                    tex:ClearAllPoints()
+                    tex:SetTexture(nil)
+                end
             end
+            btn._lootBorders = nil
         end
 
         -- 6. Рамка кнопки — по IsBorderless()
@@ -80,9 +81,12 @@ NSQC4.RegisterModule("quests", function()
             btn:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
         end
 
-        -- 7. Ховер-обработчики
+        -- 7. Ховер-обработчики + тултип + state key
         btn._onEnter = nil
         btn._onLeave = nil
+        btn._tooltipFn = nil
+        btn._lastStateKey = nil
+        btn._hoverInitialized = nil
     end
 
     function QuestsField:ClearAll()

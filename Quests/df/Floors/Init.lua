@@ -1,28 +1,14 @@
 -- ============================================================================
 -- NSQC4 / Quests / df / Floors / Init
--- Реестр этажей.
+-- Реестр этажей. ТОЛЬКО базовое: Get/Set/IsVisited/CanSwitch/EnsureStorage.
 --
--- Модель:
---   nsDbc4.quests.df.floors = {
---     current = 0,
---     min     = -N,   -- самый нижний сгенерированный этаж
---     max     = 0,    -- выше нулевого нельзя
---     visited = { [0] = true, [-1] = true, ... },
---   }
+-- Generate / Clear / Switch здесь НЕ определяются:
+--   - Generate — в Floors/Generate.lua
+--   - Switch   — в Floors/Switch.lua
+--   - SaveFloor / LoadFloor / ApplyWaterFromAbove / GetSnapshot — в Floors/Storage.lua
 --
--- API:
---   Floors:Get()           → текущий этаж
---   Floors:Set(n)          → установить (без генерации)
---   Floors:CanSwitch(to)   → true/false + причина
---   Floors:Switch(to)      → переключить (с проверкой)
---   Floors:Generate(n)     → сгенерировать этаж n (если ещё нет)
---   Floors:Clear(n)        → очистить этаж n
---   Floors:IsVisited(n)    → true, если этаж уже сгенерирован
---
--- Логика переключения:
---   - бесплатно только 0 → -1
---   - дальше — только если PercentVoid() >= 0.6 (60% выкопано)
---   - выше 0 нельзя
+-- Если Generate.lua или Switch.lua не загрузятся — будет честная ошибка
+-- «attempt to call method 'Generate' (a nil value)», а не тихий баг.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -44,10 +30,11 @@ NSQC4.RegisterModule("quests", function()
         nsDbc4.quests.df.floors = nsDbc4.quests.df.floors or {}
 
         local s = nsDbc4.quests.df.floors
-        s.current = s.current or 0
-        s.min     = s.min or 0
-        s.max     = s.max or 0
-        s.visited = s.visited or { [0] = true }
+        s.current   = s.current or 0
+        s.min       = s.min or 0
+        s.max       = s.max or 0
+        s.visited   = s.visited or { [0] = true }
+        s.snapshots = s.snapshots or {}
         return s
     end
 
@@ -109,7 +96,6 @@ NSQC4.RegisterModule("quests", function()
 
         -- вверх
         if to > cur then
-            -- возврат на посещённый этаж — бесплатно
             if s.visited[to] then
                 return true
             end
@@ -117,54 +103,6 @@ NSQC4.RegisterModule("quests", function()
         end
 
         return false, "?"
-    end
-
-    -- ========================================================================
-    -- Generate(n) — сгенерировать этаж (заглушка: пока просто помечаем visited;
-    -- реальная генерация — в Floors/Generate.lua)
-    -- ========================================================================
-    function Floors:Generate(n)
-        n = tonumber(n) or 0
-        local s = EnsureStorage()
-        if s.visited[n] then return false end
-        s.visited[n] = true
-        if n < s.min then s.min = n end
-        return true
-    end
-
-    -- ========================================================================
-    -- Clear(n) — очистить этаж (заглушка)
-    -- ========================================================================
-    function Floors:Clear(n)
-        n = tonumber(n) or 0
-        local s = EnsureStorage()
-        s.visited[n] = nil
-        return true
-    end
-
-    -- ========================================================================
-    -- Switch(to) — переключить (с проверкой CanSwitch)
-    -- ========================================================================
-    function Floors:Switch(to)
-        to = tonumber(to) or 0
-        local ok, reason = self:CanSwitch(to)
-        if not ok then
-            print("|cffff0000[NSQC4]|r Нельзя переключить этаж: " .. tostring(reason))
-            return false
-        end
-
-        -- сохранить текущий этаж (позже — Storage)
-        local s = EnsureStorage()
-        local from = s.current
-
-        -- сгенерировать целевой этаж, если ещё нет
-        if not s.visited[to] then
-            self:Generate(to)
-        end
-
-        s.current = to
-        print(string.format("|cff00ff00[NSQC4]|r Этаж: %d → %d", from, to))
-        return true
     end
 
 end)
