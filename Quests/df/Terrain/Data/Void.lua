@@ -1,6 +1,8 @@
 -- ============================================================================
 -- NSQC4 / Quests / df / Terrain / Data / Void
--- Пустота: без текстуры, hardness = 0, непроходима.
+-- Пустота: чёрный квадрат. Текстура — стандартная WHITE8x8 (без внешних
+-- файлов), затемняется в Terrain/UI/Api через SetVertexColor(0,0,0,1).
+-- hardness = 0, непроходима.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -12,8 +14,8 @@ NSQC4.RegisterModule("quests", function()
 
     Data:Register("void", {
         hardness = 0,
-        texture  = nil,          -- без текстуры
+        texture  = "Interface\\Buttons\\WHITE8x8",   -- белая заливка, затемняется в UI/Api
         textSize = 0,
-        color    = { 0.20, 0.20, 0.20 },
+        color    = { 0.05, 0.05, 0.05 },
     })
 end)

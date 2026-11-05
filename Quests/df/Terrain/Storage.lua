@@ -3,6 +3,10 @@
 -- Хранилище ландшафта: адаптер к общему Grid + точка входа рендера.
 --
 -- Для void hardness = nil (не добывается). Текстура void = nil (в Data).
+--
+-- ФИКС: при смене terrain снимаем выделение со старого типа —
+-- иначе в selections.terrain_types остаётся устаревшая запись, и
+-- Find:Pick может выбрать клетку, которая уже стала void.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -65,6 +69,17 @@ NSQC4.RegisterModule("quests", function()
     function Terrain:SetInitialized(v) EnsureTable().initialized = v and true or false end
 
     -- ========================================================================
+    -- Снять выделение со старого terrain в клетке (если было)
+    -- ========================================================================
+    local function ClearOldSelection(index, newTerrainId)
+        if not Grid or not Grid.IsTerrainSelected then return end
+        local isSel, oldType = Grid:IsTerrainSelected(index)
+        if isSel and oldType and oldType ~= newTerrainId then
+            Grid:SetTerrainSelected(index, oldType, false)
+        end
+    end
+
+    -- ========================================================================
     -- Реестр типов
     -- ========================================================================
     function Terrain:RegisterType(id, opts)
@@ -95,6 +110,9 @@ NSQC4.RegisterModule("quests", function()
         if index < 1 or index > TOTAL then return false end
         if type(terrainId) ~= "string" or terrainId == "" then return false end
 
+        -- ФИКС: снять выделение со старого terrain
+        ClearOldSelection(index, terrainId)
+
         local s = EnsureTable()
         if opts and not s.types[terrainId] then
             s.types[terrainId] = opts
@@ -107,6 +125,10 @@ NSQC4.RegisterModule("quests", function()
 
         if terrainId == "void" then
             Grid:ClearHardness(index)
+            -- ФИКС: void точно не выделен
+            if Grid.ClearSelection then
+                Grid:ClearSelection("terrain", index)
+            end
         elseif def and def.hardness then
             Grid:SetHardness(index, def.hardness)
         else
@@ -124,9 +146,7 @@ NSQC4.RegisterModule("quests", function()
         local current = Grid:GetTerrain(index)
         if not current then return false end
 
-        if self:IsSelected(index) then
-            self:ToggleSelect(index)
-        end
+        ClearOldSelection(index, nil)
 
         Grid:SetTerrain(index, nil)
         Grid:ClearHardness(index)
@@ -137,9 +157,7 @@ NSQC4.RegisterModule("quests", function()
 
     function Terrain:Clear()
         for i = 1, TOTAL do
-            if self:IsSelected(i) then
-                self:ToggleSelect(i)
-            end
+            ClearOldSelection(i, nil)
             Grid:SetTerrain(i, nil)
             Grid:ClearHardness(i)
             ClearCellClicks(i)
@@ -168,6 +186,7 @@ NSQC4.RegisterModule("quests", function()
 
         local terrainId = Grid:GetTerrain(index)
         if not terrainId then return false end
+        if terrainId == "void" then return false end   -- пустоту не выделяем
 
         local isSelected = Grid:IsTerrainSelected(index)
 

@@ -2,6 +2,12 @@
 -- NSQC4 / Quests / df / AI / Work
 -- Один клик работы существа по клетке-цели.
 -- Если hardness уже <= 0 — завершение без клика (не «долбим пустую»).
+--
+-- Прокачка при клике (каждый — отдельный бросок int/10000):
+--   tree  → agility + vitality
+--   stone → strength + vitality
+--   grass → intellect (только)
+--   earth → vitality (только)
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -14,6 +20,14 @@ NSQC4.RegisterModule("quests", function()
         print("|cffff0000[NSQC4]|r AI/Work: Grid не загружен.")
         return
     end
+
+    -- Какой стат (кроме живучести) качать при работе по terrain.
+    -- Живучесть качается всегда, кроме grass (там только intellect).
+    local TERRAIN_TO_STAT = {
+        tree  = { stat = "agility",   vitality = true  },
+        stone = { stat = "strength",  vitality = true  },
+        grass = { stat = "intellect", vitality = false },
+    }
 
     local function EnsureWork(entity, ai)
         if ai.work and ai.work.total then return ai.work end
@@ -31,7 +45,7 @@ NSQC4.RegisterModule("quests", function()
         local profDef = ai.profId and ProfApi and ProfApi:Get(ai.profId) or nil
         if profDef and profDef.clicks and Resolve then
             local pp = Resolve:ProfPct(entity, ai.terrainId)
-            local sp = Resolve:StrPct(entity)
+            local sp = Resolve:StatPct(entity, profDef.stat)
             total = profDef.clicks(hardness, pp, sp)
         else
             total = math.floor(hardness + 0.5)
@@ -72,11 +86,24 @@ NSQC4.RegisterModule("quests", function()
             Grid:SetHardness(ai.target, newHardness)
         end
 
+        -- Прокачка при клике
         local Stats = NSQC4.QuestsDfAIStats
-        if Stats and Stats.TryUpVitality then
-            Stats:TryUpVitality(entity)
+        if Stats then
+            local rule = TERRAIN_TO_STAT[ai.terrainId]
+
+            -- профильный стат по terrain (agility/strength/intellect)
+            if rule and rule.stat and Stats.TryUpStat then
+                Stats:TryUpStat(entity, rule.stat)
+            end
+
+            -- живучесть: всегда, кроме grass (у неё vitality = false)
+            local wantVitality = (rule == nil) or (rule.vitality ~= false)
+            if wantVitality and Stats.TryUpVitality then
+                Stats:TryUpVitality(entity)
+            end
         end
 
+        -- Звук работы: только если мышь на клетке существа
         local QuestsField = NSQC4.QuestsField
         local cell = QuestsField and QuestsField.cells and QuestsField.cells[entity.index]
         if cell and cell._hovered then

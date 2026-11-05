@@ -2,20 +2,9 @@
 -- NSQC4 / Quests / df / AI / Find
 -- Выбор цели для существа.
 --
--- Логика:
---   1. Allowed существа по opts.kind (Goblin/Dwarf).
---   2. Выделенные клетки (nsDbc4.quests.df.selections.terrain_types).
---      Фильтр: allowed[terrainId] И не зарезервировано другим существом.
---   3. Лучшие (есть своя профессия) / просто.
---   4. Случайный из лучших, иначе из просто.
---   5. { index, terrainId, profId|nil } | nil.
---
--- known_skills — таблица [имя] = уровень (1..100). Для выбора цели
--- достаточно самого факта «есть def с этим terrain», уровень не нужен.
---
--- HasProfForSelected(entity) — проверка: есть ли у существа профессия
--- под хотя бы одну из выделенных клеток. Используется в Ticker, чтобы
--- дать приоритет существам с профессией.
+-- ФИКС: сверяем фактический terrain клетки с terrainId из selections.
+-- Если клетка была выделена как earth, а стала void (или другой тип),
+-- она не должна попадать в кандидаты.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -67,10 +56,6 @@ NSQC4.RegisterModule("quests", function()
         return result
     end
 
-    -- ========================================================================
-    -- Есть ли у существа def профессии под данный terrain?
-    -- known_skills — hash [имя] = уровень, поэтому pairs.
-    -- ========================================================================
     local function FindProfForTerrain(entity, terrainId)
         local ProfApi = NSQC4.QuestsDfProfessionsApi
         if not ProfApi then return nil end
@@ -88,9 +73,18 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Есть ли у существа профессия под хотя бы одну ВЫДЕЛЕННУЮ клетку?
-    -- (учитываем и Allowed, иначе смысла нет)
+    -- Клетка «свежая»? Фактический terrain совпадает с тем, что в selections,
+    -- и это не void.
     -- ========================================================================
+    local function IsCellFresh(cell)
+        if not cell then return false end
+        local actual = Grid:GetTerrain(cell.index)
+        if not actual then return false end
+        if actual == "void" then return false end
+        if actual ~= cell.terrainId then return false end
+        return true
+    end
+
     function Find:HasProfForSelected(entity)
         if not entity or not entity.opts then return false end
 
@@ -102,7 +96,7 @@ NSQC4.RegisterModule("quests", function()
         if #selected == 0 then return false end
 
         for _, cell in ipairs(selected) do
-            if allowed[cell.terrainId] then
+            if IsCellFresh(cell) and allowed[cell.terrainId] then
                 if FindProfForTerrain(entity, cell.terrainId) then
                     return true
                 end
@@ -127,20 +121,22 @@ NSQC4.RegisterModule("quests", function()
             return nil
         end
 
-        -- 1. Фильтр: allowed + не зарезервировано другим
+        -- 1. Фильтр: свежая клетка + allowed + не зарезервировано другим
         local candidates = {}
         for _, cell in ipairs(selected) do
-            if allowed[cell.terrainId] then
+            if IsCellFresh(cell) and allowed[cell.terrainId] then
                 if not Grid:IsReserved(cell.index, entity.id) then
                     candidates[#candidates + 1] = cell
                 else
                     dbg("skip reserved", cell.index, "terrain", cell.terrainId,
                         "by", tostring(Grid:GetReservedBy(cell.index)))
                 end
+            else
+                dbg("skip stale", cell.index, "terrain", cell.terrainId)
             end
         end
         if #candidates == 0 then
-            dbg("no candidates (all reserved or not allowed)")
+            dbg("no candidates (all stale/reserved/not allowed)")
             return nil
         end
 

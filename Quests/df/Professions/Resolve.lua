@@ -3,22 +3,25 @@
 -- Перевод данных существа в числа, которые ждёт формула профессии.
 --
 -- Формула любой профессии принимает:
---   clicks(hardness, prof_pct, str_pct)
+--   clicks(hardness, prof_pct, stat_pct)
 --
 -- Resolve готовит два числа:
 --   prof_pct — насколько прокачана «своя» профессия для данного terrain (0..1)
---   str_pct  — сила существа относительно максимума (0..1)
+--   stat_pct — профильный стат существа относительно максимума (0..1):
+--                "strength"  → opts.strength  / opts.max_strength
+--                "agility"   → opts.agility   / opts.max_agility
+--                "intellect" → opts.intellect / opts.max_intellect
 --
 -- Откуда берёт:
 --   prof_pct:
 --     opts.known_skills — таблица [имя] = уровень (1..100)
 --     → ProfessionsApi:GetByName(name) → def.terrain == terrainId
 --     → уровень / 100 = 0..1
---   str_pct:
---     opts.strength / opts.max_strength (обрезать до 0..1)
+--   stat_pct:
+--     Resolve:StatPct(entity, stat), где stat — profDef.stat
 --
 -- Ничего не знает про Grid, движение, работу, клики.
--- Только entity + terrainId → два числа.
+-- Только entity + terrainId (+ stat) → числа.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -70,11 +73,61 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Удобный фасад: оба числа сразу.
-    --   → prof_pct, str_pct
+    -- agi_pct: 0..1.
+    --   0 — ловкости нет или max_agility не задан.
     -- ========================================================================
-    function Resolve:Both(entity, terrainId)
-        return self:ProfPct(entity, terrainId), self:StrPct(entity)
+    function Resolve:AgiPct(entity)
+        if not entity or not entity.opts then return 0 end
+        local opts = entity.opts
+
+        local agi = tonumber(opts.agility) or 0
+        local max = tonumber(opts.max_agility) or 0
+        if max <= 0 then return 0 end
+
+        local pct = agi / max
+        if pct < 0 then pct = 0 elseif pct > 1 then pct = 1 end
+        return pct
+    end
+
+    -- ========================================================================
+    -- int_pct: 0..1.
+    --   0 — интеллекта нет или max_intellect не задан.
+    -- ========================================================================
+    function Resolve:IntPct(entity)
+        if not entity or not entity.opts then return 0 end
+        local opts = entity.opts
+
+        local int = tonumber(opts.intellect) or 0
+        local max = tonumber(opts.max_intellect) or 0
+        if max <= 0 then return 0 end
+
+        local pct = int / max
+        if pct < 0 then pct = 0 elseif pct > 1 then pct = 1 end
+        return pct
+    end
+
+    -- ========================================================================
+    -- stat_pct: 0..1 по имени стата.
+    --   "strength" | "agility" | "intellect".
+    --   Если stat не задан или неизвестен — 0.
+    -- ========================================================================
+    function Resolve:StatPct(entity, stat)
+        if stat == "strength" then
+            return self:StrPct(entity)
+        elseif stat == "agility" then
+            return self:AgiPct(entity)
+        elseif stat == "intellect" then
+            return self:IntPct(entity)
+        end
+        return 0
+    end
+
+    -- ========================================================================
+    -- Удобный фасад: prof_pct + stat_pct по profDef.stat.
+    --   → prof_pct, stat_pct
+    -- ========================================================================
+    function Resolve:Both(entity, terrainId, stat)
+        return self:ProfPct(entity, terrainId), self:StatPct(entity, stat)
     end
 
 end)

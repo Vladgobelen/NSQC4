@@ -1,14 +1,16 @@
 -- ============================================================================
 -- NSQC4 / Quests / df / Entities / Tooltip
--- Сборка GameTooltip. opts._landscape = { index, terrainId }.
--- В OnEnter hardness читается заново из Grid и Terrain/Data.
+-- Сборка GameTooltip для существа.
+--
+-- opts._landscape = { index, terrainId } — используется только чтобы
+-- Terrain/UI/Api мог дописать строки клетки (Клетка / Прочность / Лут).
+-- Сам Tooltip.Build ландшафт НЕ рисует — это делает Terrain/UI/Api.
 --
 -- Строки:
 --   имя / титул / описание
 --   статы
 --   ПРОФЕССИИ
---   РОДСТВО        ← имена богов по opts.gods
---   ЛАНДШАФТ
+--   РОДСТВО
 --
 -- Отладка:
 --   /run NSQC4.QuestsDfTooltip__DEBUG = true
@@ -39,24 +41,6 @@ NSQC4.RegisterModule("quests", function()
         end
     end
     Tooltip.GetColorByPercent = GetColorByPercent
-
-    local function LandscapeLine(index, terrainId)
-        local Grid = NSQC4.QuestsDfGrid
-        local Data = NSQC4.QuestsDfTerrainData
-        if not index or not Grid or not Data then return nil end
-
-        local curH = Grid:GetHardness(index)
-        local def = terrainId and Data:Get(terrainId) or nil
-        local maxH = def and def.hardness or nil
-        if not curH or not maxH or maxH <= 0 then return nil end
-
-        local r, g, b = GetColorByPercent(curH, maxH)
-        local curR = math.floor(curH + 0.5)
-        local maxR = math.floor(maxH + 0.5)
-        local pct  = (curH / maxH) * 100
-        return string.format("Ландшафт: %s  %d / %d (%.0f%%)",
-            tostring(terrainId or "?"), curR, maxR, pct), r, g, b
-    end
 
     local function BuildSkillsLine(known_skills)
         if type(known_skills) ~= "table" then
@@ -117,8 +101,6 @@ NSQC4.RegisterModule("quests", function()
                 if land then
                     print(string.format("[TT] landscape index=%s terrain=%s",
                         tostring(land.index), tostring(land.terrainId)))
-                else
-                    print("[TT] landscape = nil")
                 end
                 print(string.format("[TT] kinship=%s gods=%s",
                     tostring(opts.kinship),
@@ -191,15 +173,8 @@ NSQC4.RegisterModule("quests", function()
                 GameTooltip:AddLine(kline, kr, kg, kb, true)
             end
 
-            -- ЛАНДШАФТ
-            local land = opts._landscape
-            if land and land.index then
-                local line, r, g, b = LandscapeLine(land.index, land.terrainId)
-                if line then
-                    GameTooltip:AddLine(" ")
-                    GameTooltip:AddLine(line, r, g, b)
-                end
-            end
+            -- ЛАНДШАФТ здесь НЕ выводится — это делает Terrain/UI/Api
+            -- (Клетка / Прочность / Лут) после tooltipFn(btn).
         end
     end
 

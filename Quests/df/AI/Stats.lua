@@ -2,20 +2,9 @@
 -- NSQC4 / Quests / df / AI / Stats
 -- Прокачка характеристик существ + отладка.
 --
--- Шанс за бросок: math.random(1, 10000) <= int
---   int = 4 → 0.04%, int = 50 → 0.5%, int = 100 → 1%
---
--- Обычный успех (roll <= int): vitality + 1, если vit < max_vit.
---
--- ДЖЕКПОТ (roll == 1): дополнительно поднимает ПОТОЛОК случайного
--- параметра на 1 (max_* + 1). Текущее значение не трогается.
--- Параметры: max_skills_max, max_strength, max_agility,
---            max_vitality, max_intellect.
--- Потолок не выше 100: если max_* уже 100, параметр не выбирается.
--- Если все пять уже 100 — джекпот ничего не даёт.
---
--- Бросок идёт ВСЕГДА (даже если vit >= max_vit) — иначе джекпот
--- никогда бы не выпал у «прокачанного» существа.
+-- TryUpVitality — живучесть, шанс int/10000, джекпот (roll == 1) на max_*.
+-- TryUpStat(entity, statName) — сила/ловкость/интеллект, шанс int/10000,
+--   без джекпота (джекпот уже даёт TryUpVitality на случайный max_*).
 --
 -- Отладка:
 --   /ns_stats on | off | dump | min | reset
@@ -38,14 +27,30 @@ NSQC4.RegisterModule("quests", function()
         { key = "max_intellect",   label = "intellect"   },
     }
 
+    -- Какой стат к какому max_*
+    local STAT_MAX = {
+        strength  = "max_strength",
+        agility   = "max_agility",
+        intellect = "max_intellect",
+        vitality  = "max_vitality",
+    }
+
+    local STAT_LABEL = {
+        strength  = "Сила",
+        agility   = "Ловкость",
+        intellect = "Интеллект",
+        vitality  = "Живучесть",
+    }
+
     local dbg = {
         calls        = 0,
-        earlyExitMax = 0,   -- больше не используется как ранний выход; оставлено для совместимости
         earlyExitInt = 0,
         rolls        = 0,
         successes    = 0,
-        jacks        = 0,   -- сколько раз выпал roll == 1
-        capsRaised   = 0,   -- сколько раз реально подняли потолок
+        jacks        = 0,
+        capsRaised   = 0,
+        statRolls    = 0,
+        statSuccess  = 0,
         sumChance    = 0,
         minRoll      = nil,
         minRollName  = nil,
@@ -54,9 +59,6 @@ NSQC4.RegisterModule("quests", function()
     }
     Stats._dbg = dbg
 
-    -- ========================================================================
-    -- Личный минимум существа
-    -- ========================================================================
     local function UpdateEntityMin(opts, roll, int)
         local now = GetTime()
         local em = opts._minRoll
@@ -85,9 +87,6 @@ NSQC4.RegisterModule("quests", function()
         return math.floor(GetTime() - em.firstAt)
     end
 
-    -- ========================================================================
-    -- Джекпот: поднять случайный потолок на 1 (не выше MAX_CAP)
-    -- ========================================================================
     local function RaiseRandomCap(opts)
         local pool = {}
         for _, row in ipairs(CAP_KEYS) do
@@ -104,9 +103,6 @@ NSQC4.RegisterModule("quests", function()
         return pick.label, old, opts[pick.key]
     end
 
-    -- ========================================================================
-    -- Подтянуть глобальный минимум из существ
-    -- ========================================================================
     local function RefreshGlobalMin()
         local Grid = NSQC4.QuestsDfGrid
         if not Grid then return end
@@ -127,9 +123,6 @@ NSQC4.RegisterModule("quests", function()
     end
     Stats._RefreshGlobalMin = RefreshGlobalMin
 
-    -- ========================================================================
-    -- Сводка
-    -- ========================================================================
     local function PrintSummary(tag)
         local elapsed = GetTime() - dbg.startedAt
         local avgChance = (dbg.rolls > 0) and (dbg.sumChance / dbg.rolls) or 0
@@ -140,9 +133,10 @@ NSQC4.RegisterModule("quests", function()
             or "nil"
 
         print(string.format(
-            "[STATS %s] t=%ds calls=%d rolls=%d succ=%d caps=%d jack=%d chance=%.4f%% exp=%.3f min=%s earlyInt=%d",
+            "[STATS %s] t=%ds calls=%d rolls=%d succ=%d caps=%d jack=%d statRolls=%d statSucc=%d chance=%.4f%% exp=%.3f min=%s earlyInt=%d",
             tag or "", math.floor(elapsed),
             dbg.calls, dbg.rolls, dbg.successes, dbg.capsRaised, dbg.jacks,
+            dbg.statRolls, dbg.statSuccess,
             avgChance * 100, expected, minStr,
             dbg.earlyExitInt))
     end
@@ -179,12 +173,13 @@ NSQC4.RegisterModule("quests", function()
 
     function Stats:ResetStats()
         dbg.calls        = 0
-        dbg.earlyExitMax = 0
         dbg.earlyExitInt = 0
         dbg.rolls        = 0
         dbg.successes    = 0
         dbg.jacks        = 0
         dbg.capsRaised   = 0
+        dbg.statRolls    = 0
+        dbg.statSuccess  = 0
         dbg.sumChance    = 0
         dbg.minRoll      = nil
         dbg.minRollName  = nil
@@ -217,7 +212,7 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Попытка повысить (vitality + джекпот на потолок)
+    -- Живучесть (с джекпотом на max_*)
     -- ========================================================================
     function Stats:TryUpVitality(entity)
         dbg.calls = dbg.calls + 1
@@ -239,7 +234,6 @@ NSQC4.RegisterModule("quests", function()
             return false
         end
 
-        -- Бросок идёт ВСЕГДА (даже если vit >= max_vit)
         local chance = int / 10000
         if chance > 1 then chance = 1 end
         dbg.sumChance = dbg.sumChance + chance
@@ -258,7 +252,6 @@ NSQC4.RegisterModule("quests", function()
             newGlobalMin    = true
         end
 
-        -- Джекпот: roll == 1 → поднять случайный потолок
         local capLabel, capOld, capNew
         if roll == 1 then
             dbg.jacks = dbg.jacks + 1
@@ -268,7 +261,6 @@ NSQC4.RegisterModule("quests", function()
             end
         end
 
-        -- Обычный успех: vitality + 1, если есть куда
         local vit    = tonumber(opts.vitality)     or 0
         local maxVit = tonumber(opts.max_vitality) or 0
         local vitUp  = false
@@ -305,6 +297,45 @@ NSQC4.RegisterModule("quests", function()
         end
 
         return vitUp or (capLabel ~= nil)
+    end
+
+    -- ========================================================================
+    -- Профильный стат (сила / ловкость / интеллект) — без джекпота.
+    -- Шанс int/10000. +1 к текущему, если < max_<stat>.
+    -- ========================================================================
+    function Stats:TryUpStat(entity, statName)
+        if not entity or not entity.opts then return false end
+        if not statName then return false end
+
+        local opts = entity.opts
+        local name = tostring(opts.name or entity.id)
+
+        local maxKey = STAT_MAX[statName]
+        if not maxKey then return false end
+
+        local int = tonumber(opts.intellect) or 0
+        if int <= 0 then return false end
+
+        local cur = tonumber(opts[statName]) or 0
+        local max = tonumber(opts[maxKey]) or 0
+        if max <= 0 or cur >= max then return false end
+
+        dbg.statRolls = dbg.statRolls + 1
+
+        local roll = math.random(1, 10000)
+        local hit  = (roll <= int)
+        if not hit then return false end
+
+        opts[statName] = cur + 1
+        dbg.statSuccess = dbg.statSuccess + 1
+
+        if Stats.DEBUG then
+            print(string.format(
+                "[STATS] %s %s +1: %d→%d (roll=%d/%d int=%d)",
+                name, STAT_LABEL[statName] or statName,
+                cur, opts[statName], roll, 10000, int))
+        end
+        return true
     end
 
     -- ========================================================================

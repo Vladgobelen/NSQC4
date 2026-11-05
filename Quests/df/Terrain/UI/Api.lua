@@ -2,6 +2,9 @@
 -- NSQC4 / Quests / df / Terrain / UI / Api
 -- Ландшафт — владелец клетки.
 --
+-- void рисуется чёрным квадратом: текстура WHITE8x8 (из Terrain/Data/Void),
+-- затемняется через ApplyTint(index, {0,0,0,1}) после рендера клетки.
+--
 -- Тултип клетки:
 --   - тип ландшафта, hardness (если есть)
 --   - лут в клетке (список)
@@ -12,8 +15,6 @@
 --   - если в клетке есть лут и нет активного (не спящего) существа
 --     → клики по клетке не вешаются (SetCellOnMouseClick nil).
 --   - иначе — как обычно (Actions вешают клики по terrain/существу).
---
--- opts._landscape для тултипа существа: { index, terrainId }.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -180,22 +181,6 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Тултип существа + (в конце) клетка и лут
-    -- ========================================================================
-    local function ShowEntityTooltip(entity, tooltipFn, index, terrainId)
-        tooltipFn(entity and nil)
-        -- в конце — клетка и лут
-        local lines = CellLines(index, terrainId)
-        if lines and #lines > 0 then
-            GameTooltip:AddLine(" ")
-            for _, ln in ipairs(lines) do
-                GameTooltip:AddLine(ln.text, ln.r, ln.g, ln.b)
-            end
-        end
-        GameTooltip:Show()
-    end
-
-    -- ========================================================================
     -- Render (визуал клетки)
     -- ========================================================================
     function UIApi:Render(index, opts)
@@ -269,6 +254,11 @@ NSQC4.RegisterModule("quests", function()
                 anchors   = data.anchors   or logic.anchors,
                 highlight = selected and { 1.0, 0.8, 0.0, 1.0 } or nil,
             })
+
+            -- void — чёрный квадрат (WHITE8x8 из Data, затемняем в чёрный)
+            if terrainId == "void" then
+                ApplyTint(index, { 0, 0, 0, 1 })
+            end
         end
 
         local EntitiesApi = NSQC4.QuestsDfEntitiesUIApi
@@ -295,7 +285,6 @@ NSQC4.RegisterModule("quests", function()
         local hasActiveEntity = entity and not sleeping
 
         if hasActiveEntity then
-            -- тултип существа + клетка/лут
             entity.opts._landscape = { index = index, terrainId = terrainId }
 
             local tooltipFn = ResolveTooltip(entity)
@@ -315,14 +304,11 @@ NSQC4.RegisterModule("quests", function()
                     ShowCellTooltip(index, terrainId)
                 end)
             end
-            -- клики по существу — как обычно (Actions)
         else
-            -- нет активного существа → тултип только клетки/лута
             QuestsField:SetCellTooltip(index, function(btn)
                 ShowCellTooltip(index, terrainId)
             end)
 
-            -- если есть лут — клики по клетке не вешаем
             if hasLoot then
                 QuestsField:SetCellOnMouseClick(index, "LeftButton",  nil)
                 QuestsField:SetCellOnMouseClick(index, "RightButton", nil)

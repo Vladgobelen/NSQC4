@@ -2,13 +2,9 @@
 -- NSQC4 / Quests / df / AI / Move
 -- Передвижение существа по маршруту. Скорость — по абсолютной выносливости.
 --
--- stepTime = 100 − 99 × (vitality / 100)
---   vitality 0/1     → ~100–99 сек/клетку
---   vitality 100     → 1 сек/клетку
---
--- При каждом шаге — шанс прокачки живучести (intellect / 100).
---
--- Отладка: /run NSQC4.QuestsDfAIMove.DEBUG = true
+-- ФИКС: даже если клетка-цель — void, шагать в неё нельзя.
+-- Раньше проверка IsPassable пропускалась для isTarget, и существо
+-- уходило в void, где Grid:SetEntity молча не ставил его — существо «пропадало».
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -28,10 +24,6 @@ NSQC4.RegisterModule("quests", function()
         return
     end
 
-    -- ========================================================================
-    -- Время на один шаг (секунды) по АБСОЛЮТНОЙ выносливости (0..100).
-    -- max_vitality не используется.
-    -- ========================================================================
     function Move:StepTime(entity)
         if not entity or not entity.opts then return 100 end
         local opts = entity.opts
@@ -48,8 +40,15 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Один шаг по маршруту.
+    -- Проверка: можно ли шагнуть в nextIndex (в т.ч. цель)
     -- ========================================================================
+    local function CanStepInto(nextIndex)
+        local c = Grid:GetCell(nextIndex)
+        if not c then return false end
+        if c.terrain == "void" then return false end
+        return true
+    end
+
     function Move:Advance(entity)
         if not entity or not entity.opts then return nil end
 
@@ -74,11 +73,25 @@ NSQC4.RegisterModule("quests", function()
         if not nextIndex then return nil end
 
         local isTarget = (idx + 1 == #path)
-        if not isTarget and not Grid:IsPassable(nextIndex) then
-            dbg(string.format("blocked %s next=%d", tostring(entity.id), nextIndex))
+
+        -- ФИКС: цель тоже должна быть не-void
+        if not CanStepInto(nextIndex) then
+            dbg(string.format("blocked %s next=%d (void или нет клетки)", tostring(entity.id), nextIndex))
             ai.path = nil
             ai.pathIdx = nil
             return nil
+        end
+
+        -- Для не-цели — стандартная проверка проходимости (нет существа)
+        if not isTarget then
+            local c = Grid:GetCell(nextIndex)
+            if c and c.entityName and c.entityName ~= entity.opts.name then
+                dbg(string.format("blocked %s next=%d (occupied by %s)",
+                    tostring(entity.id), nextIndex, tostring(c.entityName)))
+                ai.path = nil
+                ai.pathIdx = nil
+                return nil
+            end
         end
 
         local fromIndex = entity.index
@@ -88,6 +101,19 @@ NSQC4.RegisterModule("quests", function()
         Grid:SetEntity(fromIndex, nil)
         entity.index = nextIndex
         Grid:SetEntity(nextIndex, entity)
+
+        -- Страховка: если SetEntity не записал (например, terrain стал void
+        -- между проверкой и записью) — откатываем.
+        if not Grid:GetEntity(nextIndex) then
+            entity.index = fromIndex
+            if fromIndex then
+                Grid:SetEntity(fromIndex, entity)
+            end
+            ai.path = nil
+            ai.pathIdx = nil
+            dbg(string.format("rollback %s: SetEntity(%d) не записал", tostring(entity.id), nextIndex))
+            return nil
+        end
 
         -- 2. Анимация
         local Animate = NSQC4.QuestsDfEntitiesAnimate

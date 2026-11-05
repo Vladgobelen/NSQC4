@@ -4,12 +4,18 @@
 --
 -- Профессия — самостоятельная единица. Знает:
 --   - к каким объектам применяется (terrain)
---   - каким параметром существа ускоряется (stat)
+--   - каким параметром существа ускоряется (stat) — СИЛА
 --   - как считать клики под конкретный объект (clicks)
 --   - что даёт по завершении (work.yields)
 --
--- Формула кликов — ВНУТРИ профессии. Другие профессии могут считать иначе.
--- Позже сюда добавим скорость прокачки (зависит от интеллекта и т.п.).
+-- Формула кликов — ВНУТРИ профессии:
+--   factor = 1 − 0.666 × prof_pct − 0.333 × stat_pct
+--   clicks = max(1, round(hardness × factor))
+--
+--   prof_pct — уровень диггера / 100
+--   stat_pct — сила / максимум (Resolve:StatPct(entity, "strength"))
+--
+-- hardness берётся из df/Terrain/Data/Earth.lua (1000).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -22,25 +28,25 @@ NSQC4.RegisterModule("quests", function()
 
     -- Веса вклада в снижение кликов (в сумме 0.999).
     local PROF_WEIGHT = 0.666
-    local STR_WEIGHT  = 0.333
+    local STAT_WEIGHT = 0.333
 
     -- ========================================================================
     -- Формула кликов Диггера.
     --   hardness — базовое HP объекта (из Terrain/Data)
     --   prof_pct — 0..1 (насколько прокачана профессия)
-    --   str_pct  — 0..1 (сила существа / максимум)
+    --   stat_pct — 0..1 (сила существа / максимум)
     -- Возвращает целое ≥ 1.
     -- ========================================================================
-    local function clicks(hardness, prof_pct, str_pct)
+    local function clicks(hardness, prof_pct, stat_pct)
         hardness = tonumber(hardness) or 0
         if hardness <= 0 then return 1 end
 
         prof_pct = tonumber(prof_pct) or 0
-        str_pct  = tonumber(str_pct)  or 0
+        stat_pct = tonumber(stat_pct) or 0
         if prof_pct < 0 then prof_pct = 0 elseif prof_pct > 1 then prof_pct = 1 end
-        if str_pct  < 0 then str_pct  = 0 elseif str_pct  > 1 then str_pct  = 1 end
+        if stat_pct < 0 then stat_pct = 0 elseif stat_pct > 1 then stat_pct = 1 end
 
-        local factor = 1 - PROF_WEIGHT * prof_pct - STR_WEIGHT * str_pct
+        local factor = 1 - PROF_WEIGHT * prof_pct - STAT_WEIGHT * stat_pct
         if factor < 0 then factor = 0 end
 
         local n = math.floor(hardness * factor + 0.5)
@@ -55,7 +61,7 @@ NSQC4.RegisterModule("quests", function()
         name    = "Диггер",
         desc    = "Копает землю, добывает глину.",
         terrain = "earth",          -- к какому объекту применяется
-        stat    = "strength",       -- какой параметр ускоряет
+        stat    = "strength",       -- какой параметр ускоряет (сила)
         clicks  = clicks,           -- формула кликов (внутри профессии)
         work    = { verb = "копает", duration = 1, yields = "clay" },
     })

@@ -12,8 +12,13 @@
 --       * бога нет                            → int
 --     Потолок шанса — 100%.
 --
--- Отладка:
+-- Отладка (подробная):
 --   /ns_complete on | off | dump | reset
+--   При каждом завершении:
+--     [COMPLETE skill] имя kin=... gods=... int=... skills_max=.../...
+--                      known=[...] terrain=... profId=...
+--     | ПРОФА ... (roll, p, x, результат)
+--     [COMPLETE now]  сводка (calls, rolls, succ, learn, up, miss, noslot, max, rate)
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -56,6 +61,11 @@ NSQC4.RegisterModule("quests", function()
         learned  = 0,
         rolls    = 0,
         success  = 0,
+        up       = 0,   -- повышение уровня (профа была)
+        learn    = 0,   -- изучение новой
+        miss     = 0,   -- бросок был, но промах
+        noslot   = 0,   -- нет слота
+        max      = 0,   -- профа уже 100
         startedAt = GetTime(),
     }
     Complete._dbg = dbg
@@ -64,10 +74,10 @@ NSQC4.RegisterModule("quests", function()
         local elapsed = GetTime() - dbg.startedAt
         local rate = (dbg.rolls > 0) and (dbg.success / dbg.rolls * 100) or 0
         print(string.format(
-            "[COMPLETE %s] t=%ds calls=%d skip=%d max=%d learn=%d rolls=%d succ=%d rate=%.1f%%",
+            "[COMPLETE %s] t=%ds calls=%d skip=%d rolls=%d succ=%d rate=%.1f%% | up=%d learn=%d miss=%d noslot=%d max=%d",
             tag or "", math.floor(elapsed),
-            dbg.calls, dbg.skipped, dbg.maxed, dbg.learned,
-            dbg.rolls, dbg.success, rate))
+            dbg.calls, dbg.skipped, dbg.rolls, dbg.success, rate,
+            dbg.up, dbg.learn, dbg.miss, dbg.noslot, dbg.max))
     end
 
     function Complete:ResetStats()
@@ -77,6 +87,11 @@ NSQC4.RegisterModule("quests", function()
         dbg.learned  = 0
         dbg.rolls    = 0
         dbg.success  = 0
+        dbg.up       = 0
+        dbg.learn    = 0
+        dbg.miss     = 0
+        dbg.noslot   = 0
+        dbg.max      = 0
         dbg.startedAt = GetTime()
         print("[COMPLETE] статистика сброшена.")
     end
@@ -115,6 +130,28 @@ NSQC4.RegisterModule("quests", function()
         if line == "single" then return "x3 single"
         elseif line == "mixed" then return "x2 mixed"
         else return "x1 none" end
+    end
+
+    -- ========================================================================
+    -- Подробная строка про существо + профессию (для отладки)
+    -- ========================================================================
+    local function PrintSkillLine(entity, terrainId, profId)
+        if not Complete.DEBUG then return end
+        local opts = entity and entity.opts or {}
+        local sk = {}
+        for n, l in pairs(opts.known_skills or {}) do
+            sk[#sk + 1] = tostring(n) .. ":" .. tostring(l)
+        end
+        table.sort(sk)
+        print(string.format(
+            "[COMPLETE skill] %s | int=%s kin=%s gods=%s | skills_max=%s/%s known=[%s] | terrain=%s profId=%s",
+            tostring(opts.name or (entity and entity.id) or "?"),
+            tostring(opts.intellect),
+            tostring(opts.kinship),
+            (opts.gods and table.concat(opts.gods, ",")) or "-",
+            tostring(opts.skills_max), tostring(opts.max_skills_max),
+            table.concat(sk, ", "),
+            tostring(terrainId), tostring(profId)))
     end
 
     -- ========================================================================
@@ -161,6 +198,7 @@ NSQC4.RegisterModule("quests", function()
         if cur > 0 then
             if cur >= PROF_MAX then
                 dbg.maxed = dbg.maxed + 1
+                dbg.max   = dbg.max + 1
                 return name, cur, cur, "max", nil, int, chancePct, mult, line
             end
 
@@ -169,8 +207,10 @@ NSQC4.RegisterModule("quests", function()
             if roll <= chancePct then
                 skills[name] = cur + 1
                 dbg.success = dbg.success + 1
+                dbg.up      = dbg.up + 1
                 return name, cur, cur + 1, "up", roll, int, chancePct, mult, line
             end
+            dbg.miss = dbg.miss + 1
             return name, cur, cur, "miss", roll, int, chancePct, mult, line
         end
 
@@ -179,6 +219,7 @@ NSQC4.RegisterModule("quests", function()
 
         if smax >= smaxmax then
             dbg.maxed = dbg.maxed + 1
+            dbg.noslot = dbg.noslot + 1
             return name, 0, 0, "noslot", nil, int, chancePct, mult, line,
                 string.format("skills_max=%d/%d", smax, smaxmax)
         end
@@ -189,10 +230,12 @@ NSQC4.RegisterModule("quests", function()
             skills[name] = 1
             opts.skills_max = smax + 1
             dbg.learned = dbg.learned + 1
+            dbg.learn   = dbg.learn + 1
             dbg.success = dbg.success + 1
             return name, 0, 1, "learn", roll, int, chancePct, mult, line,
                 string.format("skills_max %d→%d", smax, smax + 1)
         end
+        dbg.miss = dbg.miss + 1
         return name, 0, 0, "learnmiss", roll, int, chancePct, mult, line
     end
 
@@ -207,10 +250,13 @@ NSQC4.RegisterModule("quests", function()
 
         local target    = ai.target
         local terrainId = ai.terrainId
-        local profId    = ai.profId
+        local profId    = ai.profId or TERRAIN_TO_PROF[terrainId]
 
         local profDef = profId and ProfApi and ProfApi:Get(profId) or nil
         local yield   = profDef and profDef.work and profDef.work.yields or nil
+
+        -- Подробная строка (все known_skills, kin, gods, slots)
+        PrintSkillLine(entity, terrainId, profId)
 
         -- 1. Профессия
         local pname, pold, pnew, result, proll, pint, ppct, pmult, pline, extra =
