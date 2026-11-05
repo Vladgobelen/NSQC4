@@ -10,13 +10,17 @@
 --   - для water — «Глубина: N / 10» (Grid:GetDepth)
 --   - для не-void (кроме water) — «Прочность: X / Y» (Grid:GetHardness)
 --   - лут в клетке (список)
---   - если в клетке не спящее существо — его тултип + в конце клетка+лут
---   - если существо спит — только клетка+лут
+--   - если в клетке существо (активное или спящее) — его тултип + в конце
+--     клетка+лут
+--   - если существа нет — только клетка+лут
 --
 -- Клики:
---   - если в клетке есть лут и нет активного (не спящего) существа
---     → клики по клетке не вешаются (SetCellOnMouseClick nil).
---   - иначе — как обычно (Actions вешают клики по terrain/существу).
+--   - ЛКМ: если в клетке есть лут — НЕ вешаем (не выделяем клетку с лутом).
+--   - ПКМ: если в клетке есть лут и НЕТ существа — НЕ вешаем.
+--          Если есть существо (даже спящее) — вешаем (меню Спать/Разбудить/
+--          Осмотреть). Без этого нельзя разбудить спящее существо на клетке
+--          с лутом.
+--   - Если существ нет и лута нет — вешаем по terrain (Actions).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -141,7 +145,10 @@ NSQC4.RegisterModule("quests", function()
 
         -- глубина воды (water)
         if terrainId == "water" then
-            local d = Grid.GetDepth and Grid:GetDepth(index) or nil
+            local d = nil
+            if Grid.GetDepth then
+                d = Grid:GetDepth(index)
+            end
             if d then
                 lines[#lines + 1] = {
                     text = string.format("Глубина: %d / %d", d, Grid.DEPTH_MAX or 10),
@@ -150,7 +157,7 @@ NSQC4.RegisterModule("quests", function()
             end
         end
 
-        -- прочность (не void, не water — у воды своя строка «Глубина»)
+        -- прочность (не void, не water)
         if terrainId and terrainId ~= "void" and terrainId ~= "water" then
             local curH = Grid:GetHardness(index)
             local maxH = nil
@@ -292,12 +299,15 @@ NSQC4.RegisterModule("quests", function()
         local Drops = NSQC4.QuestsDfTransformDrops
         if Drops then Drops:Render(index) end
 
+        -- ====================================================================
         -- Тултип и клики
-        local sleeping = entity and entity.opts and entity.opts.sleeping
-        local hasLoot  = Drops and Drops:HasAny(index) or false
-        local hasActiveEntity = entity and not sleeping
+        -- ====================================================================
+        local sleeping     = entity and entity.opts and entity.opts.sleeping
+        local hasEntity    = entity ~= nil            -- активное ИЛИ спящее
+        local hasActive    = entity and not sleeping  -- только активное
+        local hasLoot      = Drops and Drops:HasAny(index) or false
 
-        if hasActiveEntity then
+        if hasEntity then
             entity.opts._landscape = { index = index, terrainId = terrainId }
 
             local tooltipFn = ResolveTooltip(entity)
@@ -321,15 +331,23 @@ NSQC4.RegisterModule("quests", function()
             QuestsField:SetCellTooltip(index, function(btn)
                 ShowCellTooltip(index, terrainId)
             end)
+        end
 
-            if hasLoot then
-                QuestsField:SetCellOnMouseClick(index, "LeftButton",  nil)
+        -- ЛКМ: лут блокирует выделение (клетку с лутом не выделяем).
+        if hasLoot then
+            QuestsField:SetCellOnMouseClick(index, "LeftButton", nil)
+            -- ПКМ: если есть существо (даже спящее) — не снимаем,
+            -- чтобы можно было открыть меню (Разбудить/Осмотреть/Спать).
+            -- Если существа нет — снимаем.
+            if not hasEntity then
                 QuestsField:SetCellOnMouseClick(index, "RightButton", nil)
                 return true
             end
         end
 
-        -- Клики по terrain (как раньше)
+        -- Клики по terrain (Actions вешают свои обработчики).
+        -- Для клеток с существом Action-ы сами решают, показать меню
+        -- существа или нет (см. RightClickEntities.lua).
         local Actions = NSQC4.QuestsDfTerrainActions
         local T = Actions and Actions.Types and terrainId and Actions.Types[terrainId]
 
@@ -337,8 +355,11 @@ NSQC4.RegisterModule("quests", function()
             if T.LeftClickSelf then T.LeftClickSelf(index) end
             if T.RightClickEntities then T.RightClickEntities(index) end
         else
-            QuestsField:SetCellOnMouseClick(index, "LeftButton",  nil)
-            QuestsField:SetCellOnMouseClick(index, "RightButton", nil)
+            -- Нет Action для этого terrain — снимаем клики, если не существо
+            if not hasEntity then
+                QuestsField:SetCellOnMouseClick(index, "LeftButton",  nil)
+                QuestsField:SetCellOnMouseClick(index, "RightButton", nil)
+            end
         end
 
         return true

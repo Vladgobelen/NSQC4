@@ -1,9 +1,19 @@
 -- ============================================================================
 -- NSQC4 / Quests / df / Actions / Terrain / Tree / RightClickEntities
--- ПКМ по tree:
---   1. Есть лут и нет активного существа → меню не показываем
---   2. Есть активное существо → меню существа (Спать/Осмотреть)
---   3. Иначе → меню нет
+-- ПКМ по tree.
+--
+-- ЛОГИКА:
+--   1. Есть существо (активное ИЛИ спящее) → меню существа:
+--        - если активно:  «Спать»
+--        - если спит:     «Разбудить»
+--        - «Осмотреть» — всегда
+--      Меню показываем ДАЖЕ если в клетке есть лут — иначе нельзя
+--      разбудить существо на клетке с лутом.
+--   2. Существа нет и есть лут → меню не показываем (return false).
+--   3. Существа нет и лута нет → меню клетки нет (return false).
+--
+-- «Спать» и «Разбудить» перерисовывают клетку через Entities:Spawn
+-- (Spawn обновляет opts.sleeping и заново рендерит визуал существа).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -28,32 +38,62 @@ NSQC4.RegisterModule("quests", function()
         QuestsField:SetCellOnMouseClick(index, "RightButton", function(btn, button, idx)
             local Drops  = NSQC4.QuestsDfTransformDrops
             local entity = Grid and Grid:GetEntity(idx)
-            local sleeping = entity and entity.opts and entity.opts.sleeping
-            local hasActive = entity and not sleeping
-            local hasLoot = Drops and Drops:HasAny(idx) or false
+            local hasEntity = entity ~= nil
+            local sleeping  = entity and entity.opts and entity.opts.sleeping
+            local hasLoot   = Drops and Drops:HasAny(idx) or false
 
-            if hasLoot and not hasActive then
-                return false
-            end
-
-            if hasActive then
+            -- 1. Существо (активное или спящее) → меню существа
+            if hasEntity and entity.opts then
                 local opts = entity.opts
-                local menuItems = {
-                    { text = "Спать", func = function()
-                        opts.sleeping = true
-                        local Entities = NSQC4.QuestsDfEntities
-                        if Entities then Entities:Spawn(entity.id, idx, opts) end
-                    end },
-                    { text = "Осмотреть", func = function()
+                local menuItems = {}
+
+                if sleeping then
+                    menuItems[#menuItems + 1] = {
+                        text = "Разбудить",
+                        func = function()
+                            opts.sleeping = false
+                            local Entities = NSQC4.QuestsDfEntities
+                            if Entities then
+                                Entities:Spawn(entity.id, idx, opts)
+                            end
+                            print("|cff00ff00[NSQC4]|r " ..
+                                  (opts.name or "Существо") .. " проснулся.")
+                        end,
+                    }
+                else
+                    menuItems[#menuItems + 1] = {
+                        text = "Спать",
+                        func = function()
+                            opts.sleeping = true
+                            local Entities = NSQC4.QuestsDfEntities
+                            if Entities then
+                                Entities:Spawn(entity.id, idx, opts)
+                            end
+                            print("|cff00ff00[NSQC4]|r " ..
+                                  (opts.name or "Существо") .. " уснул.")
+                        end,
+                    }
+                end
+
+                menuItems[#menuItems + 1] = {
+                    text = "Осмотреть",
+                    func = function()
                         print("|cff00ff00[NSQC4]|r Вы осмотрели " ..
                               (opts.name or "существо") .. ".")
-                    end },
+                    end,
                 }
+
                 QuestsField:ShowContextMenu(menuItems, btn)
                 return true
             end
 
-            return false   -- меню нет
+            -- 2. Существа нет, есть лут → меню не показываем
+            if hasLoot then
+                return false
+            end
+
+            -- 3. Существа нет, лута нет → меню клетки нет
+            return false
         end)
 
         return true
