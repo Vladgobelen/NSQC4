@@ -2,6 +2,13 @@
 -- NSQC4 / Quests / Field / UI / API / Clear
 -- Полная очистка визуала клетки и всего поля.
 -- Клики НЕ трогает — их вешают/снимают модули через Mouse.
+--
+-- РАМКИ:
+--   - Якорь существа (btn.anchors[pos]) — БЕЗ рамки (в Anchors.lua
+--     SetAnchorBorder больше не вызывается). Здесь рамки якорей не трогаем.
+--   - Лут (btn._lootTextures + btn._lootBorders) — рамка вокруг каждой
+--     лут-текстуры (btn._lootBorders[anchor]). Здесь скрываем и текстуры,
+--     и рамки.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -39,7 +46,7 @@ NSQC4.RegisterModule("quests", function()
             btn.text_hover:Hide()
         end
 
-        -- 4. Иконки-якоря (визуал, не _clicks)
+        -- 4. Иконки-якоря (существо) — без рамок, просто текстуры
         if btn.anchors then
             for _, anchor in pairs(btn.anchors) do
                 anchor:SetTexture(nil)
@@ -47,10 +54,25 @@ NSQC4.RegisterModule("quests", function()
             end
         end
 
-        -- 5. Рамка кнопки — стандартный вид
+        -- 5. Лут-текстуры + их рамки
+        if btn._lootTextures then
+            for _, tex in pairs(btn._lootTextures) do
+                tex:Hide()
+                tex:ClearAllPoints()
+                tex:SetTexture(nil)
+            end
+            btn._lootTextures = nil
+        end
+        if btn._lootBorders then
+            for _, border in pairs(btn._lootBorders) do
+                border:Hide()
+            end
+        end
+
+        -- 6. Рамка кнопки — стандартный вид
         btn:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
 
-        -- 6. Ховер-обработчики
+        -- 7. Ховер-обработчики
         btn._onEnter = nil
         btn._onLeave = nil
     end

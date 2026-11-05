@@ -6,6 +6,18 @@
 --
 -- TOPLEFT — под существо, лут туда НЕ кладётся.
 --
+-- РАМКА ВОКРУГ ЛУТ-ЯКОРЯ:
+--   Каждый лут (ARTWORK/7) обёрнут тонкой рамкой 1 px (Frame с backdrop
+--   WHITE8x8, edgeSize = 1, прозрачная заливка, чёрная граница).
+--   Рамка создаётся в самом Drops.lua (btn._lootBorders[anchor]) — вокруг
+--   лут-текстуры (tex), а НЕ вокруг btn.anchors[pos] (это якорь существа).
+--   Anchors.lua больше НЕ вызывает SetAnchorBorder — вокруг существа
+--   рамки нет. Рамка только вокруг лута.
+--
+-- ЯКОРЬ ВЫШЕ ЛУТА:
+--   Якорь (существо) — ARTWORK/8 (ANCHOR_SUBLEVEL = 8 в Anchors.lua).
+--   Лут — ARTWORK/7. Якорь рисуется ВЫШЕ лута. Не меняем subLevel лута.
+--
 -- API:
 --   Drops:FreeAnchors(index)       → массив свободных лут-якорей
 --   Drops:HasAny(index)            → true, если занят хоть один лут-якорь
@@ -46,6 +58,18 @@ NSQC4.RegisterModule("quests", function()
     }
 
     Drops.LOOT_ANCHORS = LOOT_ANCHORS
+
+    -- ========================================================================
+    -- Параметры рамки вокруг лут-текстуры
+    -- ========================================================================
+    local LOOT_SUBLEVEL  = 7         -- лут — ARTWORK/7 (якорь выше: ARTWORK/8)
+    local BORDER_SIZE    = 1         -- 1 px
+    local BORDER_R       = 0.0
+    local BORDER_G       = 0.0
+    local BORDER_B       = 0.0
+    local BORDER_A       = 1.0
+    local BORDER_PAD     = 1         -- выступ рамки наружу на 1 px,
+                                     -- чтобы edgeSize=1 не перекрывал иконку
 
     local function EnsureLoot(index)
         local c = Grid:GetCell(index)
@@ -145,11 +169,12 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Рендер лута клетки: каждая иконка — в свой лут-якорь
+    -- Очистить визуал лута (текстуры + рамки)
     -- ========================================================================
     local function ClearLootTextures(index)
         local btn = QuestsField.cells and QuestsField.cells[index]
         if not btn then return end
+
         if btn._lootTextures then
             for _, tex in pairs(btn._lootTextures) do
                 tex:Hide()
@@ -158,8 +183,48 @@ NSQC4.RegisterModule("quests", function()
             end
             btn._lootTextures = nil
         end
+
+        if btn._lootBorders then
+            for _, border in pairs(btn._lootBorders) do
+                border:Hide()
+            end
+        end
     end
 
+    -- ========================================================================
+    -- Создать/обновить рамку вокруг лут-текстуры tex (в клетке index,
+    -- для якоря anchor). Рамка — Frame с backdrop WHITE8x8, edgeSize = 1.
+    -- BORDER_PAD = 1 — рамка на 1 px больше иконки со всех сторон;
+    -- SetBackdrop рисует границу ВНУТРИ этого Frame — снаружи иконки.
+    -- ========================================================================
+    local function SetLootBorder(index, anchor, tex)
+        local btn = QuestsField.cells and QuestsField.cells[index]
+        if not btn or not tex then return end
+
+        if not btn._lootBorders then btn._lootBorders = {} end
+        local border = btn._lootBorders[anchor]
+
+        if not border then
+            border = CreateFrame("Frame", nil, btn)
+            border:SetFrameLevel(btn:GetFrameLevel() + 11)
+            border:SetBackdrop({
+                edgeFile = "Interface\\Buttons\\WHITE8x8",
+                edgeSize = BORDER_SIZE,
+            })
+            border:SetBackdropColor(0, 0, 0, 0)
+            border:SetBackdropBorderColor(BORDER_R, BORDER_G, BORDER_B, BORDER_A)
+            btn._lootBorders[anchor] = border
+        end
+
+        border:ClearAllPoints()
+        border:SetPoint("TOPLEFT",     tex, "TOPLEFT",     -BORDER_PAD,  BORDER_PAD)
+        border:SetPoint("BOTTOMRIGHT", tex, "BOTTOMRIGHT",  BORDER_PAD, -BORDER_PAD)
+        border:Show()
+    end
+
+    -- ========================================================================
+    -- Рендер лута клетки: каждая иконка — в свой лут-якорь + рамка вокруг
+    -- ========================================================================
     function Drops:Render(index)
         index = tonumber(index) or 0
         if index < 1 or index > TOTAL then return false end
@@ -175,8 +240,8 @@ NSQC4.RegisterModule("quests", function()
         btn._lootTextures = {}
 
         for anchor, d in pairs(c.loot) do
-            local tex = btn:CreateTexture(nil, "ARTWORK", nil, 7)
-            tex:SetDrawLayer("ARTWORK", 7)
+            local tex = btn:CreateTexture(nil, "ARTWORK", nil, LOOT_SUBLEVEL)
+            tex:SetDrawLayer("ARTWORK", LOOT_SUBLEVEL)
             tex:SetTexture(d.icon)
             tex:SetTexCoord(0, 1, 0, 1)
             -- размер и позиция — как у существа (1/3 клетки), через якорь
@@ -201,6 +266,9 @@ NSQC4.RegisterModule("quests", function()
             end
             tex:Show()
             btn._lootTextures[anchor] = tex
+
+            -- рамка вокруг лут-текстуры (1 px, снаружи)
+            SetLootBorder(index, anchor, tex)
         end
 
         return true
