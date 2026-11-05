@@ -12,16 +12,29 @@
 --   Floors:ApplyWaterFromAbove(n) берёт снимок этажа n+1 (если есть) и
 --   для каждой клетки, где на этаже n+1 вода с depth >= 1, ставит на этаж n
 --   тоже воду с depth = depth - 1. Где depth - 1 == 0 — ставит earth (дно).
---   Это даёт «проваливание» реки/озера с этажа 0 вниз на глубину.
+--
+-- БЛОКИРОВКА ПОВТОРНОЙ ГЕНЕРАЦИИ:
+--   Раньше блокировали по s.visited[n]. Это несогласованно: visited мог
+--   быть true, а snapshots[n] — nil (например, после /reload, если visited
+--   сохранился, а snapshots — нет). Тогда Generate не звался, LoadFloor
+--   падал (нет снимка), и на этаже оставались существа с другого этажа.
+--
+--   Теперь блокируем по s.snapshots[n]: visited — производное от snapshots.
+--   Если снимка нет — генерируем, даже если visited[n] == true.
+--
+-- ОЧИСТКА СУЩЕСТВ:
+--   Для n ~= 0 зовём Entities:Clear() ДО ClearGrid(), чтобы RenderCell
+--   при очистке byName не находил существ (entityName ещё стоит, но
+--   byName уже пуст → Grid:GetEntity вернёт nil).
 --
 -- 0. Animate:StopAll() — чтобы temp-текстуры старого этажа не остались.
--- 1. Очистить клетки (terrain=nil, hardness=nil, entityName=nil, loot=nil,
---    depth=nil) и выделения (terrain_types, reserved).
--- 2. Для n < 0 — заполнить earth/stone.
--- 3. ApplyWaterFromAbove(n) — вода с этажа n+1, если есть снимок.
--- 4. SeedRiver/SeedLake — обычная генерация воды (если доступна).
--- 5. Пометить visited[n] = true, обновить min/max.
--- 6. Сохранить снимок (SaveFloor).
+-- 1. Entities:Clear() (для n ~= 0) — очистить существ.
+-- 2. ClearGrid() — очистить клетки + выделения + depth.
+-- 3. Для n < 0 — FillRandom({earth, stone}).
+-- 4. ApplyWaterFromAbove(n) — вода с этажа n+1, если есть снимок.
+-- 5. SeedRiver/SeedLake — обычная генерация воды (если доступна).
+-- 6. Пометить visited[n] = true, обновить min/max.
+-- 7. SaveFloor(n) — сохранить снимок (пустые существа для n < 0).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -69,7 +82,6 @@ NSQC4.RegisterModule("quests", function()
                 c.depth      = nil
             end
         end
-        -- выделения: свои на каждом этаже, новый этаж — без выделений
         if Grid.ClearAllSelections then
             Grid:ClearAllSelections("terrain")
             Grid:ClearAllSelections("reserved")
@@ -84,24 +96,11 @@ NSQC4.RegisterModule("quests", function()
         end
     end
 
-    -- ========================================================================
-    -- Вода с этажа n+1 (если есть снимок). Делает:
-    --   - клетка над нами water depth>=2 → у нас water, depth-1
-    --   - клетка над нами water depth==1 → у нас earth (дно)
-    --   - клетка над нами не water        → не трогаем (останется earth/stone)
-    -- ========================================================================
     local function ApplyWaterFromAbove(n)
         if not Floors.ApplyWaterFromAbove then return 0 end
         return Floors:ApplyWaterFromAbove(n)
     end
 
-    -- ========================================================================
-    -- Обычная генерация воды на этаже (река/озеро).
-    -- Вызывается только если у этажа нет «воды сверху», либо в дополнение
-    -- к ней (по желанию). Сейчас: если ApplyWaterFromAbove ничего не
-    -- поставил — пробуем SeedRiver/SeedLake. Если поставил — не добавляем,
-    -- чтобы не перекрывать «провалившуюся» воду.
-    -- ========================================================================
     local function SeedWaterOnFloor(n, placedFromAbove)
         if placedFromAbove > 0 then
             return 0
@@ -127,7 +126,10 @@ NSQC4.RegisterModule("quests", function()
         n = tonumber(n) or 0
 
         local s = EnsureStorage()
-        if s.visited[n] and n ~= 0 then
+
+        -- БЛОКИРОВКА ПО СНИМКУ, а не по visited:
+        -- если снимок есть — этаж уже сгенерирован.
+        if s.snapshots[n] then
             return false
         end
 
@@ -142,21 +144,23 @@ NSQC4.RegisterModule("quests", function()
             Animate:StopAll()
         end
 
-        -- существ убираем на любом этаже (кроме 0 — там текущая карта)
+        -- 1. Существ убираем ДО ClearGrid, чтобы RenderCell при очистке
+        --    byName не находил существ (entityName ещё стоит, byName пуст).
         if n ~= 0 and Entities and Entities.Clear then
             Entities:Clear()
         end
 
+        -- 2. Очистить клетки + выделения + depth
         ClearGrid()
 
         if n < 0 then
-            -- 2. База: земля/камень
+            -- 3. База: земля/камень
             FillRandom({ "earth", "stone" })
 
-            -- 3. Вода «сверху» (если этаж n+1 уже сгенерирован)
+            -- 4. Вода «сверху» (если этаж n+1 уже сгенерирован)
             local placedAbove = ApplyWaterFromAbove(n)
 
-            -- 4. Обычная генерация воды — только если сверху ничего не пришло
+            -- 5. Обычная генерация воды — только если сверху ничего не пришло
             local placedSeed = SeedWaterOnFloor(n, placedAbove)
 
             if placedAbove > 0 or placedSeed > 0 then
@@ -172,6 +176,7 @@ NSQC4.RegisterModule("quests", function()
         if n < s.min then s.min = n end
         if n > s.max then s.max = n end
 
+        -- 6. Сохранить снимок (для n < 0 — пустые существа)
         if Floors.SaveFloor then
             Floors:SaveFloor(n)
         end

@@ -2,18 +2,13 @@
 -- NSQC4 / Quests / df / Entities / UI / Api
 -- ОДИН визуал: в пути temp, в покое anchor.
 --
--- СЛОИ (по frame level, ВСЕГДА выше лута и его бордера):
---   btn+10 — текстуры клетки, лут (OVERLAY/3), бордер лута (OVERLAY/2)
---   btn+20 — фрейм существа (anchor в покое, temp в пути)
+-- СЛОИ: btn+20 — фрейм существа (anchor/temp внутри). Выше лута (btn+10).
 --
--- Раньше anchor/temp были ТЕКСТУРАМИ на btn (btn+10), и бордер лута —
--- фрейм btn+11 — их перекрывал. Теперь существо — ФРЕЙМ btn+20,
--- внутри него текстура на весь фрейм. Frame level важнее sublevel,
--- поэтому существо всегда сверху.
---
--- ФИКС свёрнутой в центре:
---   RefreshTempAt ставит фрейм существом CENTER в (x, y) из Move.
---   Для свёрнутой x,y = TOPLEFT + ins + size/2 — верхний левый угол.
+-- ПЕРЕКЛЮЧЕНИЕ ЭТАЖА:
+--   UIApi._entityFrames[id] живёт независимо от byName/Grid. При смене
+--   этажа старые фреймы НЕ чистятся сами — нужен явный ClearAllVisuals().
+--   Вызывается из Entities:Clear(), Floors:LoadFloor, Floors:Generate,
+--   Floors:Switch (RenderAll).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -37,7 +32,7 @@ NSQC4.RegisterModule("quests", function()
     end
 
     local DEFAULT_ALPHA  = 1.0
-    local ENTITY_LEVEL_OFFSET = 20   -- btn+20, выше лута (btn+10) и его бордера
+    local ENTITY_LEVEL_OFFSET = 20
 
     local function Valid(index)
         index = tonumber(index) or 0
@@ -50,9 +45,6 @@ NSQC4.RegisterModule("quests", function()
         return btn or QuestsField.frame
     end
 
-    -- ========================================================================
-    -- Фрейм существа + текстура внутри. Один фрейм на id.
-    -- ========================================================================
     local function EnsureEntityFrame(entity)
         if not entity or not entity.id then return nil, nil end
         local host = HostFor(entity)
@@ -100,8 +92,24 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Размер текстуры существа
+    -- ClearAllVisuals: скрыть ВСЕ фреймы существ и очистить реестр.
+    -- Вызывается при смене этажа (Entities:Clear, Floors:LoadFloor/Generate/Switch).
     -- ========================================================================
+    function UIApi:ClearAllVisuals()
+        if not UIApi._entityFrames then return end
+        for id, rec in pairs(UIApi._entityFrames) do
+            if rec.frame then
+                rec.frame:Hide()
+                rec.frame:ClearAllPoints()
+            end
+            if rec.tex then
+                rec.tex:SetTexture(nil)
+            end
+        end
+        UIApi._entityFrames = {}
+        dbg("ClearAllVisuals: все фреймы существ скрыты")
+    end
+
     local function TempSize(entity)
         local btn = QuestsField.cells and QuestsField.cells[entity.index]
         local cellW = btn and btn:GetWidth()  or 32
@@ -118,9 +126,6 @@ NSQC4.RegisterModule("quests", function()
         end
     end
 
-    -- ========================================================================
-    -- Позиция в движении: фрейм центром в (x, y) — координаты поля.
-    -- ========================================================================
     local function RefreshTempAt(entity, x, y)
         if not entity or not entity.opts then return end
         local frame, tex = EnsureEntityFrame(entity)
@@ -141,11 +146,6 @@ NSQC4.RegisterModule("quests", function()
         tex:Show()
     end
 
-    -- ========================================================================
-    -- В покое: фрейм существом в штатной точке клетки.
-    --   свёрнутая — TOPLEFT + ins + size/2 (угол)
-    --   развёрнутая — CENTER клетки
-    -- ========================================================================
     local function ApplyAnchor(index, opts)
         if not opts or not opts.icon then
             local Grid = NSQC4.QuestsDfGrid
@@ -172,7 +172,6 @@ NSQC4.RegisterModule("quests", function()
         if opts.expanded then
             frame:SetPoint("CENTER", btn, "CENTER", 0, 0)
         else
-            -- TOPLEFT + inset + size/2 — но мы ставим ЦЕНТР фрейма в эту точку
             local ins = CONST.ANCHOR_INSET or 0
             frame:SetPoint("CENTER", btn, "TOPLEFT", ins + w / 2, -(ins + h / 2))
         end
@@ -222,10 +221,21 @@ NSQC4.RegisterModule("quests", function()
         local Grid = NSQC4.QuestsDfGrid
         if not Grid then return false end
         local entity = Grid:GetEntity(index)
+
         if not entity or not entity.opts then
-            self:Render(index, nil)
+            -- Скрыть все фреймы, привязанные к этой клетке (btn)
+            if UIApi._entityFrames then
+                local btn = QuestsField.cells and QuestsField.cells[index]
+                for id, rec in pairs(UIApi._entityFrames) do
+                    if rec.frame and rec.frame:GetParent() == btn then
+                        rec.frame:Hide()
+                        rec.tex:SetTexture(nil)
+                    end
+                end
+            end
             return true
         end
+
         local opts = entity.opts
         self:Render(index, {
             icon     = opts.icon or opts.texture,
@@ -263,8 +273,10 @@ NSQC4.RegisterModule("quests", function()
         local cmd = (msg or ""):lower():match("^(%S*)")
         if cmd == "" or cmd == "on" then UIApi.DEBUG = true; print("[ENT-UI] DEBUG = true")
         elseif cmd == "off" then UIApi.DEBUG = false; print("[ENT-UI] DEBUG = false")
+        elseif cmd == "clear" then
+            UIApi:ClearAllVisuals()
+            print("[ENT-UI] clear: все фреймы скрыты")
         elseif cmd == "layers" then
-            local Grid = NSQC4.QuestsDfGrid
             local Entities = NSQC4.QuestsDfEntities
             if not Entities then return end
             for _, e in ipairs(Entities:GetAll()) do
@@ -279,8 +291,8 @@ NSQC4.RegisterModule("quests", function()
                         tostring(e.opts and e.opts.name), tostring(e.index)))
                 end
             end
-        else print("[ENT-UI] /ns_entui on | off | layers") end
+        else print("[ENT-UI] /ns_entui on | off | clear | layers") end
     end
 
-    print("|cff00ffff[ENT-UI]|r Entities/UI/Api загружен (фрейм существа btn+20, выше лута)")
+    print("|cff00ffff[ENT-UI]|r Entities/UI/Api загружен (фрейм btn+20, ClearAllVisuals)")
 end)

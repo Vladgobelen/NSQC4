@@ -37,11 +37,18 @@ NSQC4.RegisterModule("quests", function()
         local Entities = NSQC4.QuestsDfEntities
         local Drops    = NSQC4.QuestsDfTransformDrops
         local QuestsField = NSQC4.QuestsField
+        local EntApi = NSQC4.QuestsDfEntitiesUIApi
 
         dbg("Render: Terrain=" .. tostring(Terrain and "ok" or "nil") ..
             " Entities=" .. tostring(Entities and "ok" or "nil") ..
             " Drops=" .. tostring(Drops and "ok" or "nil") ..
             " Field=" .. tostring(QuestsField and "ok" or "nil"))
+
+        -- Скрыть все фреймы существ (Api._entityFrames) — старый этаж
+        if EntApi and EntApi.ClearAllVisuals then
+            EntApi:ClearAllVisuals()
+            dbg("Render: ClearAllVisuals done")
+        end
 
         -- Скрыть все якоря существ на всех клетках (старый этаж)
         if QuestsField and QuestsField.ClearAnchorTextures then
@@ -53,29 +60,9 @@ NSQC4.RegisterModule("quests", function()
             dbg("Render: ClearAnchorTextures all")
         end
 
-        -- Ландшафт
-        if Terrain and Terrain.Render then
-            Terrain:Render()
-            dbg("Render: Terrain:Render done")
-        else
-            dbg("Render: Terrain:Render SKIPPED")
-        end
-
-        -- Существа
-        if Entities and Entities.Render then
-            Entities:Render()
-            dbg("Render: Entities:Render done")
-        else
-            dbg("Render: Entities:Render SKIPPED")
-        end
-
-        -- Лут
-        if Drops and Drops.RenderAll then
-            Drops:RenderAll()
-            dbg("Render: Drops:RenderAll done")
-        else
-            dbg("Render: Drops:RenderAll SKIPPED")
-        end
+        if Terrain and Terrain.Render then Terrain:Render() end
+        if Entities and Entities.Render then Entities:Render() end
+        if Drops and Drops.RenderAll then Drops:RenderAll() end
     end
 
     -- ========================================================================

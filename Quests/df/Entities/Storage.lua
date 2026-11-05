@@ -195,6 +195,12 @@ NSQC4.RegisterModule("quests", function()
         local Animate = NSQC4.QuestsDfEntitiesAnimate
         local byName = ByName()
 
+        -- Скрыть все фреймы существ (Api._entityFrames) — они не привязаны к byName
+        local EntApi = NSQC4.QuestsDfEntitiesUIApi
+        if EntApi and EntApi.ClearAllVisuals then
+            EntApi:ClearAllVisuals()
+        end
+
         for name, e in pairs(byName) do
             if Animate and e.id then Animate:Stop(e.id) end
             if Grid.ClearSelection then

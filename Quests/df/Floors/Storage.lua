@@ -5,23 +5,28 @@
 -- snapshots[n] = {
 --     grid       = { [i] = { terrain, hardness, entityName, loot, depth } },
 --     selections = { terrain_types = {...}, reserved = {...} },
---     entities   = { { name, id, index, kind, opts = deep copy }, ... },
+--     entities   = { {
+--         name, id, index, kind, opts = deep copy,
+--         -- состояние шага (для продолжения движения):
+--         nextIndex, posX, posY,
+--         stepStartX, stepStartY, stepEndX, stepEndY,
+--         stepDuration, stepExpanded, stepT,
+--     }, ... },
 -- }
 --
--- depth — глубина воды (1..10), см. df/Grid/Depth.lua.
+-- СОХРАНЕНИЕ ШАГА:
+--   stepT = (now - stepStartedAt) / stepDuration — доля прохождения шага
+--   на момент снимка. При загрузке:
+--     stepStartedAt = GetTime() - stepT * stepDuration
+--   Тогда t = (now - stepStartedAt) / stepDuration == stepT, и Move:Advance
+--   продолжит интерполяцию с той же точки, а не начнёт заново.
 --
--- ВОДА ПО ЭТАЖАМ:
---   Если на этаже n+1 клетка i — water с depth >= 1, то на этаже n
---   в клетке i тоже вода, но depth = depth - 1 (вода «проваливается» вниз).
---   depth = 0 на этаже n → не вода (дно).
---
---   Floors:ApplyWaterFromAbove(n) — применяет это правило к этажу n
---   по снимку этажа n+1. Вызывается из Floors:Generate(n) после FillRandom,
---   до SaveFloor(n).
+-- LOADFLOOR БЕЗ СНИМКА:
+--   Если снимка нет — чистим Entities + Grid, чтобы не остались «висящие»
+--   существа с другого этажа. Возвращаем false.
 --
 -- ДУБЛЬ IsVisited: единственное определение Floors:IsVisited — в
--- Floors/Init.lua. Здесь его НЕТ (раньше было — Storage.lua грузится позже
--- Init.lua и перезаписывал версию из Init.lua; убрано).
+-- Floors/Init.lua. Здесь его НЕТ.
 --
 -- Отладка:
 --   /ns_floors on | off | dump | snap <n>
@@ -148,10 +153,14 @@ NSQC4.RegisterModule("quests", function()
 
     -- ========================================================================
     -- Снимок существ этажа (byName + Grid)
+    --   Сохраняет и состояние шага (nextIndex/posX/posY/step*/stepT),
+    --   чтобы при загрузке продолжить движение, а не начинать заново.
     -- ========================================================================
     local function SnapshotEntities()
         local list = {}
         local byName = ByName()
+        local now = GetTime()
+
         for name, e in pairs(byName) do
             if e and e.opts then
                 local onGrid = false
@@ -163,12 +172,32 @@ NSQC4.RegisterModule("quests", function()
                     end
                 end
                 if onGrid then
+                    -- доля прохождения шага на момент снимка
+                    local t = nil
+                    if e.nextIndex and e.stepStartedAt and e.stepDuration
+                       and e.stepDuration > 0 then
+                        t = (now - e.stepStartedAt) / e.stepDuration
+                        if t < 0 then t = 0 elseif t > 1 then t = 1 end
+                    end
+
                     list[#list + 1] = {
                         name  = name,
                         id    = e.id,
                         index = e.index,
                         kind  = e.kind,
                         opts  = CopyOpts(e.opts),
+
+                        -- состояние шага (nil, если существо в покое)
+                        nextIndex    = e.nextIndex,
+                        posX         = e.posX,
+                        posY         = e.posY,
+                        stepStartX   = e.stepStartX,
+                        stepStartY   = e.stepStartY,
+                        stepEndX     = e.stepEndX,
+                        stepEndY     = e.stepEndY,
+                        stepDuration = e.stepDuration,
+                        stepExpanded = e.stepExpanded,
+                        stepT        = t,
                     }
                 end
             end
@@ -235,7 +264,9 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Восстановить существ из снимка
+    -- Восстановить существ из снимка.
+    --   Восстанавливает и состояние шага: nextIndex/posX/posY/step*/stepT.
+    --   stepStartedAt = now - stepT * stepDuration, чтобы t был тот же.
     -- ========================================================================
     local function RestoreEntities(snapList)
         local E = NSQC4.QuestsDfEntities
@@ -249,6 +280,7 @@ NSQC4.RegisterModule("quests", function()
 
         if not snapList then return end
 
+        local now = GetTime()
         for _, rec in ipairs(snapList) do
             local name = rec.name
             local opts = rec.opts and CopyOpts(rec.opts) or {}
@@ -258,6 +290,23 @@ NSQC4.RegisterModule("quests", function()
                 opts  = opts,
                 kind  = rec.kind or opts.kind or "generic",
             }
+
+            -- восстановить шаг, если существо было в пути
+            if rec.nextIndex then
+                entity.nextIndex     = rec.nextIndex
+                entity.posX          = rec.posX
+                entity.posY          = rec.posY
+                entity.stepStartX    = rec.stepStartX
+                entity.stepStartY    = rec.stepStartY
+                entity.stepEndX      = rec.stepEndX
+                entity.stepEndY      = rec.stepEndY
+                entity.stepDuration  = rec.stepDuration
+                entity.stepExpanded  = rec.stepExpanded
+                local t = rec.stepT or 0
+                if t < 0 then t = 0 elseif t > 1 then t = 1 end
+                entity.stepStartedAt = now - t * (rec.stepDuration or 1)
+            end
+
             byName[name] = entity
             if rec.index and Grid then
                 Grid:SetEntityName(rec.index, name)
@@ -280,11 +329,6 @@ NSQC4.RegisterModule("quests", function()
     -- Берёт снимок этажа n+1 (если есть). Для каждой клетки:
     --   - если над нами water с depth >= 1 → у нас тоже water, depth = depth - 1
     --   - если depth - 1 == 0 → не вода (дно), ставим землю (earth)
-    --
-    -- Ставится через Terrain:SetAt (чтобы корректно сбросить hardness/selection)
-    -- и Grid:SetDepth (глубина на новом этаже).
-    --
-    -- Возвращает число клеток воды, поставленных «сверху».
     -- ========================================================================
     function Floors:ApplyWaterFromAbove(n)
         n = tonumber(n) or 0
@@ -305,14 +349,12 @@ NSQC4.RegisterModule("quests", function()
                 if upDepth >= 1 then
                     local newDepth = upDepth - 1
                     if newDepth >= 1 then
-                        -- вода «провалилась» на этаж n
                         Terrain:SetAt(i, "water")
                         if Grid and Grid.SetDepth then
                             Grid:SetDepth(i, newDepth)
                         end
                         placed = placed + 1
                     else
-                        -- дно: вода закончилась, ставим землю
                         Terrain:SetAt(i, "earth")
                         if Grid and Grid.ClearDepth then
                             Grid:ClearDepth(i)
@@ -348,8 +390,18 @@ NSQC4.RegisterModule("quests", function()
         n = tonumber(n) or 0
         local s = EnsureStorage()
         local snap = s.snapshots[n]
+
+        -- Скрыть все фреймы существ старого этажа ДО восстановления нового
+        local EntApi = NSQC4.QuestsDfEntitiesUIApi
+        if EntApi and EntApi.ClearAllVisuals then
+            EntApi:ClearAllVisuals()
+        end
+
         if not snap then
-            dbg(string.format("LoadFloor(%d): нет снимка", n))
+            dbg(string.format("LoadFloor(%d): нет снимка → очищаю этаж", n))
+            local E = NSQC4.QuestsDfEntities
+            if E and E.Clear then E:Clear() end
+            if Grid and Grid.ClearAll then Grid:ClearAll() end
             return false
         end
         RestoreGrid(snap.grid)
@@ -408,14 +460,17 @@ NSQC4.RegisterModule("quests", function()
         if snap.entities then
             for _, rec in ipairs(snap.entities) do
                 local ai = rec.opts and rec.opts.ai
-                print(string.format("  entity %s idx=%s kind=%s state=%s target=%s",
+                print(string.format(
+                    "  entity %s idx=%s kind=%s state=%s target=%s next=%s pos=(%s,%s) stepT=%s",
                     tostring(rec.name), tostring(rec.index), tostring(rec.kind),
-                    tostring(ai and ai.state), tostring(ai and ai.target)))
+                    tostring(ai and ai.state), tostring(ai and ai.target),
+                    tostring(rec.nextIndex),
+                    tostring(rec.posX), tostring(rec.posY),
+                    tostring(rec.stepT)))
             end
         else
             print("  entities: nil")
         end
-        -- Карта воды: где depth и сколько
         if snap.grid then
             local parts = {}
             for i = 1, TOTAL do
