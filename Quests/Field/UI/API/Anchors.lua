@@ -66,7 +66,11 @@ NSQC4.RegisterModule("quests", function()
     local function ApplyAnchorPosition(texture, btn, pos, expanded)
         texture:ClearAllPoints()
         if expanded then
-            texture:SetAllPoints(btn)
+            local offX = btn:GetWidth()  * 0.05
+            local offY = btn:GetHeight() * 0.05
+            texture:ClearAllPoints()
+            texture:SetPoint("TOPLEFT",     btn, "TOPLEFT",     offX, -offY)
+            texture:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -offX,  offY)
         else
             local size = btn:GetWidth() / 3 - 1
             texture:SetSize(size, size)
