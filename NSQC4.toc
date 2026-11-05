@@ -81,6 +81,9 @@ Quests\Field\UI\Border.lua
 Quests\Field\UI\Resize.lua
 Quests\Field\UI\Frame.lua
 
+# --- Обзор (вид сверху / уменьшенный масштаб) ---
+Quests\Field\UI\Overview.lua
+
 # --- API поля ---
 Quests\Field\UI\API\Textures.lua
 Quests\Field\UI\API\Anchors.lua

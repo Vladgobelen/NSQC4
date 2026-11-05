@@ -1,6 +1,11 @@
 -- ============================================================================
 -- NSQC4 / Quests / Field / Init
 -- Класс поля квестов 10×10 + метаданные модуля "quests".
+--
+-- viewMode:
+--   "detail"   — обычный вид (10×10 детальных клеток) — по умолчанию.
+--   "overview" — вид сверху (10×10 «больших» квадратов, наш этаж — 1 из 100).
+--                Управляется через QuestsField:ShowOverview/HideOverview/ToggleOverview.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -35,6 +40,11 @@ NSQC4.RegisterModule("quests", function()
         self.cellSize      = nil
         self.saved         = nil
         self.contextMenus  = {} -- Инициализация таблицы контекстных меню
+
+        -- Режим отображения: "detail" (обычный) | "overview" (вид сверху).
+        -- Управляется через ShowOverview/HideOverview/ToggleOverview (Overview.lua).
+        self.viewMode      = "detail"
+
         return self
     end
 

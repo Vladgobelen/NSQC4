@@ -3,9 +3,28 @@
 -- Создание главного фрейма поля + клетки + рамка + ресайз + крестик.
 -- Клики по клеткам НЕ вешает — это делают модули (TerrainActions → Mouse).
 -- Здесь только: drag фрейма, ресайз, крестик, раскладка.
+--
+-- РЕЖИМЫ ОТОБРАЖЕНИЯ (self.viewMode):
+--   "detail"   — обычный вид: 10×10 детальных клеток.
+--   "overview" — вид сверху: 10×10 «больших» квадратов, наш этаж — 1 из 100,
+--                внутри — 10×10 пикселей (см. Overview.lua).
+--
+-- Show():
+--   - если viewMode == "overview" → self:ShowOverview() (а не детальный рендер)
+--   - иначе                       → детальный рендер (Terrain/Entities)
+-- Hide():
+--   - скрыть overview (если был), скрыть тултип, скрыть frame
+-- Toggle():
+--   - просто Show/Hide, режим сохраняется
+--
+-- OnSizeChanged:
+--   - ReflowCells + ApplyBorderAnchors (как раньше)
+--   - если viewMode == "overview" → self:RefreshOverviewLayout() (если Overview
+--     загружен; метод экспортируется из Overview.lua)
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
+
     local QuestsField = NSQC4.QuestsFieldClass
     local CONST       = NSQC4.QuestsFieldConst
     if not QuestsField or not CONST then return end
@@ -71,9 +90,13 @@ NSQC4.RegisterModule("quests", function()
             self:SetBorderVisible(true)
         end
 
+        -- OnSizeChanged: ReflowCells + ApplyBorderAnchors + Overview layout
         f:HookScript("OnSizeChanged", function()
             self:ReflowCells()
             self:ApplyBorderAnchors()
+            if self.viewMode == "overview" and self.RefreshOverviewLayout then
+                self:RefreshOverviewLayout()
+            end
         end)
 
         f:Hide()
@@ -81,23 +104,48 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Show / Hide / Toggle
+    -- Show / Hide / Toggle (с учётом viewMode)
     -- ========================================================================
     function QuestsField:Show()
         self:EnsureFrame()
+
+        -- Скрыть тултип (на случай, если он висел от прошлого показа)
+        GameTooltip:Hide()
+
+        -- Если включён overview — показать overview, а не детальный вид
+        if self.viewMode == "overview" and self.ShowOverview then
+            self.frame:Show()
+            self:ShowOverview()
+            return
+        end
+
+        -- Обычный детальный вид
         self.frame:Show()
 
         if NSQC4.QuestsDfTerrain then NSQC4.QuestsDfTerrain:Render() end
         if NSQC4.QuestsDfEntities then NSQC4.QuestsDfEntities:Render() end
+        if NSQC4.QuestsDfTransformDrops then NSQC4.QuestsDfTransformDrops:RenderAll() end
     end
 
     function QuestsField:Hide()
+        -- Скрыть overview (если был) — чтобы при следующем Show
+        -- не остались «большие» квадраты поверх клеток
+        if self.viewMode == "overview" and self.HideOverview then
+            self:HideOverview()
+        end
+
+        GameTooltip:Hide()
+
         if self.frame then self.frame:Hide() end
     end
 
     function QuestsField:Toggle()
         self:EnsureFrame()
-        if self.frame:IsShown() then self.frame:Hide() else self:Show() end
+        if self.frame:IsShown() then
+            self:Hide()
+        else
+            self:Show()
+        end
     end
 
     -- ========================================================================
@@ -114,7 +162,7 @@ NSQC4.RegisterModule("quests", function()
         btn:SetScript("OnEnter", function(self2) self2:SetAlpha(1) end)
         btn:SetScript("OnLeave", function(self2) self2:SetAlpha(0.01) end)
         btn:SetScript("OnClick", function()
-            f:Hide()
+            self:Hide()
         end)
 
         self.closeBtn = btn
