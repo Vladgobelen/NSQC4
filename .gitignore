@@ -48,6 +48,10 @@
 !Events/
 !Events/**
 
+# Папка Quests (ядро поля 10×10 + df)
+!Quests/
+!Quests/**
+
 # ============================================
 # ЗАПРЕТЫ — в самом конце, перебивают всё выше
 # ============================================
@@ -78,3 +82,5 @@ Course/.zshistory
 Course/.directory
 Events/.zshistory
 Events/.directory
+Quests/.zshistory
+Quests/.directory
