@@ -1,6 +1,6 @@
 ======================================================================
  LUA DUMP: /home/diver/Games/wc/CircleL/Interface/AddOns/NSQC4/Quests
- Date: 2026-11-05 17:00:17
+ Date: 2026-11-05 18:57:02
 ======================================================================
 
 ======================================================================
@@ -1261,8 +1261,13 @@ end)
 --       * бога нет                            → int
 --     Потолок шанса — 100%.
 --
--- Отладка:
+-- Отладка (подробная):
 --   /ns_complete on | off | dump | reset
+--   При каждом завершении:
+--     [COMPLETE skill] имя kin=... gods=... int=... skills_max=.../...
+--                      known=[...] terrain=... profId=...
+--     | ПРОФА ... (roll, p, x, результат)
+--     [COMPLETE now]  сводка (calls, rolls, succ, learn, up, miss, noslot, max, rate)
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -1305,6 +1310,11 @@ NSQC4.RegisterModule("quests", function()
         learned  = 0,
         rolls    = 0,
         success  = 0,
+        up       = 0,   -- повышение уровня (профа была)
+        learn    = 0,   -- изучение новой
+        miss     = 0,   -- бросок был, но промах
+        noslot   = 0,   -- нет слота
+        max      = 0,   -- профа уже 100
         startedAt = GetTime(),
     }
     Complete._dbg = dbg
@@ -1313,10 +1323,10 @@ NSQC4.RegisterModule("quests", function()
         local elapsed = GetTime() - dbg.startedAt
         local rate = (dbg.rolls > 0) and (dbg.success / dbg.rolls * 100) or 0
         print(string.format(
-            "[COMPLETE %s] t=%ds calls=%d skip=%d max=%d learn=%d rolls=%d succ=%d rate=%.1f%%",
+            "[COMPLETE %s] t=%ds calls=%d skip=%d rolls=%d succ=%d rate=%.1f%% | up=%d learn=%d miss=%d noslot=%d max=%d",
             tag or "", math.floor(elapsed),
-            dbg.calls, dbg.skipped, dbg.maxed, dbg.learned,
-            dbg.rolls, dbg.success, rate))
+            dbg.calls, dbg.skipped, dbg.rolls, dbg.success, rate,
+            dbg.up, dbg.learn, dbg.miss, dbg.noslot, dbg.max))
     end
 
     function Complete:ResetStats()
@@ -1326,6 +1336,11 @@ NSQC4.RegisterModule("quests", function()
         dbg.learned  = 0
         dbg.rolls    = 0
         dbg.success  = 0
+        dbg.up       = 0
+        dbg.learn    = 0
+        dbg.miss     = 0
+        dbg.noslot   = 0
+        dbg.max      = 0
         dbg.startedAt = GetTime()
         print("[COMPLETE] статистика сброшена.")
     end
@@ -1364,6 +1379,28 @@ NSQC4.RegisterModule("quests", function()
         if line == "single" then return "x3 single"
         elseif line == "mixed" then return "x2 mixed"
         else return "x1 none" end
+    end
+
+    -- ========================================================================
+    -- Подробная строка про существо + профессию (для отладки)
+    -- ========================================================================
+    local function PrintSkillLine(entity, terrainId, profId)
+        if not Complete.DEBUG then return end
+        local opts = entity and entity.opts or {}
+        local sk = {}
+        for n, l in pairs(opts.known_skills or {}) do
+            sk[#sk + 1] = tostring(n) .. ":" .. tostring(l)
+        end
+        table.sort(sk)
+        print(string.format(
+            "[COMPLETE skill] %s | int=%s kin=%s gods=%s | skills_max=%s/%s known=[%s] | terrain=%s profId=%s",
+            tostring(opts.name or (entity and entity.id) or "?"),
+            tostring(opts.intellect),
+            tostring(opts.kinship),
+            (opts.gods and table.concat(opts.gods, ",")) or "-",
+            tostring(opts.skills_max), tostring(opts.max_skills_max),
+            table.concat(sk, ", "),
+            tostring(terrainId), tostring(profId)))
     end
 
     -- ========================================================================
@@ -1410,6 +1447,7 @@ NSQC4.RegisterModule("quests", function()
         if cur > 0 then
             if cur >= PROF_MAX then
                 dbg.maxed = dbg.maxed + 1
+                dbg.max   = dbg.max + 1
                 return name, cur, cur, "max", nil, int, chancePct, mult, line
             end
 
@@ -1418,8 +1456,10 @@ NSQC4.RegisterModule("quests", function()
             if roll <= chancePct then
                 skills[name] = cur + 1
                 dbg.success = dbg.success + 1
+                dbg.up      = dbg.up + 1
                 return name, cur, cur + 1, "up", roll, int, chancePct, mult, line
             end
+            dbg.miss = dbg.miss + 1
             return name, cur, cur, "miss", roll, int, chancePct, mult, line
         end
 
@@ -1428,6 +1468,7 @@ NSQC4.RegisterModule("quests", function()
 
         if smax >= smaxmax then
             dbg.maxed = dbg.maxed + 1
+            dbg.noslot = dbg.noslot + 1
             return name, 0, 0, "noslot", nil, int, chancePct, mult, line,
                 string.format("skills_max=%d/%d", smax, smaxmax)
         end
@@ -1438,10 +1479,12 @@ NSQC4.RegisterModule("quests", function()
             skills[name] = 1
             opts.skills_max = smax + 1
             dbg.learned = dbg.learned + 1
+            dbg.learn   = dbg.learn + 1
             dbg.success = dbg.success + 1
             return name, 0, 1, "learn", roll, int, chancePct, mult, line,
                 string.format("skills_max %d→%d", smax, smax + 1)
         end
+        dbg.miss = dbg.miss + 1
         return name, 0, 0, "learnmiss", roll, int, chancePct, mult, line
     end
 
@@ -1456,10 +1499,13 @@ NSQC4.RegisterModule("quests", function()
 
         local target    = ai.target
         local terrainId = ai.terrainId
-        local profId    = ai.profId
+        local profId    = ai.profId or TERRAIN_TO_PROF[terrainId]
 
         local profDef = profId and ProfApi and ProfApi:Get(profId) or nil
         local yield   = profDef and profDef.work and profDef.work.yields or nil
+
+        -- Подробная строка (все known_skills, kin, gods, slots)
+        PrintSkillLine(entity, terrainId, profId)
 
         -- 1. Профессия
         local pname, pold, pnew, result, proll, pint, ppct, pmult, pline, extra =
@@ -1558,6 +1604,9 @@ end)
 -- Общий fallback-цикл поведения существа: idle → moving → working.
 --
 -- При idle→moving — звук по kind существа (gob.ogg / gom.ogg).
+--
+-- Path:Find вызывается с entity — чтобы вода была проходима только
+-- для существ с профессией «Пловец» (Resolve:CanSwim).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -1613,8 +1662,12 @@ NSQC4.RegisterModule("quests", function()
         if State:IsIdle(entity) then
             local pick = Find:Pick(entity)
             if not pick then return false end
-            local path = Path:Find(entity.index, pick.index)
+
+            -- entity передаём третьим параметром:
+            -- вода проходима только для пловца (Resolve:CanSwim).
+            local path = Path:Find(entity.index, pick.index, entity)
             if not path then return false end
+
             State:SetMoving(entity, pick.index, pick.terrainId, pick.profId, path)
             dbg("idle→moving", entity.id, "->", pick.index, pick.terrainId)
 
@@ -1668,20 +1721,9 @@ end)
 -- NSQC4 / Quests / df / AI / Find
 -- Выбор цели для существа.
 --
--- Логика:
---   1. Allowed существа по opts.kind (Goblin/Dwarf).
---   2. Выделенные клетки (nsDbc4.quests.df.selections.terrain_types).
---      Фильтр: allowed[terrainId] И не зарезервировано другим существом.
---   3. Лучшие (есть своя профессия) / просто.
---   4. Случайный из лучших, иначе из просто.
---   5. { index, terrainId, profId|nil } | nil.
---
--- known_skills — таблица [имя] = уровень (1..100). Для выбора цели
--- достаточно самого факта «есть def с этим terrain», уровень не нужен.
---
--- HasProfForSelected(entity) — проверка: есть ли у существа профессия
--- под хотя бы одну из выделенных клеток. Используется в Ticker, чтобы
--- дать приоритет существам с профессией.
+-- ФИКС: сверяем фактический terrain клетки с terrainId из selections.
+-- Если клетка была выделена как earth, а стала void (или другой тип),
+-- она не должна попадать в кандидаты.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -1733,10 +1775,6 @@ NSQC4.RegisterModule("quests", function()
         return result
     end
 
-    -- ========================================================================
-    -- Есть ли у существа def профессии под данный terrain?
-    -- known_skills — hash [имя] = уровень, поэтому pairs.
-    -- ========================================================================
     local function FindProfForTerrain(entity, terrainId)
         local ProfApi = NSQC4.QuestsDfProfessionsApi
         if not ProfApi then return nil end
@@ -1754,9 +1792,18 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Есть ли у существа профессия под хотя бы одну ВЫДЕЛЕННУЮ клетку?
-    -- (учитываем и Allowed, иначе смысла нет)
+    -- Клетка «свежая»? Фактический terrain совпадает с тем, что в selections,
+    -- и это не void.
     -- ========================================================================
+    local function IsCellFresh(cell)
+        if not cell then return false end
+        local actual = Grid:GetTerrain(cell.index)
+        if not actual then return false end
+        if actual == "void" then return false end
+        if actual ~= cell.terrainId then return false end
+        return true
+    end
+
     function Find:HasProfForSelected(entity)
         if not entity or not entity.opts then return false end
 
@@ -1768,7 +1815,7 @@ NSQC4.RegisterModule("quests", function()
         if #selected == 0 then return false end
 
         for _, cell in ipairs(selected) do
-            if allowed[cell.terrainId] then
+            if IsCellFresh(cell) and allowed[cell.terrainId] then
                 if FindProfForTerrain(entity, cell.terrainId) then
                     return true
                 end
@@ -1793,20 +1840,22 @@ NSQC4.RegisterModule("quests", function()
             return nil
         end
 
-        -- 1. Фильтр: allowed + не зарезервировано другим
+        -- 1. Фильтр: свежая клетка + allowed + не зарезервировано другим
         local candidates = {}
         for _, cell in ipairs(selected) do
-            if allowed[cell.terrainId] then
+            if IsCellFresh(cell) and allowed[cell.terrainId] then
                 if not Grid:IsReserved(cell.index, entity.id) then
                     candidates[#candidates + 1] = cell
                 else
                     dbg("skip reserved", cell.index, "terrain", cell.terrainId,
                         "by", tostring(Grid:GetReservedBy(cell.index)))
                 end
+            else
+                dbg("skip stale", cell.index, "terrain", cell.terrainId)
             end
         end
         if #candidates == 0 then
-            dbg("no candidates (all reserved or not allowed)")
+            dbg("no candidates (all stale/reserved/not allowed)")
             return nil
         end
 
@@ -1880,13 +1929,17 @@ end)
 -- NSQC4 / Quests / df / AI / Move
 -- Передвижение существа по маршруту. Скорость — по абсолютной выносливости.
 --
--- stepTime = 100 − 99 × (vitality / 100)
---   vitality 0/1     → ~100–99 сек/клетку
---   vitality 100     → 1 сек/клетку
+-- CanStepInto(nextIndex, entity):
+--   - void        → нельзя
+--   - water       → только если entity умеет плавать (Resolve:CanSwim)
+--   - занято другим существом (не целью) → нельзя
 --
--- При каждом шаге — шанс прокачки живучести (intellect / 100).
+-- ФИКС: даже если клетка-цель — void, шагать в неё нельзя.
+-- Раньше проверка IsPassable пропускалась для isTarget, и существо
+-- уходило в void, где Grid:SetEntity молча не ставил его — существо «пропадало».
 --
--- Отладка: /run NSQC4.QuestsDfAIMove.DEBUG = true
+-- Вода: проверка через Resolve:CanSwim(entity). Если Resolve не загружен
+-- (например, при раннем старте) — вода считается непроходимой (безопасно).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -1906,10 +1959,6 @@ NSQC4.RegisterModule("quests", function()
         return
     end
 
-    -- ========================================================================
-    -- Время на один шаг (секунды) по АБСОЛЮТНОЙ выносливости (0..100).
-    -- max_vitality не используется.
-    -- ========================================================================
     function Move:StepTime(entity)
         if not entity or not entity.opts then return 100 end
         local opts = entity.opts
@@ -1926,8 +1975,31 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Один шаг по маршруту.
+    -- Проверка: можно ли шагнуть в nextIndex (в т.ч. цель).
+    --   entity — существо, которое шагает. Нужно, чтобы:
+    --     - вода была проходима только для пловца
+    --     - «занято другим» не считалось препятствием для цели
     -- ========================================================================
+    local function CanStepInto(nextIndex, entity)
+        local c = Grid:GetCell(nextIndex)
+        if not c then return false end
+
+        -- void — никогда
+        if c.terrain == "void" then return false end
+
+        -- water — только для пловца
+        if c.terrain == "water" then
+            local Resolve = NSQC4.QuestsDfProfessionsResolve
+            local canSwim = false
+            if entity and Resolve and Resolve.CanSwim then
+                canSwim = Resolve:CanSwim(entity) and true or false
+            end
+            if not canSwim then return false end
+        end
+
+        return true
+    end
+
     function Move:Advance(entity)
         if not entity or not entity.opts then return nil end
 
@@ -1952,11 +2024,27 @@ NSQC4.RegisterModule("quests", function()
         if not nextIndex then return nil end
 
         local isTarget = (idx + 1 == #path)
-        if not isTarget and not Grid:IsPassable(nextIndex) then
-            dbg(string.format("blocked %s next=%d", tostring(entity.id), nextIndex))
+
+        -- ФИКС: цель тоже должна быть не-void и (для не-пловца) не-water.
+        -- entity передаём в CanStepInto — там проверка воды по Resolve:CanSwim.
+        if not CanStepInto(nextIndex, entity) then
+            dbg(string.format("blocked %s next=%d (void/water без пловца/нет клетки)",
+                tostring(entity.id), nextIndex))
             ai.path = nil
             ai.pathIdx = nil
             return nil
+        end
+
+        -- Для не-цели — стандартная проверка проходимости (нет существа)
+        if not isTarget then
+            local c = Grid:GetCell(nextIndex)
+            if c and c.entityName and c.entityName ~= entity.opts.name then
+                dbg(string.format("blocked %s next=%d (occupied by %s)",
+                    tostring(entity.id), nextIndex, tostring(c.entityName)))
+                ai.path = nil
+                ai.pathIdx = nil
+                return nil
+            end
         end
 
         local fromIndex = entity.index
@@ -1966,6 +2054,19 @@ NSQC4.RegisterModule("quests", function()
         Grid:SetEntity(fromIndex, nil)
         entity.index = nextIndex
         Grid:SetEntity(nextIndex, entity)
+
+        -- Страховка: если SetEntity не записал (например, terrain стал void
+        -- между проверкой и записью) — откатываем.
+        if not Grid:GetEntity(nextIndex) then
+            entity.index = fromIndex
+            if fromIndex then
+                Grid:SetEntity(fromIndex, entity)
+            end
+            ai.path = nil
+            ai.pathIdx = nil
+            dbg(string.format("rollback %s: SetEntity(%d) не записал", tostring(entity.id), nextIndex))
+            return nil
+        end
 
         -- 2. Анимация
         local Animate = NSQC4.QuestsDfEntitiesAnimate
@@ -2014,6 +2115,14 @@ end)
 --   - проходимость: Grid:IsPassable(index) (нет entity на клетке)
 --   - старт считается проходимым, даже если на нём стоит само существо
 --   - цель считается проходимой, даже если на ней стоит само существо
+--   - ВОДА: проходима только если entity умеет плавать
+--     (Resolve:CanSwim(entity) == true). Иначе passable = false.
+--     Проверка делается по клетке-соседу (и по цели тоже).
+--
+-- entity — необязательный третий параметр. Если передан:
+--   - Resolve:CanSwim(entity) решает, пускать ли в воду
+--   - если не передан — вода считается непроходимой (безопасный дефолт:
+--     старый вызов Path:Find(a, b) из внешнего кода не «протечёт» в воду)
 --
 -- Возвращает:
 --   { {index, index, …, target}, ... } — массив индексов от старта до цели,
@@ -2057,11 +2166,35 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- BFS: кратчайший путь от startIndex до targetIndex.
-    --   selfIndex — индекс клетки, на которой стоит существо
-    --               (её считаем проходимой даже если entity есть).
+    -- Можно ли войти в клетку neighbor для данного entity.
+    --   - цель всегда проходима (даже если занята существом — оно уйдёт)
+    --   - вода: только если entity умеет плавать
+    --   - остальное: Grid:IsPassable
     -- ========================================================================
-    function Path:Find(startIndex, targetIndex)
+    local function CanEnter(neighbor, targetIndex, canSwim)
+        if neighbor == targetIndex then
+            -- цель: проверим только воду (void не может быть целью из Find,
+            -- но подстрахуемся)
+            local c = Grid:GetCell(neighbor)
+            if not c then return false end
+            if c.terrain == "void" then return false end
+            if c.terrain == "water" and not canSwim then return false end
+            return true
+        end
+
+        local c = Grid:GetCell(neighbor)
+        if not c then return false end
+        if c.terrain == "void" then return false end
+        if c.terrain == "water" and not canSwim then return false end
+
+        return Grid:IsPassable(neighbor)
+    end
+
+    -- ========================================================================
+    -- BFS: кратчайший путь от startIndex до targetIndex.
+    --   entity — опционально; если передан, учитывается CanSwim(entity).
+    -- ========================================================================
+    function Path:Find(startIndex, targetIndex, entity)
         startIndex  = tonumber(startIndex)  or 0
         targetIndex = tonumber(targetIndex) or 0
 
@@ -2070,6 +2203,13 @@ NSQC4.RegisterModule("quests", function()
 
         if startIndex == targetIndex then
             return { startIndex }
+        end
+
+        -- Умеет ли это существо плавать (если entity не передан — false)
+        local canSwim = false
+        local Resolve = NSQC4.QuestsDfProfessionsResolve
+        if entity and Resolve and Resolve.CanSwim then
+            canSwim = Resolve:CanSwim(entity) and true or false
         end
 
         local prev    = {}
@@ -2086,12 +2226,7 @@ NSQC4.RegisterModule("quests", function()
 
             for _, neighbor in ipairs(Grid:Neighbors(cur)) do
                 if not visited[neighbor] then
-                    -- Проходимость: цель всегда проходима,
-                    -- стартовая клетка уже в visited.
-                    local passable = Grid:IsPassable(neighbor)
-                    if neighbor == targetIndex then passable = true end
-
-                    if passable then
+                    if CanEnter(neighbor, targetIndex, canSwim) then
                         visited[neighbor] = true
                         prev[neighbor]    = cur
                         queue[#queue + 1] = neighbor
@@ -2346,20 +2481,9 @@ end)
 -- NSQC4 / Quests / df / AI / Stats
 -- Прокачка характеристик существ + отладка.
 --
--- Шанс за бросок: math.random(1, 10000) <= int
---   int = 4 → 0.04%, int = 50 → 0.5%, int = 100 → 1%
---
--- Обычный успех (roll <= int): vitality + 1, если vit < max_vit.
---
--- ДЖЕКПОТ (roll == 1): дополнительно поднимает ПОТОЛОК случайного
--- параметра на 1 (max_* + 1). Текущее значение не трогается.
--- Параметры: max_skills_max, max_strength, max_agility,
---            max_vitality, max_intellect.
--- Потолок не выше 100: если max_* уже 100, параметр не выбирается.
--- Если все пять уже 100 — джекпот ничего не даёт.
---
--- Бросок идёт ВСЕГДА (даже если vit >= max_vit) — иначе джекпот
--- никогда бы не выпал у «прокачанного» существа.
+-- TryUpVitality — живучесть, шанс int/10000, джекпот (roll == 1) на max_*.
+-- TryUpStat(entity, statName) — сила/ловкость/интеллект, шанс int/10000,
+--   без джекпота (джекпот уже даёт TryUpVitality на случайный max_*).
 --
 -- Отладка:
 --   /ns_stats on | off | dump | min | reset
@@ -2382,14 +2506,30 @@ NSQC4.RegisterModule("quests", function()
         { key = "max_intellect",   label = "intellect"   },
     }
 
+    -- Какой стат к какому max_*
+    local STAT_MAX = {
+        strength  = "max_strength",
+        agility   = "max_agility",
+        intellect = "max_intellect",
+        vitality  = "max_vitality",
+    }
+
+    local STAT_LABEL = {
+        strength  = "Сила",
+        agility   = "Ловкость",
+        intellect = "Интеллект",
+        vitality  = "Живучесть",
+    }
+
     local dbg = {
         calls        = 0,
-        earlyExitMax = 0,   -- больше не используется как ранний выход; оставлено для совместимости
         earlyExitInt = 0,
         rolls        = 0,
         successes    = 0,
-        jacks        = 0,   -- сколько раз выпал roll == 1
-        capsRaised   = 0,   -- сколько раз реально подняли потолок
+        jacks        = 0,
+        capsRaised   = 0,
+        statRolls    = 0,
+        statSuccess  = 0,
         sumChance    = 0,
         minRoll      = nil,
         minRollName  = nil,
@@ -2398,9 +2538,6 @@ NSQC4.RegisterModule("quests", function()
     }
     Stats._dbg = dbg
 
-    -- ========================================================================
-    -- Личный минимум существа
-    -- ========================================================================
     local function UpdateEntityMin(opts, roll, int)
         local now = GetTime()
         local em = opts._minRoll
@@ -2429,9 +2566,6 @@ NSQC4.RegisterModule("quests", function()
         return math.floor(GetTime() - em.firstAt)
     end
 
-    -- ========================================================================
-    -- Джекпот: поднять случайный потолок на 1 (не выше MAX_CAP)
-    -- ========================================================================
     local function RaiseRandomCap(opts)
         local pool = {}
         for _, row in ipairs(CAP_KEYS) do
@@ -2448,9 +2582,6 @@ NSQC4.RegisterModule("quests", function()
         return pick.label, old, opts[pick.key]
     end
 
-    -- ========================================================================
-    -- Подтянуть глобальный минимум из существ
-    -- ========================================================================
     local function RefreshGlobalMin()
         local Grid = NSQC4.QuestsDfGrid
         if not Grid then return end
@@ -2471,9 +2602,6 @@ NSQC4.RegisterModule("quests", function()
     end
     Stats._RefreshGlobalMin = RefreshGlobalMin
 
-    -- ========================================================================
-    -- Сводка
-    -- ========================================================================
     local function PrintSummary(tag)
         local elapsed = GetTime() - dbg.startedAt
         local avgChance = (dbg.rolls > 0) and (dbg.sumChance / dbg.rolls) or 0
@@ -2484,9 +2612,10 @@ NSQC4.RegisterModule("quests", function()
             or "nil"
 
         print(string.format(
-            "[STATS %s] t=%ds calls=%d rolls=%d succ=%d caps=%d jack=%d chance=%.4f%% exp=%.3f min=%s earlyInt=%d",
+            "[STATS %s] t=%ds calls=%d rolls=%d succ=%d caps=%d jack=%d statRolls=%d statSucc=%d chance=%.4f%% exp=%.3f min=%s earlyInt=%d",
             tag or "", math.floor(elapsed),
             dbg.calls, dbg.rolls, dbg.successes, dbg.capsRaised, dbg.jacks,
+            dbg.statRolls, dbg.statSuccess,
             avgChance * 100, expected, minStr,
             dbg.earlyExitInt))
     end
@@ -2523,12 +2652,13 @@ NSQC4.RegisterModule("quests", function()
 
     function Stats:ResetStats()
         dbg.calls        = 0
-        dbg.earlyExitMax = 0
         dbg.earlyExitInt = 0
         dbg.rolls        = 0
         dbg.successes    = 0
         dbg.jacks        = 0
         dbg.capsRaised   = 0
+        dbg.statRolls    = 0
+        dbg.statSuccess  = 0
         dbg.sumChance    = 0
         dbg.minRoll      = nil
         dbg.minRollName  = nil
@@ -2561,7 +2691,7 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Попытка повысить (vitality + джекпот на потолок)
+    -- Живучесть (с джекпотом на max_*)
     -- ========================================================================
     function Stats:TryUpVitality(entity)
         dbg.calls = dbg.calls + 1
@@ -2583,7 +2713,6 @@ NSQC4.RegisterModule("quests", function()
             return false
         end
 
-        -- Бросок идёт ВСЕГДА (даже если vit >= max_vit)
         local chance = int / 10000
         if chance > 1 then chance = 1 end
         dbg.sumChance = dbg.sumChance + chance
@@ -2602,7 +2731,6 @@ NSQC4.RegisterModule("quests", function()
             newGlobalMin    = true
         end
 
-        -- Джекпот: roll == 1 → поднять случайный потолок
         local capLabel, capOld, capNew
         if roll == 1 then
             dbg.jacks = dbg.jacks + 1
@@ -2612,7 +2740,6 @@ NSQC4.RegisterModule("quests", function()
             end
         end
 
-        -- Обычный успех: vitality + 1, если есть куда
         local vit    = tonumber(opts.vitality)     or 0
         local maxVit = tonumber(opts.max_vitality) or 0
         local vitUp  = false
@@ -2649,6 +2776,45 @@ NSQC4.RegisterModule("quests", function()
         end
 
         return vitUp or (capLabel ~= nil)
+    end
+
+    -- ========================================================================
+    -- Профильный стат (сила / ловкость / интеллект) — без джекпота.
+    -- Шанс int/10000. +1 к текущему, если < max_<stat>.
+    -- ========================================================================
+    function Stats:TryUpStat(entity, statName)
+        if not entity or not entity.opts then return false end
+        if not statName then return false end
+
+        local opts = entity.opts
+        local name = tostring(opts.name or entity.id)
+
+        local maxKey = STAT_MAX[statName]
+        if not maxKey then return false end
+
+        local int = tonumber(opts.intellect) or 0
+        if int <= 0 then return false end
+
+        local cur = tonumber(opts[statName]) or 0
+        local max = tonumber(opts[maxKey]) or 0
+        if max <= 0 or cur >= max then return false end
+
+        dbg.statRolls = dbg.statRolls + 1
+
+        local roll = math.random(1, 10000)
+        local hit  = (roll <= int)
+        if not hit then return false end
+
+        opts[statName] = cur + 1
+        dbg.statSuccess = dbg.statSuccess + 1
+
+        if Stats.DEBUG then
+            print(string.format(
+                "[STATS] %s %s +1: %d→%d (roll=%d/%d int=%d)",
+                name, STAT_LABEL[statName] or statName,
+                cur, opts[statName], roll, 10000, int))
+        end
+        return true
     end
 
     -- ========================================================================
@@ -2832,6 +2998,12 @@ end)
 -- NSQC4 / Quests / df / AI / Work
 -- Один клик работы существа по клетке-цели.
 -- Если hardness уже <= 0 — завершение без клика (не «долбим пустую»).
+--
+-- Прокачка при клике (каждый — отдельный бросок int/10000):
+--   tree  → agility + vitality
+--   stone → strength + vitality
+--   grass → intellect (только)
+--   earth → vitality (только)
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -2844,6 +3016,14 @@ NSQC4.RegisterModule("quests", function()
         print("|cffff0000[NSQC4]|r AI/Work: Grid не загружен.")
         return
     end
+
+    -- Какой стат (кроме живучести) качать при работе по terrain.
+    -- Живучесть качается всегда, кроме grass (там только intellect).
+    local TERRAIN_TO_STAT = {
+        tree  = { stat = "agility",   vitality = true  },
+        stone = { stat = "strength",  vitality = true  },
+        grass = { stat = "intellect", vitality = false },
+    }
 
     local function EnsureWork(entity, ai)
         if ai.work and ai.work.total then return ai.work end
@@ -2861,7 +3041,7 @@ NSQC4.RegisterModule("quests", function()
         local profDef = ai.profId and ProfApi and ProfApi:Get(ai.profId) or nil
         if profDef and profDef.clicks and Resolve then
             local pp = Resolve:ProfPct(entity, ai.terrainId)
-            local sp = Resolve:StrPct(entity)
+            local sp = Resolve:StatPct(entity, profDef.stat)
             total = profDef.clicks(hardness, pp, sp)
         else
             total = math.floor(hardness + 0.5)
@@ -2902,11 +3082,24 @@ NSQC4.RegisterModule("quests", function()
             Grid:SetHardness(ai.target, newHardness)
         end
 
+        -- Прокачка при клике
         local Stats = NSQC4.QuestsDfAIStats
-        if Stats and Stats.TryUpVitality then
-            Stats:TryUpVitality(entity)
+        if Stats then
+            local rule = TERRAIN_TO_STAT[ai.terrainId]
+
+            -- профильный стат по terrain (agility/strength/intellect)
+            if rule and rule.stat and Stats.TryUpStat then
+                Stats:TryUpStat(entity, rule.stat)
+            end
+
+            -- живучесть: всегда, кроме grass (у неё vitality = false)
+            local wantVitality = (rule == nil) or (rule.vitality ~= false)
+            if wantVitality and Stats.TryUpVitality then
+                Stats:TryUpVitality(entity)
+            end
         end
 
+        -- Звук работы: только если мышь на клетке существа
         local QuestsField = NSQC4.QuestsField
         local cell = QuestsField and QuestsField.cells and QuestsField.cells[entity.index]
         if cell and cell._hovered then
@@ -4469,6 +4662,60 @@ end)
 
 
 ======================================================================
+ FILE: df/Actions/Terrain/Void/LeftClickSelf.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / df / Actions / Terrain / Void / LeftClickSelf
+-- ЛКМ по void:
+--   1. Есть активное существо → LeftClickEntities
+--   2. Иначе → ничего (пустоту не выделяем, лут не трогаем)
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local A = NSQC4.QuestsDfTerrainActions
+    if not A then
+        print("|cffff0000[NSQC4]|r Void/LeftClickSelf: Init.lua не загружен.")
+        return
+    end
+
+    local QuestsField = NSQC4.QuestsField
+    if not QuestsField then return end
+
+    local Grid = NSQC4.QuestsDfGrid
+
+    A.Types["void"] = A.Types["void"] or {}
+
+    A.Types["void"].LeftClickSelf = function(index)
+        index = tonumber(index) or 0
+        if index < 1 then return false end
+
+        QuestsField:SetCellOnMouseClick(index, "LeftButton", function(btn, button, idx)
+            local entity = Grid and Grid:GetEntity(idx)
+            local sleeping = entity and entity.opts and entity.opts.sleeping
+
+            if entity and not sleeping then
+                local T = NSQC4.QuestsDfTerrainActions
+                          and NSQC4.QuestsDfTerrainActions.Types
+                          and NSQC4.QuestsDfTerrainActions.Types["void"]
+                if T and T.LeftClickEntities then
+                    return T.LeftClickEntities(idx)
+                end
+                return false
+            end
+
+            -- пустоту не выделяем, ничего не делаем
+            return false
+        end)
+
+        return true
+    end
+
+end)
+
+
+======================================================================
  FILE: df/Actions/Terrain/Void/RightClickEntities.lua
 ======================================================================
 
@@ -4539,6 +4786,224 @@ NSQC4.RegisterModule("quests", function()
             QuestsField:ShowContextMenu(menuItems, btn)
             return true
         end)
+
+        return true
+    end
+
+end)
+
+
+======================================================================
+ FILE: df/Actions/Terrain/Water/Check.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / df / Actions / Terrain / Water / Check
+-- Проверка: water в клетке?
+--
+-- По образцу Earth/Check.lua, Grass/Check.lua, Stone/Check.lua,
+-- Tree/Check.lua, Pool/Check.lua.
+--
+-- Вода — тип ландшафта "water". Глубина (1..10) в этой проверке не участвует:
+-- Check отвечает только на вопрос «это вода?», а не «какая глубина?».
+-- Глубина берётся отдельно через Grid:GetDepth(index) там, где нужна.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local A = NSQC4.QuestsDfTerrainActions
+    if not A then
+        print("|cffff0000[NSQC4]|r Water/Check: Init.lua не загружен.")
+        return
+    end
+
+    A.Types["water"] = A.Types["water"] or {}
+
+    A.Types["water"].Check = function(index)
+        index = tonumber(index) or 0
+        if index < 1 then return false end
+
+        local Grid = NSQC4.QuestsDfGrid
+        if not Grid then return false end
+
+        return Grid:GetTerrain(index) == "water"
+    end
+
+end)
+
+
+======================================================================
+ FILE: df/Actions/Terrain/Water/LeftClickEntities.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / df / Actions / Terrain / Water / LeftClickEntities
+-- Действие ЛКМ по существу в клетке с "water".
+-- Вызывается из LeftClickSelf.lua, когда существо НЕ спит.
+--
+-- Пока — стандартное разворачивание/сворачивание (как у Earth/Grass/Stone/
+-- Tree/Pool). Если идёт анимация — Animate:SetExpanded, иначе Spawn.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local A = NSQC4.QuestsDfTerrainActions
+    if not A then
+        print("|cffff0000[NSQC4]|r Water/LeftClickEntities: Init.lua не загружен.")
+        return
+    end
+
+    A.Types["water"] = A.Types["water"] or {}
+
+    A.Types["water"].LeftClickEntities = function(index)
+        index = tonumber(index) or 0
+        if index < 1 then return false end
+
+        local Grid = NSQC4.QuestsDfGrid
+        if not Grid then return false end
+
+        local entity = Grid:GetEntity(index)
+        if not entity or not entity.opts then return false end
+
+        if entity.opts.sleeping then return false end
+
+        entity.opts.expanded = not entity.opts.expanded
+
+        local Animate = NSQC4.QuestsDfEntitiesAnimate
+        if Animate and Animate:IsAnimating(entity.id) then
+            Animate:SetExpanded(entity.id, entity.opts.expanded)
+        else
+            local Entities = NSQC4.QuestsDfEntities
+            if Entities then
+                Entities:Spawn(entity.id, index, entity.opts)
+            end
+        end
+
+        print(string.format("|cff00ff00[NSQC4]|r %s: %s",
+            entity.opts.name or "Существо",
+            entity.opts.expanded and "развёрнут" or "свёрнут"))
+
+        return true
+    end
+
+end)
+
+
+======================================================================
+ FILE: df/Actions/Terrain/Water/LeftClickSelf.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / df / Actions / Terrain / Water / LeftClickSelf
+-- ЛКМ по воде:
+--   1. Есть активное (не спящее) существо → передаём существу (LeftClickEntities)
+--   2. Иначе → toggle выделения воды (как у Earth/Grass/Stone/Tree/Pool)
+--      + печать-заглушка «работа на воде: TODO» (по ТЗ)
+--
+-- Лут на воде пока не предусмотрен — проверку Drops:HasAny не делаем.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local A = NSQC4.QuestsDfTerrainActions
+    if not A then
+        print("|cffff0000[NSQC4]|r Water/LeftClickSelf: Init.lua не загружен.")
+        return
+    end
+
+    local QuestsField = NSQC4.QuestsField
+    if not QuestsField then return end
+
+    local Grid = NSQC4.QuestsDfGrid
+
+    A.Types["water"] = A.Types["water"] or {}
+
+    A.Types["water"].LeftClickSelf = function(index)
+        index = tonumber(index) or 0
+        if index < 1 then return false end
+
+        QuestsField:SetCellOnMouseClick(index, "LeftButton", function(btn, button, idx)
+            local entity = Grid and Grid:GetEntity(idx)
+            local sleeping = entity and entity.opts and entity.opts.sleeping
+
+            -- 1. Активное существо → ему
+            if entity and not sleeping then
+                local T = NSQC4.QuestsDfTerrainActions
+                          and NSQC4.QuestsDfTerrainActions.Types
+                          and NSQC4.QuestsDfTerrainActions.Types["water"]
+                if T and T.LeftClickEntities then
+                    return T.LeftClickEntities(idx)
+                end
+                return false
+            end
+
+            -- 2. Нет существа / спит → toggle выделения воды
+            local cell = QuestsField.cells and QuestsField.cells[idx]
+            if not Grid then return false end
+
+            local isSelected = Grid:IsTerrainSelected(idx)
+
+            if isSelected then
+                Grid:SetTerrainSelected(idx, "water", false)
+                if cell and cell.texture then
+                    cell.texture:SetVertexColor(1, 1, 1, 1)
+                end
+                print("|cffff8800[NSQC4]|r Снято выделение water в клетке " .. idx)
+            else
+                Grid:SetTerrainSelected(idx, "water", true)
+                if cell and cell.texture then
+                    cell.texture:SetVertexColor(0.5, 0.5, 0.5, 1)
+                end
+                local depth = Grid:GetDepth and Grid:GetDepth(idx) or "?"
+                print("|cff00ff00[NSQC4]|r Выделено water в клетке " .. idx ..
+                      " (глубина " .. tostring(depth) .. "; работа на воде: TODO)")
+            end
+
+            return true
+        end)
+
+        return true
+    end
+
+end)
+
+
+======================================================================
+ FILE: df/Actions/Terrain/Water/RightClickEntities.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / df / Actions / Terrain / Water / RightClickEntities
+-- ПКМ по воде — пока ПУСТОЙ (по ТЗ).
+--
+-- Меню не показываем. Клик правой кнопкой по клетке воды снимается
+-- (SetCellOnMouseClick(index, "RightButton", nil)), чтобы старый обработчик
+-- (если клетка раньше была другим ландшафтом) не сработал.
+--
+-- Сюда позже добавятся пункты: «Нырнуть», «Построить мост», «Осмотреть дно»
+-- и т.п. — через QuestsField:ShowContextMenu(menuItems, btn), как в
+-- Earth/RightClickEntities.lua.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local A = NSQC4.QuestsDfTerrainActions
+    if not A then
+        print("|cffff0000[NSQC4]|r Water/RightClickEntities: Init.lua не загружен.")
+        return
+    end
+
+    local QuestsField = NSQC4.QuestsField
+    if not QuestsField then return end
+
+    A.Types["water"] = A.Types["water"] or {}
+
+    A.Types["water"].RightClickEntities = function(index)
+        index = tonumber(index) or 0
+        if index < 1 then return false end
+
+        -- Клик не вешаем — ПКМ по воде ничего не делает.
+        QuestsField:SetCellOnMouseClick(index, "RightButton", nil)
 
         return true
     end
@@ -5673,15 +6138,17 @@ end)
 
 -- ============================================================================
 -- NSQC4 / Quests / df / Entities / Tooltip
--- Сборка GameTooltip. opts._landscape = { index, terrainId }.
--- В OnEnter hardness читается заново из Grid и Terrain/Data.
+-- Сборка GameTooltip для существа.
+--
+-- opts._landscape = { index, terrainId } — используется только чтобы
+-- Terrain/UI/Api мог дописать строки клетки (Клетка / Прочность / Лут).
+-- Сам Tooltip.Build ландшафт НЕ рисует — это делает Terrain/UI/Api.
 --
 -- Строки:
 --   имя / титул / описание
 --   статы
 --   ПРОФЕССИИ
---   РОДСТВО        ← имена богов по opts.gods
---   ЛАНДШАФТ
+--   РОДСТВО
 --
 -- Отладка:
 --   /run NSQC4.QuestsDfTooltip__DEBUG = true
@@ -5712,24 +6179,6 @@ NSQC4.RegisterModule("quests", function()
         end
     end
     Tooltip.GetColorByPercent = GetColorByPercent
-
-    local function LandscapeLine(index, terrainId)
-        local Grid = NSQC4.QuestsDfGrid
-        local Data = NSQC4.QuestsDfTerrainData
-        if not index or not Grid or not Data then return nil end
-
-        local curH = Grid:GetHardness(index)
-        local def = terrainId and Data:Get(terrainId) or nil
-        local maxH = def and def.hardness or nil
-        if not curH or not maxH or maxH <= 0 then return nil end
-
-        local r, g, b = GetColorByPercent(curH, maxH)
-        local curR = math.floor(curH + 0.5)
-        local maxR = math.floor(maxH + 0.5)
-        local pct  = (curH / maxH) * 100
-        return string.format("Ландшафт: %s  %d / %d (%.0f%%)",
-            tostring(terrainId or "?"), curR, maxR, pct), r, g, b
-    end
 
     local function BuildSkillsLine(known_skills)
         if type(known_skills) ~= "table" then
@@ -5790,8 +6239,6 @@ NSQC4.RegisterModule("quests", function()
                 if land then
                     print(string.format("[TT] landscape index=%s terrain=%s",
                         tostring(land.index), tostring(land.terrainId)))
-                else
-                    print("[TT] landscape = nil")
                 end
                 print(string.format("[TT] kinship=%s gods=%s",
                     tostring(opts.kinship),
@@ -5864,15 +6311,8 @@ NSQC4.RegisterModule("quests", function()
                 GameTooltip:AddLine(kline, kr, kg, kb, true)
             end
 
-            -- ЛАНДШАФТ
-            local land = opts._landscape
-            if land and land.index then
-                local line, r, g, b = LandscapeLine(land.index, land.terrainId)
-                if line then
-                    GameTooltip:AddLine(" ")
-                    GameTooltip:AddLine(line, r, g, b)
-                end
-            end
+            -- ЛАНДШАФТ здесь НЕ выводится — это делает Terrain/UI/Api
+            -- (Клетка / Прочность / Лут) после tooltipFn(btn).
         end
     end
 
@@ -5890,9 +6330,9 @@ end)
 -- temp — на кнопке toIndex, слой ARTWORK/7 (слой существа).
 -- Anchor в fromIndex прячется на время анимации.
 --
--- ФИКС: при завершении (Tick) и в Stop перерисовываются ОБЕ клетки —
--- fromIndex и toIndex. Иначе клики/тултип остаются на fromIndex, где
--- существа уже нет (entity.index уже в toIndex с начала шага).
+-- Stop: обрывает анимацию и перерисовывает ОБЕ клетки.
+-- StopAll: обрывает ВСЕ активные анимации (нужно при переключении этажа,
+-- чтобы temp-текстуры старого этажа не висели на новом).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -5972,7 +6412,6 @@ NSQC4.RegisterModule("quests", function()
         end
     end
 
-    -- Перерисовать обе клетки — старую и новую
     local function RenderBoth(fromIndex, toIndex)
         if fromIndex and toIndex and fromIndex == toIndex then
             RenderCell(toIndex)
@@ -6088,10 +6527,6 @@ NSQC4.RegisterModule("quests", function()
         return true
     end
 
-    -- ========================================================================
-    -- Stop: обрываем анимацию. Перерисовываем ОБЕ клетки —
-    -- fromIndex (снять клик/тултип с пустой) и toIndex (поставить на новую).
-    -- ========================================================================
     function Animate:Stop(id)
         local a = active[id]
         if not a then return false end
@@ -6107,13 +6542,27 @@ NSQC4.RegisterModule("quests", function()
         return true
     end
 
+    -- ========================================================================
+    -- StopAll: оборвать ВСЕ активные анимации.
+    -- Нужно при переключении этажа: temp-текстуры старого этажа
+    -- не должны висеть на новом.
+    -- ========================================================================
+    function Animate:StopAll()
+        local ids = {}
+        for id in pairs(active) do ids[#ids + 1] = id end
+        for _, id in ipairs(ids) do
+            self:Stop(id)
+        end
+        if Animate.DEBUG then
+            print("|cff00ffff[ANIM]|r StopAll:", #ids, "анимаций остановлено")
+        end
+        return #ids
+    end
+
     function Animate:IsAnimating(id)
         return id and active[id] ~= nil
     end
 
-    -- ========================================================================
-    -- Tick: при завершении — тоже обе клетки.
-    -- ========================================================================
     function Animate:Tick()
         local now = GetTime()
         for id, a in pairs(active) do
@@ -6311,15 +6760,26 @@ end)
 -- NSQC4 / Quests / df / Floors / Generate
 -- Генерация этажа.
 --
---   n < 0  → только earth/stone (случайно), без существ, без лута
+--   n < 0  → earth/stone (случайно), затем вода «сверху» из snapshots[n+1],
+--            затем обычная генерация реки/озера (SeedRiver/SeedLake),
+--            без существ, без лута
 --   n == 0 → текущая карта (не генерируем)
 --   n > 0  → нельзя (выше нулевого нет)
 --
--- Floors:Generate(n):
---   1. Очистить клетки (terrain=nil, hardness=nil, entityName=nil, loot=nil)
---   2. Для n < 0 — заполнить earth/stone (50/50 или по вкусу)
---   3. Пометить visited[n] = true, обновить min/max
---   4. Сохранить снимок (SaveFloor)
+-- ВОДА СВЕРХУ:
+--   Floors:ApplyWaterFromAbove(n) берёт снимок этажа n+1 (если есть) и
+--   для каждой клетки, где на этаже n+1 вода с depth >= 1, ставит на этаж n
+--   тоже воду с depth = depth - 1. Где depth - 1 == 0 — ставит earth (дно).
+--   Это даёт «проваливание» реки/озера с этажа 0 вниз на глубину.
+--
+-- 0. Animate:StopAll() — чтобы temp-текстуры старого этажа не остались.
+-- 1. Очистить клетки (terrain=nil, hardness=nil, entityName=nil, loot=nil,
+--    depth=nil) и выделения (terrain_types, reserved).
+-- 2. Для n < 0 — заполнить earth/stone.
+-- 3. ApplyWaterFromAbove(n) — вода с этажа n+1, если есть снимок.
+-- 4. SeedRiver/SeedLake — обычная генерация воды (если доступна).
+-- 5. Пометить visited[n] = true, обновить min/max.
+-- 6. Сохранить снимок (SaveFloor).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -6352,6 +6812,9 @@ NSQC4.RegisterModule("quests", function()
         return s
     end
 
+    -- ========================================================================
+    -- Очистка клеток + выделений (включая depth)
+    -- ========================================================================
     local function ClearGrid()
         if not Grid then return end
         for i = 1, TOTAL do
@@ -6361,11 +6824,13 @@ NSQC4.RegisterModule("quests", function()
                 c.hardness   = nil
                 c.entityName = nil
                 c.loot       = nil
+                c.depth      = nil
             end
         end
-        -- снять выделения
+        -- выделения: свои на каждом этаже, новый этаж — без выделений
         if Grid.ClearAllSelections then
             Grid:ClearAllSelections("terrain")
+            Grid:ClearAllSelections("reserved")
         end
     end
 
@@ -6377,6 +6842,45 @@ NSQC4.RegisterModule("quests", function()
         end
     end
 
+    -- ========================================================================
+    -- Вода с этажа n+1 (если есть снимок). Делает:
+    --   - клетка над нами water depth>=2 → у нас water, depth-1
+    --   - клетка над нами water depth==1 → у нас earth (дно)
+    --   - клетка над нами не water        → не трогаем (останется earth/stone)
+    -- ========================================================================
+    local function ApplyWaterFromAbove(n)
+        if not Floors.ApplyWaterFromAbove then return 0 end
+        return Floors:ApplyWaterFromAbove(n)
+    end
+
+    -- ========================================================================
+    -- Обычная генерация воды на этаже (река/озеро).
+    -- Вызывается только если у этажа нет «воды сверху», либо в дополнение
+    -- к ней (по желанию). Сейчас: если ApplyWaterFromAbove ничего не
+    -- поставил — пробуем SeedRiver/SeedLake. Если поставил — не добавляем,
+    -- чтобы не перекрывать «провалившуюся» воду.
+    -- ========================================================================
+    local function SeedWaterOnFloor(n, placedFromAbove)
+        if placedFromAbove > 0 then
+            return 0
+        end
+        if not Terrain then return 0 end
+
+        local made = 0
+        if Terrain.SeedRiver then
+            local ok, res = pcall(Terrain.SeedRiver, Terrain)
+            if ok and type(res) == "number" then made = made + res end
+        end
+        if Terrain.SeedLake then
+            local ok, res = pcall(Terrain.SeedLake, Terrain)
+            if ok and type(res) == "number" then made = made + res end
+        end
+        return made
+    end
+
+    -- ========================================================================
+    -- Generate(n)
+    -- ========================================================================
     function Floors:Generate(n)
         n = tonumber(n) or 0
 
@@ -6390,6 +6894,12 @@ NSQC4.RegisterModule("quests", function()
             return false
         end
 
+        -- 0. Оборвать все анимации (temp на старом этаже)
+        local Animate = NSQC4.QuestsDfEntitiesAnimate
+        if Animate and Animate.StopAll then
+            Animate:StopAll()
+        end
+
         -- существ убираем на любом этаже (кроме 0 — там текущая карта)
         if n ~= 0 and Entities and Entities.Clear then
             Entities:Clear()
@@ -6398,7 +6908,20 @@ NSQC4.RegisterModule("quests", function()
         ClearGrid()
 
         if n < 0 then
+            -- 2. База: земля/камень
             FillRandom({ "earth", "stone" })
+
+            -- 3. Вода «сверху» (если этаж n+1 уже сгенерирован)
+            local placedAbove = ApplyWaterFromAbove(n)
+
+            -- 4. Обычная генерация воды — только если сверху ничего не пришло
+            local placedSeed = SeedWaterOnFloor(n, placedAbove)
+
+            if placedAbove > 0 or placedSeed > 0 then
+                print(string.format(
+                    "|cff00ffff[GEN]|r Этаж %d: вода сверху=%d, своя=%d",
+                    n, placedAbove, placedSeed))
+            end
         elseif n == 0 then
             -- текущая карта не генерируется
         end
@@ -6407,12 +6930,10 @@ NSQC4.RegisterModule("quests", function()
         if n < s.min then s.min = n end
         if n > s.max then s.max = n end
 
-        -- снимок
         if Floors.SaveFloor then
             Floors:SaveFloor(n)
         end
 
-        -- перерисовать
         if Terrain and Terrain.Render then Terrain:Render() end
         if Drops and Drops.RenderAll then Drops:RenderAll() end
 
@@ -6605,15 +7126,27 @@ end)
 
 -- ============================================================================
 -- NSQC4 / Quests / df / Floors / Storage
--- Хранение состояния этажей в nsDbc4.quests.df.floors.
---   current, min, max, visited
---   grid  — снимок клеток этажа (terrain, hardness, entityName, loot)
+-- Хранение состояния этажей + отладка.
 --
--- API:
---   Floors:Save()        — сохранить текущий этаж (снимок grid)
---   Floors:Load(n)       — загрузить этаж n (восстановить grid)
---   Floors:SaveFloor(n)  — сохранить этаж n
---   Floors:LoadFloor(n)  — загрузить этаж n
+-- snapshots[n] = {
+--     grid       = { [i] = { terrain, hardness, entityName, loot, depth } },
+--     selections = { terrain_types = {...}, reserved = {...} },
+--     entities   = { { name, id, index, kind, opts = deep copy }, ... },
+-- }
+--
+-- depth — глубина воды (1..10), см. df/Grid/Depth.lua.
+--
+-- ВОДА ПО ЭТАЖАМ:
+--   Если на этаже n+1 клетка i — water с depth >= 1, то на этаже n
+--   в клетке i тоже вода, но depth = depth - 1 (вода «проваливается» вниз).
+--   depth = 0 на этаже n → не вода (дно).
+--
+--   Floors:ApplyWaterFromAbove(n) — применяет это правило к этажу n
+--   по снимку этажа n+1. Вызывается из Floors:Generate(n) после FillRandom,
+--   до SaveFloor(n).
+--
+-- Отладка:
+--   /ns_floors on | off | dump | snap <n>
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -6627,6 +7160,15 @@ NSQC4.RegisterModule("quests", function()
     local Grid = NSQC4.QuestsDfGrid
     local CONST = NSQC4.QuestsFieldConst
     local TOTAL = CONST and (CONST.COLS * CONST.ROWS) or 100
+
+    -- ========================================================================
+    -- Отладка
+    -- ========================================================================
+    Floors.DEBUG = true
+
+    local function dbg(...)
+        if Floors.DEBUG then print("|cff00ffff[FLOORS]|r", ...) end
+    end
 
     local function EnsureStorage()
         nsDbc4 = nsDbc4 or {}
@@ -6645,7 +7187,46 @@ NSQC4.RegisterModule("quests", function()
     function Floors:EnsureStorage() return EnsureStorage() end
 
     -- ========================================================================
-    -- Снимок клеток текущего этажа (terrain, hardness, entityName, loot)
+    -- byName доступ
+    -- ========================================================================
+    local function ByName()
+        local E = NSQC4.QuestsDfEntities
+        if not E then return {} end
+        return E:EnsureByName()
+    end
+
+    -- ========================================================================
+    -- Глубокие копии (opts содержит таблицы: known_skills, ai, gods, _minRoll)
+    -- ========================================================================
+    local function CopyTable(t)
+        if type(t) ~= "table" then return t end
+        local c = {}
+        for k, v in pairs(t) do
+            if type(v) == "table" then
+                c[k] = CopyTable(v)
+            else
+                c[k] = v
+            end
+        end
+        return c
+    end
+
+    local function CopyOpts(opts)
+        if type(opts) ~= "table" then return opts end
+        local c = {}
+        for k, v in pairs(opts) do
+            if k == "ai" or k == "known_skills" or k == "gods"
+               or k == "_minRoll" or k == "_landscape" then
+                c[k] = CopyTable(v)
+            else
+                c[k] = v
+            end
+        end
+        return c
+    end
+
+    -- ========================================================================
+    -- Снимок клеток (с depth)
     -- ========================================================================
     local function SnapshotGrid()
         if not Grid then return nil end
@@ -6657,13 +7238,8 @@ NSQC4.RegisterModule("quests", function()
                     terrain    = c.terrain,
                     hardness   = c.hardness,
                     entityName = c.entityName,
-                    loot       = c.loot and (function()
-                        local copy = {}
-                        for a, d in pairs(c.loot) do
-                            copy[a] = { id = d.id, icon = d.icon }
-                        end
-                        return copy
-                    end)() or nil,
+                    loot       = c.loot and CopyTable(c.loot) or nil,
+                    depth      = c.depth,
                 }
             end
         end
@@ -6671,7 +7247,59 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Восстановить клетки из снимка
+    -- Снимок выделений
+    -- ========================================================================
+    local function SnapshotSelections()
+        nsDbc4 = nsDbc4 or {}
+        nsDbc4.quests = nsDbc4.quests or {}
+        nsDbc4.quests.df = nsDbc4.quests.df or {}
+        nsDbc4.quests.df.selections = nsDbc4.quests.df.selections or {}
+        local s = nsDbc4.quests.df.selections
+
+        local snap = { terrain_types = {}, reserved = {} }
+        for tid, list in pairs(s.terrain_types or {}) do
+            local copy = {}
+            for idx in pairs(list) do copy[idx] = true end
+            snap.terrain_types[tid] = copy
+        end
+        for idx, who in pairs(s.reserved or {}) do
+            snap.reserved[idx] = who
+        end
+        return snap
+    end
+
+    -- ========================================================================
+    -- Снимок существ этажа (byName + Grid)
+    -- ========================================================================
+    local function SnapshotEntities()
+        local list = {}
+        local byName = ByName()
+        for name, e in pairs(byName) do
+            if e and e.opts then
+                local onGrid = false
+                for i = 1, TOTAL do
+                    local c = Grid:GetCell(i)
+                    if c and c.entityName == name then
+                        onGrid = true
+                        break
+                    end
+                end
+                if onGrid then
+                    list[#list + 1] = {
+                        name  = name,
+                        id    = e.id,
+                        index = e.index,
+                        kind  = e.kind,
+                        opts  = CopyOpts(e.opts),
+                    }
+                end
+            end
+        end
+        return list
+    end
+
+    -- ========================================================================
+    -- Восстановить клетки из снимка (с depth)
     -- ========================================================================
     local function RestoreGrid(snap)
         if not Grid or not snap then return false end
@@ -6683,16 +7311,145 @@ NSQC4.RegisterModule("quests", function()
                     c.terrain    = sc.terrain
                     c.hardness   = sc.hardness
                     c.entityName = sc.entityName
-                    c.loot       = sc.loot
+                    c.loot       = sc.loot and CopyTable(sc.loot) or nil
+                    c.depth      = sc.depth
                 else
                     c.terrain    = nil
                     c.hardness   = nil
                     c.entityName = nil
                     c.loot       = nil
+                    c.depth      = nil
                 end
             end
         end
         return true
+    end
+
+    -- ========================================================================
+    -- Восстановить выделения (или очистить)
+    -- ========================================================================
+    local function RestoreSelections(snap)
+        nsDbc4 = nsDbc4 or {}
+        nsDbc4.quests = nsDbc4.quests or {}
+        nsDbc4.quests.df = nsDbc4.quests.df or {}
+        nsDbc4.quests.df.selections = nsDbc4.quests.df.selections or {}
+        local s = nsDbc4.quests.df.selections
+
+        if not snap then
+            s.terrain_types = {}
+            s.reserved      = {}
+            return
+        end
+
+        local newTypes = {}
+        for tid, list in pairs(snap.terrain_types or {}) do
+            local copy = {}
+            for idx in pairs(list) do copy[idx] = true end
+            newTypes[tid] = copy
+        end
+        s.terrain_types = newTypes
+
+        local newRes = {}
+        for idx, who in pairs(snap.reserved or {}) do
+            newRes[idx] = who
+        end
+        s.reserved = newRes
+    end
+
+    -- ========================================================================
+    -- Восстановить существ из снимка
+    -- ========================================================================
+    local function RestoreEntities(snapList)
+        local E = NSQC4.QuestsDfEntities
+        if not E then return end
+        local byName = E:EnsureByName()
+
+        -- очистить byName
+        for name in pairs(byName) do
+            byName[name] = nil
+        end
+
+        if not snapList then return end
+
+        for _, rec in ipairs(snapList) do
+            local name = rec.name
+            local opts = rec.opts and CopyOpts(rec.opts) or {}
+            local entity = {
+                id    = rec.id,
+                index = rec.index,
+                opts  = opts,
+                kind  = rec.kind or opts.kind or "generic",
+            }
+            byName[name] = entity
+            if rec.index and Grid then
+                Grid:SetEntityName(rec.index, name)
+            end
+        end
+        dbg("restored entities:", #(snapList or {}))
+    end
+
+    -- ========================================================================
+    -- Публичный доступ к снимку (для Generate и отладки)
+    -- ========================================================================
+    function Floors:GetSnapshot(n)
+        n = tonumber(n) or 0
+        return EnsureStorage().snapshots[n]
+    end
+
+    function Floors:IsVisited(n)
+        n = tonumber(n) or 0
+        return EnsureStorage().visited[n] and true or false
+    end
+
+    -- ========================================================================
+    -- ApplyWaterFromAbove(n)
+    -- Берёт снимок этажа n+1 (если есть). Для каждой клетки:
+    --   - если над нами water с depth >= 1 → у нас тоже water, depth = depth - 1
+    --   - если depth - 1 == 0 → не вода (дно), ставим землю (earth)
+    --
+    -- Ставится через Terrain:SetAt (чтобы корректно сбросить hardness/selection)
+    -- и Grid:SetDepth (глубина на новом этаже).
+    --
+    -- Возвращает число клеток воды, поставленных «сверху».
+    -- ========================================================================
+    function Floors:ApplyWaterFromAbove(n)
+        n = tonumber(n) or 0
+        local above = EnsureStorage().snapshots[n + 1]
+        if not above or not above.grid then
+            dbg(string.format("ApplyWaterFromAbove(%d): нет снимка этажа %d", n, n + 1))
+            return 0
+        end
+
+        local Terrain = NSQC4.QuestsDfTerrain
+        if not Terrain then return 0 end
+
+        local placed = 0
+        for i = 1, TOTAL do
+            local up = above.grid[i]
+            if up and up.terrain == "water" then
+                local upDepth = tonumber(up.depth) or 0
+                if upDepth >= 1 then
+                    local newDepth = upDepth - 1
+                    if newDepth >= 1 then
+                        -- вода «провалилась» на этаж n
+                        Terrain:SetAt(i, "water")
+                        if Grid and Grid.SetDepth then
+                            Grid:SetDepth(i, newDepth)
+                        end
+                        placed = placed + 1
+                    else
+                        -- дно: вода закончилась, ставим землю
+                        Terrain:SetAt(i, "earth")
+                        if Grid and Grid.ClearDepth then
+                            Grid:ClearDepth(i)
+                        end
+                    end
+                end
+            end
+        end
+
+        dbg(string.format("ApplyWaterFromAbove(%d): поставлено воды %d", n, placed))
+        return placed
     end
 
     -- ========================================================================
@@ -6701,10 +7458,15 @@ NSQC4.RegisterModule("quests", function()
     function Floors:SaveFloor(n)
         n = tonumber(n) or 0
         local s = EnsureStorage()
-        s.snapshots[n] = SnapshotGrid()
+        s.snapshots[n] = {
+            grid       = SnapshotGrid(),
+            selections = SnapshotSelections(),
+            entities   = SnapshotEntities(),
+        }
         s.visited[n] = true
         if n < s.min then s.min = n end
         if n > s.max then s.max = n end
+        dbg(string.format("SaveFloor(%d): entities=%d", n, #(s.snapshots[n].entities or {})))
         return true
     end
 
@@ -6712,8 +7474,15 @@ NSQC4.RegisterModule("quests", function()
         n = tonumber(n) or 0
         local s = EnsureStorage()
         local snap = s.snapshots[n]
-        if not snap then return false end
-        return RestoreGrid(snap)
+        if not snap then
+            dbg(string.format("LoadFloor(%d): нет снимка", n))
+            return false
+        end
+        RestoreGrid(snap.grid)
+        RestoreSelections(snap.selections)
+        RestoreEntities(snap.entities)
+        dbg(string.format("LoadFloor(%d): entities=%d", n, #(snap.entities or {})))
+        return true
     end
 
     -- ========================================================================
@@ -6729,6 +7498,87 @@ NSQC4.RegisterModule("quests", function()
         return self:LoadFloor(n)
     end
 
+    -- ========================================================================
+    -- Отладочные команды
+    -- ========================================================================
+    local function DumpFloors()
+        local s = EnsureStorage()
+        print(string.format("[FLOORS] current=%d min=%d max=%d", s.current, s.min, s.max))
+        for n, snap in pairs(s.snapshots) do
+            local ec = snap.entities and #snap.entities or 0
+            local gcount = 0
+            local wcount = 0
+            if snap.grid then
+                for i = 1, TOTAL do
+                    if snap.grid[i] and snap.grid[i].terrain then
+                        gcount = gcount + 1
+                        if snap.grid[i].terrain == "water" then
+                            wcount = wcount + 1
+                        end
+                    end
+                end
+            end
+            print(string.format("  floor %d: cells=%d water=%d entities=%d",
+                n, gcount, wcount, ec))
+        end
+    end
+
+    local function DumpSnap(n)
+        local s = EnsureStorage()
+        local snap = s.snapshots[n]
+        if not snap then
+            print("[FLOORS] нет снимка этажа " .. tostring(n))
+            return
+        end
+        print(string.format("[FLOORS] snap floor %d:", n))
+        if snap.entities then
+            for _, rec in ipairs(snap.entities) do
+                local ai = rec.opts and rec.opts.ai
+                print(string.format("  entity %s idx=%s kind=%s state=%s target=%s",
+                    tostring(rec.name), tostring(rec.index), tostring(rec.kind),
+                    tostring(ai and ai.state), tostring(ai and ai.target)))
+            end
+        else
+            print("  entities: nil")
+        end
+        -- Карта воды: где depth и сколько
+        if snap.grid then
+            local parts = {}
+            for i = 1, TOTAL do
+                local c = snap.grid[i]
+                if c and c.terrain == "water" then
+                    parts[#parts + 1] = string.format("%d(d=%s)", i, tostring(c.depth))
+                end
+            end
+            if #parts > 0 then
+                print("  water: " .. table.concat(parts, " "))
+            else
+                print("  water: (нет)")
+            end
+        end
+    end
+
+    SLASH_NSFLOORS1 = "/ns_floors"
+    SlashCmdList["NSFLOORS"] = function(msg)
+        local cmd, arg = (msg or ""):match("^(%S*)%s*(.-)$")
+        cmd = (cmd or ""):lower()
+        if cmd == "" or cmd == "dump" then
+            DumpFloors()
+        elseif cmd == "snap" then
+            DumpSnap(tonumber(arg) or 0)
+        elseif cmd == "on" then
+            Floors.DEBUG = true
+            print("[FLOORS] DEBUG = true")
+        elseif cmd == "off" then
+            Floors.DEBUG = false
+            print("[FLOORS] DEBUG = false")
+        else
+            print("[FLOORS] /ns_floors dump | snap <n> | on | off")
+        end
+    end
+
+    print("|cff00ffff[FLOORS]|r Floors/Storage загружен (DEBUG=" .. tostring(Floors.DEBUG) .. ")")
+
 end)
 
 
@@ -6738,12 +7588,21 @@ end)
 
 -- ============================================================================
 -- NSQC4 / Quests / df / Floors / Switch
--- Переключение этажа:
---   1. Проверить CanSwitch(to) — если нельзя, сообщение и выход.
---   2. Сохранить текущий этаж (Floors:Save()).
---   3. Если целевой не сгенерирован — Generate(to).
---   4. Загрузить целевой этаж (Floors:Load(to)) — восстановить grid.
---   5. Set(to), перерисовать (Terrain, Entities, Drops).
+-- Переключение этажа + отладка.
+--
+-- Порядок:
+--   1. CanSwitch(to) — если нельзя, сообщение и выход.
+--   2. Animate:StopAll — оборвать анимации (temp со старого этажа).
+--   3. Save текущего этажа (grid + selections + entities).
+--   4. Generate(to), если этаж ещё не сгенерирован.
+--   5. Load(to) — восстановить grid + selections + byName.
+--   6. Set(to).
+--   7. Render: Terrain:Render, Entities:Render, Drops:RenderAll.
+--   8. (Отладка) принудительно скрыть все якоря существ на всякий случай.
+--
+-- Отладка:
+--   Floors.DEBUG = true (по умолчанию)
+--   /ns_floors on | off
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -6754,37 +7613,125 @@ NSQC4.RegisterModule("quests", function()
         return
     end
 
+    local function dbg(...)
+        if Floors.DEBUG then print("|cff00ffff[FLOORS-SW]|r", ...) end
+    end
+
+    -- ========================================================================
+    -- Рендер всего поля
+    -- ========================================================================
+    local function RenderAll()
+        local Terrain  = NSQC4.QuestsDfTerrain
+        local Entities = NSQC4.QuestsDfEntities
+        local Drops    = NSQC4.QuestsDfTransformDrops
+        local QuestsField = NSQC4.QuestsField
+
+        dbg("Render: Terrain=" .. tostring(Terrain and "ok" or "nil") ..
+            " Entities=" .. tostring(Entities and "ok" or "nil") ..
+            " Drops=" .. tostring(Drops and "ok" or "nil") ..
+            " Field=" .. tostring(QuestsField and "ok" or "nil"))
+
+        -- Скрыть все якоря существ на всех клетках (старый этаж)
+        if QuestsField and QuestsField.ClearAnchorTextures then
+            local CONST = NSQC4.QuestsFieldConst
+            local TOTAL = CONST and (CONST.COLS * CONST.ROWS) or 100
+            for i = 1, TOTAL do
+                QuestsField:ClearAnchorTextures(i)
+            end
+            dbg("Render: ClearAnchorTextures all")
+        end
+
+        -- Ландшафт
+        if Terrain and Terrain.Render then
+            Terrain:Render()
+            dbg("Render: Terrain:Render done")
+        else
+            dbg("Render: Terrain:Render SKIPPED")
+        end
+
+        -- Существа
+        if Entities and Entities.Render then
+            Entities:Render()
+            dbg("Render: Entities:Render done")
+        else
+            dbg("Render: Entities:Render SKIPPED")
+        end
+
+        -- Лут
+        if Drops and Drops.RenderAll then
+            Drops:RenderAll()
+            dbg("Render: Drops:RenderAll done")
+        else
+            dbg("Render: Drops:RenderAll SKIPPED")
+        end
+    end
+
+    -- ========================================================================
+    -- Switch
+    -- ========================================================================
     function Floors:Switch(to)
         to = tonumber(to) or 0
+        local from = self:Get()
+        dbg(string.format("Switch: from=%d to=%d", from, to))
 
         local ok, reason = self:CanSwitch(to)
         if not ok then
             print("|cffff0000[NSQC4]|r Нельзя переключить этаж: " .. tostring(reason))
+            dbg("Switch: CanSwitch=false, reason=" .. tostring(reason))
             return false
         end
+        dbg("Switch: CanSwitch=true")
 
-        local from = self:Get()
-
-        -- сохранить текущий
-        if self.Save then self:Save() end
-
-        -- сгенерировать целевой, если нужно
-        if not self:IsVisited(to) then
-            self:Generate(to)
+        -- 1. Оборвать все анимации
+        local Animate = NSQC4.QuestsDfEntitiesAnimate
+        if Animate and Animate.StopAll then
+            local n = Animate:StopAll()
+            dbg("Switch: Animate:StopAll -> " .. tostring(n))
+        else
+            dbg("Switch: Animate:StopAll SKIPPED")
         end
 
-        -- загрузить целевой
-        if self.Load then self:Load(to) end
+        -- 2. Сохранить текущий этаж
+        if self.Save then
+            local okSave = self:Save()
+            dbg("Switch: Save -> " .. tostring(okSave))
+        else
+            dbg("Switch: Save SKIPPED")
+        end
 
+        -- 3. Сгенерировать целевой, если нужно
+        if not self:IsVisited(to) then
+            if self.Generate then
+                local okGen = self:Generate(to)
+                dbg("Switch: Generate(" .. to .. ") -> " .. tostring(okGen))
+            else
+                dbg("Switch: Generate SKIPPED")
+            end
+        else
+            dbg("Switch: floor " .. to .. " already visited")
+        end
+
+        -- 4. Загрузить целевой
+        if self.Load then
+            local okLoad = self:Load(to)
+            dbg("Switch: Load(" .. to .. ") -> " .. tostring(okLoad))
+        else
+            dbg("Switch: Load SKIPPED")
+        end
+
+        -- 5. Set текущего
         self:Set(to)
+        dbg("Switch: Set(" .. to .. ") -> current=" .. tostring(self:Get()))
 
-        -- перерисовать
-        local Terrain = NSQC4.QuestsDfTerrain
-        local Entities = NSQC4.QuestsDfEntities
-        local Drops = NSQC4.QuestsDfTransformDrops
-        if Terrain and Terrain.Render then Terrain:Render() end
-        if Entities and Entities.Render then Entities:Render() end
-        if Drops and Drops.RenderAll then Drops:RenderAll() end
+        -- 6. Render
+        RenderAll()
+
+        -- 7. Обновить кнопки этажей (если есть)
+        local QuestsField = NSQC4.QuestsField
+        if QuestsField and QuestsField.RefreshFloorButtons then
+            QuestsField.RefreshFloorButtons()
+            dbg("Switch: RefreshFloorButtons done")
+        end
 
         print(string.format("|cff00ff00[NSQC4]|r Этаж: %d → %d", from, to))
         return true
@@ -7573,6 +8520,123 @@ end)
 
 
 ======================================================================
+ FILE: df/Grid/Depth.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / df / Grid / Depth
+-- Глубина клетки воды: cell.depth (1..10).
+--
+-- Живёт в cell.depth — рядом с terrain/entityName/hardness/loot.
+-- Базовая «глубина по умолчанию» для воды — не здесь, а в генераторе воды
+-- (df/Terrain/Logic/Water.lua): он решает, какую глубину ставить каждой
+-- клетке реки/озера.
+--
+-- Этот файл — только про cell.depth: поставить, получить, сбросить, проверить.
+-- Никакой логики плавания, кликов, рендера здесь нет.
+--
+-- API:
+--   Grid:SetDepth(index, value)     -- 1..10, nil = сброс
+--   Grid:GetDepth(index)            -- 1..10 | nil
+--   Grid:ClearDepth(index)          -- сброс в nil
+--   Grid:HasDepth(index)            -- true, если depth задан (1..10)
+--   Grid:IsWater(index)             -- true, если terrain == "water"
+--   Grid:IsDeepWater(index, minD)   -- true, если вода и depth >= minD
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local Grid = NSQC4.QuestsDfGrid
+    if not Grid then
+        print("|cffff0000[NSQC4]|r Grid/Depth: Grid не загружен.")
+        return
+    end
+
+    local MIN_DEPTH = 1
+    local MAX_DEPTH = 10
+
+    -- ========================================================================
+    -- Поставить глубину клетки.
+    --   index  — 1..100
+    --   value  — 1..10, nil = сброс
+    --   Значения вне диапазона зажимаются в 1..10.
+    -- ========================================================================
+    function Grid:SetDepth(index, value)
+        local c = self:GetCell(index)
+        if not c then return false end
+
+        if value == nil then
+            c.depth = nil
+            return true
+        end
+
+        local v = math.floor((tonumber(value) or MIN_DEPTH) + 0.5)
+        if v < MIN_DEPTH then v = MIN_DEPTH end
+        if v > MAX_DEPTH then v = MAX_DEPTH end
+        c.depth = v
+        return true
+    end
+
+    -- ========================================================================
+    -- Получить глубину клетки.
+    --   nil — если не задана (не вода / только что очищена)
+    -- ========================================================================
+    function Grid:GetDepth(index)
+        local c = self:GetCell(index)
+        return c and c.depth or nil
+    end
+
+    -- ========================================================================
+    -- Сбросить глубину в nil.
+    -- ========================================================================
+    function Grid:ClearDepth(index)
+        local c = self:GetCell(index)
+        if not c then return false end
+        c.depth = nil
+        return true
+    end
+
+    -- ========================================================================
+    -- Есть ли у клетки заданная глубина (1..10).
+    -- ========================================================================
+    function Grid:HasDepth(index)
+        local c = self:GetCell(index)
+        if not c then return false end
+        local d = c.depth
+        return d ~= nil and d >= MIN_DEPTH and d <= MAX_DEPTH
+    end
+
+    -- ========================================================================
+    -- Вода ли в клетке (terrain == "water").
+    -- ========================================================================
+    function Grid:IsWater(index)
+        local c = self:GetCell(index)
+        if not c then return false end
+        return c.terrain == "water"
+    end
+
+    -- ========================================================================
+    -- Глубокая ли вода: вода + depth >= minD (по умолчанию 1).
+    --   Если minD <= 1 — эквивалентно IsWater(index).
+    -- ========================================================================
+    function Grid:IsDeepWater(index, minD)
+        minD = tonumber(minD) or MIN_DEPTH
+        if not self:IsWater(index) then return false end
+        local d = self:GetDepth(index)
+        if d == nil then return false end
+        return d >= minD
+    end
+
+    -- ========================================================================
+    -- Экспорт констант (для генератора воды и тултипа).
+    -- ========================================================================
+    Grid.DEPTH_MIN = MIN_DEPTH
+    Grid.DEPTH_MAX = MAX_DEPTH
+
+end)
+
+
+======================================================================
  FILE: df/Grid/Hardness.lua
 ======================================================================
 
@@ -7724,12 +8788,16 @@ end)
 --
 -- Grid:GetEntity(index) резолвит по byName → entity.
 --
--- cell = { terrain, entityName, hardness, loot }
---   loot = { [anchor] = { id, icon }, ... }   -- лут в лут-якорях
+-- cell = { terrain, entityName, hardness, loot, depth }
+--   loot  = { [anchor] = { id, icon }, ... }   -- лут в лут-якорях
+--   depth = 1..10 | nil                        -- глубина воды (Grid/Depth.lua)
 --
 -- SetTerrainSelected снимает все другие типы в клетке.
 -- Reserve / Release / IsReserved — резерв клетки под существо.
 -- void непроходим (IsPassable = false), существо туда не ставится.
+-- water непроходим для тех, у кого нет профессии «Пловец» — но проверка
+--   живёт в AI/Path.lua и AI/Move.lua (через Resolve:CanSwim), а не здесь:
+--   Grid:IsPassable не знает про entity.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -7758,7 +8826,7 @@ NSQC4.RegisterModule("quests", function()
         local g = nsDbc4.quests.df.grid
         for i = 1, TOTAL do
             if not g[i] then
-                g[i] = { terrain = nil, entityName = nil, hardness = nil, loot = nil }
+                g[i] = { terrain = nil, entityName = nil, hardness = nil, loot = nil, depth = nil }
             end
         end
         return g
@@ -7797,13 +8865,13 @@ NSQC4.RegisterModule("quests", function()
     function Grid:ClearCell(index)
         index = tonumber(index) or 0
         if index < 1 or index > TOTAL then return end
-        EnsureGrid()[index] = { terrain = nil, entityName = nil, hardness = nil, loot = nil }
+        EnsureGrid()[index] = { terrain = nil, entityName = nil, hardness = nil, loot = nil, depth = nil }
     end
 
     function Grid:ClearAll()
         local g = EnsureGrid()
         for i = 1, TOTAL do
-            g[i] = { terrain = nil, entityName = nil, hardness = nil, loot = nil }
+            g[i] = { terrain = nil, entityName = nil, hardness = nil, loot = nil, depth = nil }
         end
         local s = EnsureSelections()
         s.terrain_types = {}
@@ -7978,6 +9046,10 @@ NSQC4.RegisterModule("quests", function()
 
     -- ========================================================================
     -- Проходимость
+    --   Внимание: Grid:IsPassable не знает про entity.
+    --   Вода здесь считается проходимой (terrain ~= void, нет entity).
+    --   Ограничение «только пловец» — в AI/Path.lua и AI/Move.lua
+    --   через Resolve:CanSwim(entity).
     -- ========================================================================
     function Grid:IsPassable(index)
         local c = self:GetCell(index)
@@ -8013,7 +9085,7 @@ NSQC4.RegisterModule("quests", function()
         print(string.format("[GRID] reserved=%d  [%s]", rcnt, table.concat(rcells, " ")))
     end
 
-    print("|cff00ffff[GRID-DEBUG]|r Единый реестр клеток инициализирован (byName, loot, void).")
+    print("|cff00ffff[GRID-DEBUG]|r Единый реестр клеток инициализирован (byName, loot, depth, void).")
 
 end)
 
@@ -8025,6 +9097,13 @@ end)
 -- ============================================================================
 -- NSQC4 / Quests / df / Init
 -- EnsureCreatures проверяет byName (есть ли уже гоблин/дворф), не Grid.
+--
+-- Генерация воды в GenerateDfMap:
+--   - SeedRiver (река) и SeedLake (озеро) — из df/Terrain/Logic/Water.lua.
+--   - Water ставит depth через Grid:SetDepth; Generate не лезет в глубину.
+--   - Вода ставится ПОСЛЕ FillRandom — перетирает часть grass/stone/tree/earth.
+--
+-- Существа спавнятся ТОЛЬКО при первой инициализации мира (IsDfInitialized).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -8129,14 +9208,41 @@ NSQC4.RegisterModule("quests", function()
         Terrain:Clear()
         if NSQC4.QuestsDfEntities then NSQC4.QuestsDfEntities:Clear() end
 
+        -- 1. База: земля/трава/камень/дерево
         local pool = { "grass", "stone", "tree", "earth" }
         for i = 1, 100 do
             Terrain:SetTerrain(i, pool[math.random(1, #pool)])
         end
+
+        -- 2. Вода: река + озеро (после базы — перетирает часть клеток).
+        --    SeedRiver/SeedLake живут в df/Terrain/Logic/Water.lua и сами
+        --    ставят depth через Grid:SetDepth. Здесь только вызов.
+        local placedWater = 0
+        if Terrain.SeedRiver then
+            local ok, res = pcall(Terrain.SeedRiver, Terrain)
+            if ok and type(res) == "number" then placedWater = placedWater + res end
+        end
+        if Terrain.SeedLake then
+            local ok, res = pcall(Terrain.SeedLake, Terrain)
+            if ok and type(res) == "number" then placedWater = placedWater + res end
+        end
+        if placedWater > 0 then
+            print(string.format("|cff00ffff[GEN]|r Вода на карте: %d клеток", placedWater))
+        end
+
         if Terrain.Render then Terrain:Render() end
         print("|cffff0000[GEN]|r Ландшафт сгенерирован.")
 
-        EnsureCreatures()
+        -- Существа спавнятся ТОЛЬКО при первой генерации мира.
+        -- Повторные открытия поля и переключения этажей существ не добавляют.
+        if not self:IsDfInitialized() then
+            EnsureCreatures()
+            self:SetDfInitialized(true)
+            print("|cff00ff00[GEN]|r Существа заспавнены (первая инициализация мира).")
+        else
+            print("|cff808080[GEN]|r Мир уже инициализирован — существа не спавнятся.")
+        end
+
         StartAITicker()
 
         print("|cff00ff00[NSQC4]|r Карта сгенерирована.")
@@ -8191,7 +9297,8 @@ NSQC4.RegisterModule("quests", function()
         else
             Terrain:Render()
             if NSQC4.QuestsDfEntities then NSQC4.QuestsDfEntities:Render() end
-            EnsureCreatures()
+            -- EnsureCreatures() убран: открытие поля НЕ должно доспавнивать существ.
+            -- Существа появляются только при первой генерации мира (GenerateDfMap).
         end
 
         StartAITicker()
@@ -8216,6 +9323,7 @@ NSQC4.RegisterModule("quests", function()
         elseif cmd == "restart" then
             StaticPopup_Show("NSQC4_RESTART_DF")
         elseif cmd == "ensure" then
+            -- Ручной доспавн (для отладки). Осознанно оставлен как явная команда.
             EnsureCreatures()
             print("|cff00ff00[NSQC4]|r ensure: существ в byName " .. tostring(NSQC4.QuestsDfEntities:Count()))
         end
@@ -8245,12 +9353,18 @@ end)
 --
 -- Профессия — самостоятельная единица. Знает:
 --   - к каким объектам применяется (terrain)
---   - каким параметром существа ускоряется (stat)
+--   - каким параметром существа ускоряется (stat) — СИЛА
 --   - как считать клики под конкретный объект (clicks)
 --   - что даёт по завершении (work.yields)
 --
--- Формула кликов — ВНУТРИ профессии. Другие профессии могут считать иначе.
--- Позже сюда добавим скорость прокачки (зависит от интеллекта и т.п.).
+-- Формула кликов — ВНУТРИ профессии:
+--   factor = 1 − 0.666 × prof_pct − 0.333 × stat_pct
+--   clicks = max(1, round(hardness × factor))
+--
+--   prof_pct — уровень диггера / 100
+--   stat_pct — сила / максимум (Resolve:StatPct(entity, "strength"))
+--
+-- hardness берётся из df/Terrain/Data/Earth.lua (1000).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -8263,25 +9377,25 @@ NSQC4.RegisterModule("quests", function()
 
     -- Веса вклада в снижение кликов (в сумме 0.999).
     local PROF_WEIGHT = 0.666
-    local STR_WEIGHT  = 0.333
+    local STAT_WEIGHT = 0.333
 
     -- ========================================================================
     -- Формула кликов Диггера.
     --   hardness — базовое HP объекта (из Terrain/Data)
     --   prof_pct — 0..1 (насколько прокачана профессия)
-    --   str_pct  — 0..1 (сила существа / максимум)
+    --   stat_pct — 0..1 (сила существа / максимум)
     -- Возвращает целое ≥ 1.
     -- ========================================================================
-    local function clicks(hardness, prof_pct, str_pct)
+    local function clicks(hardness, prof_pct, stat_pct)
         hardness = tonumber(hardness) or 0
         if hardness <= 0 then return 1 end
 
         prof_pct = tonumber(prof_pct) or 0
-        str_pct  = tonumber(str_pct)  or 0
+        stat_pct = tonumber(stat_pct) or 0
         if prof_pct < 0 then prof_pct = 0 elseif prof_pct > 1 then prof_pct = 1 end
-        if str_pct  < 0 then str_pct  = 0 elseif str_pct  > 1 then str_pct  = 1 end
+        if stat_pct < 0 then stat_pct = 0 elseif stat_pct > 1 then stat_pct = 1 end
 
-        local factor = 1 - PROF_WEIGHT * prof_pct - STR_WEIGHT * str_pct
+        local factor = 1 - PROF_WEIGHT * prof_pct - STAT_WEIGHT * stat_pct
         if factor < 0 then factor = 0 end
 
         local n = math.floor(hardness * factor + 0.5)
@@ -8296,7 +9410,7 @@ NSQC4.RegisterModule("quests", function()
         name    = "Диггер",
         desc    = "Копает землю, добывает глину.",
         terrain = "earth",          -- к какому объекту применяется
-        stat    = "strength",       -- какой параметр ускоряет
+        stat    = "strength",       -- какой параметр ускоряет (сила)
         clicks  = clicks,           -- формула кликов (внутри профессии)
         work    = { verb = "копает", duration = 1, yields = "clay" },
     })
@@ -8314,17 +9428,18 @@ end)
 --
 -- Профессия — самостоятельная единица. Знает:
 --   - к каким объектам применяется (terrain)
---   - каким параметром существа ускоряется (stat)
+--   - каким параметром существа ускоряется (stat) — ИНТЕЛЛЕКТ
 --   - как считать клики под конкретный объект (clicks)
 --   - что даёт по завершении (work.yields)
 --
--- Формула кликов — ВНУТРИ профессии. Та же, что у Диггера, Лесоруба,
--- Камнереза:
---   factor = 1 − 0.666 × prof_pct − 0.333 × str_pct
+-- Формула кликов — ВНУТРИ профессии:
+--   factor = 1 − 0.666 × prof_pct − 0.333 × stat_pct
 --   clicks = max(1, round(hardness × factor))
 --
+--   prof_pct — уровень травника / 100
+--   stat_pct — интеллект / максимум (Resolve:StatPct(entity, "intellect"))
+--
 -- hardness берётся из df/Terrain/Data/Grass.lua (100).
--- Позже сюда добавим скорость прокачки (зависит от интеллекта и т.п.).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -8337,25 +9452,25 @@ NSQC4.RegisterModule("quests", function()
 
     -- Веса вклада в снижение кликов (в сумме 0.999).
     local PROF_WEIGHT = 0.666
-    local STR_WEIGHT  = 0.333
+    local STAT_WEIGHT = 0.333
 
     -- ========================================================================
     -- Формула кликов Травника.
     --   hardness — базовое HP объекта (из Terrain/Data)
     --   prof_pct — 0..1 (насколько прокачана профессия)
-    --   str_pct  — 0..1 (сила существа / максимум)
+    --   stat_pct — 0..1 (интеллект существа / максимум)
     -- Возвращает целое ≥ 1.
     -- ========================================================================
-    local function clicks(hardness, prof_pct, str_pct)
+    local function clicks(hardness, prof_pct, stat_pct)
         hardness = tonumber(hardness) or 0
         if hardness <= 0 then return 1 end
 
         prof_pct = tonumber(prof_pct) or 0
-        str_pct  = tonumber(str_pct)  or 0
+        stat_pct = tonumber(stat_pct) or 0
         if prof_pct < 0 then prof_pct = 0 elseif prof_pct > 1 then prof_pct = 1 end
-        if str_pct  < 0 then str_pct  = 0 elseif str_pct  > 1 then str_pct  = 1 end
+        if stat_pct < 0 then stat_pct = 0 elseif stat_pct > 1 then stat_pct = 1 end
 
-        local factor = 1 - PROF_WEIGHT * prof_pct - STR_WEIGHT * str_pct
+        local factor = 1 - PROF_WEIGHT * prof_pct - STAT_WEIGHT * stat_pct
         if factor < 0 then factor = 0 end
 
         local n = math.floor(hardness * factor + 0.5)
@@ -8370,7 +9485,7 @@ NSQC4.RegisterModule("quests", function()
         name    = "Травник",
         desc    = "Собирает травы, ягоды, грибы.",
         terrain = "grass",          -- к какому объекту применяется
-        stat    = "strength",       -- какой параметр ускоряет
+        stat    = "intellect",      -- какой параметр ускоряет (интеллект)
         clicks  = clicks,           -- формула кликов (внутри профессии)
         work    = { verb = "собирает", duration = 1, yields = "herbs" },
     })
@@ -8500,16 +9615,18 @@ end)
 --
 -- Профессия — самостоятельная единица. Знает:
 --   - к каким объектам применяется (terrain)
---   - каким параметром существа ускоряется (stat)
+--   - каким параметром существа ускоряется (stat) — ЛОВКОСТЬ
 --   - как считать клики под конкретный объект (clicks)
 --   - что даёт по завершении (work.yields)
 --
--- Формула кликов — ВНУТРИ профессии. Та же, что у Диггера:
---   factor = 1 − 0.666 × prof_pct − 0.333 × str_pct
+-- Формула кликов — ВНУТРИ профессии:
+--   factor = 1 − 0.666 × prof_pct − 0.333 × stat_pct
 --   clicks = max(1, round(hardness × factor))
 --
+--   prof_pct — уровень лесоруба / 100
+--   stat_pct — ловкость / максимум (Resolve:StatPct(entity, "agility"))
+--
 -- hardness берётся из df/Terrain/Data/Tree.lua (1500).
--- Позже сюда добавим скорость прокачки (зависит от интеллекта и т.п.).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -8522,25 +9639,25 @@ NSQC4.RegisterModule("quests", function()
 
     -- Веса вклада в снижение кликов (в сумме 0.999).
     local PROF_WEIGHT = 0.666
-    local STR_WEIGHT  = 0.333
+    local STAT_WEIGHT = 0.333
 
     -- ========================================================================
     -- Формула кликов Лесоруба.
     --   hardness — базовое HP объекта (из Terrain/Data)
     --   prof_pct — 0..1 (насколько прокачана профессия)
-    --   str_pct  — 0..1 (сила существа / максимум)
+    --   stat_pct — 0..1 (ловкость существа / максимум)
     -- Возвращает целое ≥ 1.
     -- ========================================================================
-    local function clicks(hardness, prof_pct, str_pct)
+    local function clicks(hardness, prof_pct, stat_pct)
         hardness = tonumber(hardness) or 0
         if hardness <= 0 then return 1 end
 
         prof_pct = tonumber(prof_pct) or 0
-        str_pct  = tonumber(str_pct)  or 0
+        stat_pct = tonumber(stat_pct) or 0
         if prof_pct < 0 then prof_pct = 0 elseif prof_pct > 1 then prof_pct = 1 end
-        if str_pct  < 0 then str_pct  = 0 elseif str_pct  > 1 then str_pct  = 1 end
+        if stat_pct < 0 then stat_pct = 0 elseif stat_pct > 1 then stat_pct = 1 end
 
-        local factor = 1 - PROF_WEIGHT * prof_pct - STR_WEIGHT * str_pct
+        local factor = 1 - PROF_WEIGHT * prof_pct - STAT_WEIGHT * stat_pct
         if factor < 0 then factor = 0 end
 
         local n = math.floor(hardness * factor + 0.5)
@@ -8555,7 +9672,7 @@ NSQC4.RegisterModule("quests", function()
         name    = "Лесоруб",
         desc    = "Валит лес, заготавливает брёвна.",
         terrain = "tree",           -- к какому объекту применяется
-        stat    = "strength",       -- какой параметр ускоряет
+        stat    = "agility",        -- какой параметр ускоряет (ловкость)
         clicks  = clicks,           -- формула кликов (внутри профессии)
         work    = { verb = "рубит", duration = 1, yields = "wood" },
     })
@@ -8569,25 +9686,34 @@ end)
 
 -- ============================================================================
 -- NSQC4 / Quests / df / Professions / Resolve
--- Перевод данных существа в числа, которые ждёт формула профессии.
+-- Перевод данных существа в числа, которые ждёт формула профессии,
+-- + проверка «умеет ли существо плавать» (для воды).
 --
 -- Формула любой профессии принимает:
---   clicks(hardness, prof_pct, str_pct)
+--   clicks(hardness, prof_pct, stat_pct)
 --
 -- Resolve готовит два числа:
 --   prof_pct — насколько прокачана «своя» профессия для данного terrain (0..1)
---   str_pct  — сила существа относительно максимума (0..1)
+--   stat_pct — профильный стат существа относительно максимума (0..1):
+--                "strength"  → opts.strength  / opts.max_strength
+--                "agility"   → opts.agility   / opts.max_agility
+--                "intellect" → opts.intellect / opts.max_intellect
 --
 -- Откуда берёт:
 --   prof_pct:
 --     opts.known_skills — таблица [имя] = уровень (1..100)
 --     → ProfessionsApi:GetByName(name) → def.terrain == terrainId
 --     → уровень / 100 = 0..1
---   str_pct:
---     opts.strength / opts.max_strength (обрезать до 0..1)
+--   stat_pct:
+--     Resolve:StatPct(entity, stat), где stat — profDef.stat
+--
+-- CanSwim(entity):
+--   true, если у существа есть ЛЮБАЯ профессия с terrain == "water"
+--   (сейчас — "Пловец"). Вода пересекается только пловцами.
+--   Используется в AI/Path.lua (Path:Find) и AI/Move.lua (CanStepInto).
 --
 -- Ничего не знает про Grid, движение, работу, клики.
--- Только entity + terrainId → два числа.
+-- Только entity + terrainId (+ stat) → числа / булево.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -8639,11 +9765,89 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Удобный фасад: оба числа сразу.
-    --   → prof_pct, str_pct
+    -- agi_pct: 0..1.
+    --   0 — ловкости нет или max_agility не задан.
     -- ========================================================================
-    function Resolve:Both(entity, terrainId)
-        return self:ProfPct(entity, terrainId), self:StrPct(entity)
+    function Resolve:AgiPct(entity)
+        if not entity or not entity.opts then return 0 end
+        local opts = entity.opts
+
+        local agi = tonumber(opts.agility) or 0
+        local max = tonumber(opts.max_agility) or 0
+        if max <= 0 then return 0 end
+
+        local pct = agi / max
+        if pct < 0 then pct = 0 elseif pct > 1 then pct = 1 end
+        return pct
+    end
+
+    -- ========================================================================
+    -- int_pct: 0..1.
+    --   0 — интеллекта нет или max_intellect не задан.
+    -- ========================================================================
+    function Resolve:IntPct(entity)
+        if not entity or not entity.opts then return 0 end
+        local opts = entity.opts
+
+        local int = tonumber(opts.intellect) or 0
+        local max = tonumber(opts.max_intellect) or 0
+        if max <= 0 then return 0 end
+
+        local pct = int / max
+        if pct < 0 then pct = 0 elseif pct > 1 then pct = 1 end
+        return pct
+    end
+
+    -- ========================================================================
+    -- stat_pct: 0..1 по имени стата.
+    --   "strength" | "agility" | "intellect".
+    --   Если stat не задан или неизвестен — 0.
+    -- ========================================================================
+    function Resolve:StatPct(entity, stat)
+        if stat == "strength" then
+            return self:StrPct(entity)
+        elseif stat == "agility" then
+            return self:AgiPct(entity)
+        elseif stat == "intellect" then
+            return self:IntPct(entity)
+        end
+        return 0
+    end
+
+    -- ========================================================================
+    -- Удобный фасад: prof_pct + stat_pct по profDef.stat.
+    --   → prof_pct, stat_pct
+    -- ========================================================================
+    function Resolve:Both(entity, terrainId, stat)
+        return self:ProfPct(entity, terrainId), self:StatPct(entity, stat)
+    end
+
+    -- ========================================================================
+    -- CanSwim: умеет ли существо плавать.
+    --   true, если в known_skills есть любая профессия с terrain == "water"
+    --   (сейчас — "Пловец", зарегистрирован в df/Professions/Swimmer.lua).
+    --
+    --   Используется:
+    --     AI/Path.lua  → Path:Find(..., entity) — не пускать в воду
+    --     AI/Move.lua  → CanStepInto(nextIndex, entity) — не шагать в воду
+    --
+    --   Если profession "Пловец" в known_skills нет — false.
+    --   Если ProfessionsApi не загружен — false (безопасный дефолт).
+    -- ========================================================================
+    function Resolve:CanSwim(entity)
+        if not entity or not entity.opts then return false end
+
+        local opts = entity.opts
+        local ProfApi = NSQC4.QuestsDfProfessionsApi
+        if not ProfApi or type(opts.known_skills) ~= "table" then return false end
+
+        for name in pairs(opts.known_skills) do
+            local def = ProfApi:GetByName(name)
+            if def and def.terrain == "water" then
+                return true
+            end
+        end
+        return false
     end
 
 end)
@@ -8659,16 +9863,18 @@ end)
 --
 -- Профессия — самостоятельная единица. Знает:
 --   - к каким объектам применяется (terrain)
---   - каким параметром существа ускоряется (stat)
+--   - каким параметром существа ускоряется (stat) — СИЛА
 --   - как считать клики под конкретный объект (clicks)
 --   - что даёт по завершении (work.yields)
 --
--- Формула кликов — ВНУТРИ профессии. Та же, что у Диггера и Лесоруба:
---   factor = 1 − 0.666 × prof_pct − 0.333 × str_pct
+-- Формула кликов — ВНУТРИ профессии:
+--   factor = 1 − 0.666 × prof_pct − 0.333 × stat_pct
 --   clicks = max(1, round(hardness × factor))
 --
+--   prof_pct — уровень камнереза / 100
+--   stat_pct — сила / максимум (Resolve:StatPct(entity, "strength"))
+--
 -- hardness берётся из df/Terrain/Data/Stone.lua (2000).
--- Позже сюда добавим скорость прокачки (зависит от интеллекта и т.п.).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -8681,25 +9887,25 @@ NSQC4.RegisterModule("quests", function()
 
     -- Веса вклада в снижение кликов (в сумме 0.999).
     local PROF_WEIGHT = 0.666
-    local STR_WEIGHT  = 0.333
+    local STAT_WEIGHT = 0.333
 
     -- ========================================================================
     -- Формула кликов Камнереза.
     --   hardness — базовое HP объекта (из Terrain/Data)
     --   prof_pct — 0..1 (насколько прокачана профессия)
-    --   str_pct  — 0..1 (сила существа / максимум)
+    --   stat_pct — 0..1 (сила существа / максимум)
     -- Возвращает целое ≥ 1.
     -- ========================================================================
-    local function clicks(hardness, prof_pct, str_pct)
+    local function clicks(hardness, prof_pct, stat_pct)
         hardness = tonumber(hardness) or 0
         if hardness <= 0 then return 1 end
 
         prof_pct = tonumber(prof_pct) or 0
-        str_pct  = tonumber(str_pct)  or 0
+        stat_pct = tonumber(stat_pct) or 0
         if prof_pct < 0 then prof_pct = 0 elseif prof_pct > 1 then prof_pct = 1 end
-        if str_pct  < 0 then str_pct  = 0 elseif str_pct  > 1 then str_pct  = 1 end
+        if stat_pct < 0 then stat_pct = 0 elseif stat_pct > 1 then stat_pct = 1 end
 
-        local factor = 1 - PROF_WEIGHT * prof_pct - STR_WEIGHT * str_pct
+        local factor = 1 - PROF_WEIGHT * prof_pct - STAT_WEIGHT * stat_pct
         if factor < 0 then factor = 0 end
 
         local n = math.floor(hardness * factor + 0.5)
@@ -8714,9 +9920,70 @@ NSQC4.RegisterModule("quests", function()
         name    = "Камнерез",
         desc    = "Обрабатывает камень для построек.",
         terrain = "stone",          -- к какому объекту применяется
-        stat    = "strength",       -- какой параметр ускоряет
+        stat    = "strength",       -- какой параметр ускоряет (сила)
         clicks  = clicks,           -- формула кликов (внутри профессии)
         work    = { verb = "режет", duration = 1, yields = "stone_block" },
+    })
+
+end)
+
+
+======================================================================
+ FILE: df/Professions/Swimmer.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / df / Professions / Swimmer
+-- Профессия «Пловец». Позволяет существу пересекать воду (water).
+--
+-- Профессия — самостоятельная единица. Знает:
+--   - к каким объектам применяется (terrain = "water")
+--   - каким параметром существа ускоряется (stat = "agility")
+--   - как считать клики под конкретный объект (clicks)
+--   - что даёт по завершении (work.yields)
+--
+-- ВАЖНО: вода НЕ добывается работой. Пловец нужен для ПРОХОДИМОСТИ
+-- (Path/Move проверяют Resolve:CanSwim(entity) и пускают в воду только
+-- существ с этой профессией). Поэтому:
+--   - clicks   — заглушка (всегда 1), вода не «копается»
+--   - yields   — nil, ничего не даёт по завершении
+--   - hardness — 0 (см. df/Terrain/Data/Water.lua), работы по hardness нет
+--
+-- Отдельная логика работы на воде (если появится) — в
+-- df/Actions/Terrain/Water/*, а не здесь. Профессия отвечает только за
+-- право находиться в воде и за формулу кликов (сейчас — заглушка).
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local P = NSQC4.QuestsDfProfessionsApi
+    if not P then
+        print("|cffff0000[NSQC4]|r Swimmer: Professions/Init.lua не загружен.")
+        return
+    end
+
+    -- ========================================================================
+    -- Формула кликов Пловца.
+    --   Вода не добывается работой, поэтому кликов всегда 1 (заглушка).
+    --   Сигнатура совпадает с другими профессиями:
+    --     clicks(hardness, prof_pct, stat_pct) -> int >= 1
+    --   Это позволяет Work:Tick и Resolve работать единообразно,
+    --   если в будущем появится «работа на воде».
+    -- ========================================================================
+    local function clicks(hardness, prof_pct, stat_pct)
+        return 1
+    end
+
+    -- ========================================================================
+    -- Регистрация профессии.
+    -- ========================================================================
+    P:Register("swimmer", {
+        name    = "Пловец",
+        desc    = "Умеет плавать и пересекать воду.",
+        terrain = "water",          -- к какому объекту применяется
+        stat    = "agility",        -- какой параметр ускоряет (ловкость)
+        clicks  = clicks,           -- формула кликов (заглушка: всегда 1)
+        work    = { verb = "плывёт", duration = 1, yields = nil },
     })
 
 end)
@@ -8729,11 +9996,29 @@ end)
 -- ============================================================================
 -- NSQC4 / Quests / df / Professions
 -- Реестр всех возможных профессий (умений) для существ.
+--
+-- ВАЖНО: это «список возможных профессий», из которого Spawner'ы
+-- (Goblin/Spawner.lua, Dwarf/Spawner.lua) случайно выбирают known_skills.
+-- Конкретные def профессий (name, terrain, stat, clicks, work) живут в
+-- df/Professions/<Prof>.lua и регистрируются через ProfessionsApi:Register.
+--
+-- Чтобы профессия могла выпасть существу, она должна быть:
+--   1. в этом списке (id совпадает с Register-id), И
+--   2. зарегистрирована через ProfessionsApi (иначе GetByName не найдёт её,
+--      и ProfPct/CanSwim будут false).
+--
+-- «Пловец» (swimmer) — в списке, зарегистрирован в Swimmer.lua.
+-- Без него Resolve:CanSwim всегда false → никто не войдёт в воду.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
 
     NSQC4.QuestsDfProfessions = {
+        -- ====================================================================
+        -- 0. Вода
+        -- ====================================================================
+        { id = "swimmer",     name = "Пловец",       desc = "Умеет плавать и пересекать воду." },
+
         -- ====================================================================
         -- 1. Добыча ресурсов (Сырье)
         -- ====================================================================
@@ -9047,7 +10332,9 @@ end)
 
 -- ============================================================================
 -- NSQC4 / Quests / df / Terrain / Data / Void
--- Пустота: без текстуры, hardness = 0, непроходима.
+-- Пустота: чёрный квадрат. Текстура — стандартная WHITE8x8 (без внешних
+-- файлов), затемняется в Terrain/UI/Api через SetVertexColor(0,0,0,1).
+-- hardness = 0, непроходима.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -9059,9 +10346,42 @@ NSQC4.RegisterModule("quests", function()
 
     Data:Register("void", {
         hardness = 0,
-        texture  = nil,          -- без текстуры
+        texture  = "Interface\\Buttons\\WHITE8x8",   -- белая заливка, затемняется в UI/Api
         textSize = 0,
-        color    = { 0.20, 0.20, 0.20 },
+        color    = { 0.05, 0.05, 0.05 },
+    })
+end)
+
+
+======================================================================
+ FILE: df/Terrain/Data/Water.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / df / Terrain / Data / Water
+-- Базовые характеристики типа "Вода" (water).
+--
+-- Глубина — не здесь, а в клетке (cell.depth, 1..10). Этот файл задаёт
+-- только «паспорт» типа: текстура, цвет, размер текста, hardness.
+--
+-- hardness = 0: воду не «копают» работой по hardness — у неё своя логика
+-- (работу назначим заглушкой в Actions/Terrain/Water).
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+    local Data = NSQC4.QuestsDfTerrainData
+    if not Data then
+        print("|cffff0000[NSQC4]|r Terrain/Data/Water: Init.lua не загружен.")
+        return
+    end
+
+    local IMG_PATH = "Interface\\AddOns\\NSQC4\\Media\\Images\\"
+
+    Data:Register("water", {
+        hardness = 0,
+        texture  = IMG_PATH .. "00w",
+        textSize = 9,
+        color    = { 0.30, 0.55, 0.85 },
     })
 end)
 
@@ -9589,6 +10909,339 @@ end)
 
 
 ======================================================================
+ FILE: df/Terrain/Logic/Void.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / df / Terrain / Logic / Void
+-- Логика пустоты: без onClick/contextMenu (клики — в Actions/Terrain/Void).
+-- Регистрирует "void" как тип ландшафта, чтобы он был в реестре GetTypes().
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+    local Terrain = NSQC4.QuestsDfTerrain
+    if not Terrain then return end
+
+    Terrain:RegisterType("void", {
+        onClick = function(index)
+            -- ничего
+        end,
+        contextMenu = nil,
+    })
+end)
+
+
+======================================================================
+ FILE: df/Terrain/Logic/Water.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / df / Terrain / Logic / Water
+-- Логика и генерация типа "Вода" (water).
+--
+-- Два вида генерации:
+--   1. Река — две клетки на РАЗНЫХ сторонах поля (10×10), между ними
+--      изгибающийся путь из клеток воды (4-связность).
+--   2. Озеро — 1..5 клеток воды случайным «пятном» в случайном месте.
+--
+-- Каждая клетка воды получает глубину 1..10 (Grid:SetDepth).
+--
+-- Поведение при кликах — в Actions/Terrain/Water/*. Здесь только:
+--   - регистрация типа "water" (onClick/contextMenu = пусто)
+--   - SeedRiver()  — река
+--   - SeedLake()   — озеро
+--
+-- Глубина зажимается Grid:SetDepth в 1..10 (см. Grid/Depth.lua).
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local Terrain = NSQC4.QuestsDfTerrain
+    if not Terrain then
+        print("|cffff0000[NSQC4]|r Terrain/Logic/Water: Terrain не загружен.")
+        return
+    end
+
+    local Grid = NSQC4.QuestsDfGrid
+    if not Grid then
+        print("|cffff0000[NSQC4]|r Terrain/Logic/Water: Grid не загружен.")
+        return
+    end
+
+    local CONST = NSQC4.QuestsFieldConst
+    if not CONST then return end
+    local COLS, ROWS = CONST.COLS, CONST.ROWS
+    local TOTAL = COLS * ROWS
+
+    -- ========================================================================
+    -- РЕГИСТРАЦИЯ ТИПА
+    -- ========================================================================
+    Terrain:RegisterType("water", {
+        onClick = function(index)
+            -- клики — в Actions/Terrain/Water/*
+        end,
+        contextMenu = nil,   -- ПКМ пока пустой
+    })
+
+    -- ========================================================================
+    -- ВСПОМОГАТЕЛЬНОЕ: индекс ↔ (col, row)
+    --   col 0..COLS-1, row 0..ROWS-1
+    -- ========================================================================
+    local function RC(index)
+        local i = index - 1
+        return i % COLS, math.floor(i / COLS)
+    end
+
+    local function CR(col, row)
+        return row * COLS + col + 1
+    end
+
+    -- ========================================================================
+    -- ВСПОМОГАТЕЛЬНОЕ: поставить воду + глубину в клетке
+    -- ========================================================================
+    local function SetWaterCell(index, depth)
+        if index < 1 or index > TOTAL then return false end
+        Terrain:SetTerrain(index, "water")
+        local d = depth or math.random(1, 10)
+        if Grid and Grid.SetDepth then
+            Grid:SetDepth(index, d)
+        end
+        return true
+    end
+
+    -- ========================================================================
+    -- РЕКА
+    -- Две стороны из набора {top, bottom, left, right} — РАЗНЫЕ.
+    -- На каждой стороне выбирается случайная клетка.
+    -- Между ними строится путь изгибом (случайное блуждание с приоритетом
+    -- направления к финишу).
+    -- ========================================================================
+
+    local SIDES = { "top", "bottom", "left", "right" }
+
+    -- Случайная клетка на стороне side.
+    local function RandomCellOnSide(side)
+        if side == "top" then
+            return CR(math.random(0, COLS - 1), 0)
+        elseif side == "bottom" then
+            return CR(math.random(0, COLS - 1), ROWS - 1)
+        elseif side == "left" then
+            return CR(0, math.random(0, ROWS - 1))
+        elseif side == "right" then
+            return CR(COLS - 1, math.random(0, ROWS - 1))
+        end
+        return nil
+    end
+
+    -- Две разные стороны.
+    local function PickTwoDifferentSides()
+        local a = SIDES[math.random(#SIDES)]
+        local b = a
+        while b == a do
+            b = SIDES[math.random(#SIDES)]
+        end
+        return a, b
+    end
+
+    -- Строит путь от (c1,r1) до (c2,r2) изгибом.
+    -- Возвращает массив индексов клеток (включая старт и финиш).
+    local function BuildWindingPath(c1, r1, c2, r2)
+        local path = {}
+        local visited = {}
+        local curCol, curRow = c1, r1
+
+        local function push(col, row)
+            local idx = CR(col, row)
+            if not visited[idx] then
+                visited[idx] = true
+                path[#path + 1] = idx
+            end
+        end
+
+        push(curCol, curRow)
+
+        -- Максимум шагов, чтобы не зациклиться
+        local maxSteps = COLS * ROWS * 2
+        local steps = 0
+
+        while steps < maxSteps do
+            steps = steps + 1
+            if curCol == c2 and curRow == r2 then break end
+
+            local candidates = {}
+
+            -- Приоритет — направление к финишу
+            if curCol < c2 then candidates[#candidates + 1] = { "right", 3 } end
+            if curCol > c2 then candidates[#candidates + 1] = { "left",  3 } end
+            if curRow < r2 then candidates[#candidates + 1] = { "down",  3 } end
+            if curRow > r2 then candidates[#candidates + 1] = { "up",    3 } end
+
+            -- Перпендикулярные «изгибы» — меньший вес, но ненулевой
+            if curCol > 0          then candidates[#candidates + 1] = { "left",  1 } end
+            if curCol < COLS - 1   then candidates[#candidates + 1] = { "right", 1 } end
+            if curRow > 0          then candidates[#candidates + 1] = { "up",    1 } end
+            if curRow < ROWS - 1   then candidates[#candidates + 1] = { "down",  1 } end
+
+            if #candidates == 0 then break end
+
+            -- Взвешенный случайный выбор
+            local totalW = 0
+            for _, c in ipairs(candidates) do totalW = totalW + c[2] end
+            local roll = math.random() * totalW
+            local acc, chosen = 0, nil
+            for _, c in ipairs(candidates) do
+                acc = acc + c[2]
+                if roll <= acc then chosen = c[1]; break end
+            end
+
+            local nc, nr = curCol, curRow
+            if chosen == "left"  then nc = nc - 1 end
+            if chosen == "right" then nc = nc + 1 end
+            if chosen == "up"    then nr = nr - 1 end
+            if chosen == "down"  then nr = nr + 1 end
+
+            -- Clamp (взвешенный выбор мог выбрать край; всё равно проверим)
+            if nc < 0 then nc = 0 end
+            if nc > COLS - 1 then nc = COLS - 1 end
+            if nr < 0 then nr = 0 end
+            if nr > ROWS - 1 then nr = ROWS - 1 end
+
+            -- Если шаг не сдвинул — пропускаем (край), но шаг засчитываем
+            if nc ~= curCol or nr ~= curRow then
+                curCol, curRow = nc, nr
+                push(curCol, curRow)
+            end
+        end
+
+        -- На всякий случай: если не дошли до финиша, дотягиваем прямыми шагами
+        if curCol ~= c2 or curRow ~= r2 then
+            while curCol ~= c2 do
+                curCol = curCol + (c2 > curCol and 1 or -1)
+                push(curCol, curRow)
+            end
+            while curRow ~= r2 do
+                curRow = curRow + (r2 > curRow and 1 or -1)
+                push(curCol, curRow)
+            end
+        end
+
+        return path
+    end
+
+    -- Публичный API: река.
+    function Terrain:SeedRiver(opts)
+        opts = opts or {}
+
+        local sideA, sideB = PickTwoDifferentSides()
+        local startIdx = RandomCellOnSide(sideA)
+        local endIdx   = RandomCellOnSide(sideB)
+        if not startIdx or not endIdx or startIdx == endIdx then
+            return 0
+        end
+
+        local c1, r1 = RC(startIdx)
+        local c2, r2 = RC(endIdx)
+        local path = BuildWindingPath(c1, r1, c2, r2)
+
+        local depthMin = opts.depthMin or 1
+        local depthMax = opts.depthMax or 10
+        if depthMin < 1 then depthMin = 1 end
+        if depthMax > 10 then depthMax = 10 end
+        if depthMax < depthMin then depthMax = depthMin end
+
+        local made = 0
+        for _, idx in ipairs(path) do
+            local d = math.random(depthMin, depthMax)
+            if SetWaterCell(idx, d) then made = made + 1 end
+        end
+
+        if Terrain.Render then Terrain:Render() end
+        print(string.format("|cff00ff00[NSQC4]|r Река: %s → %s, клеток воды: %d",
+            tostring(sideA), tostring(sideB), made))
+        return made
+    end
+
+    -- ========================================================================
+    -- ОЗЕРО
+    -- 1..5 клеток воды в случайном месте. Пятно — связное (BFS от центра).
+    -- Если opts.count задан — используется он, иначе random(1,5).
+    -- ========================================================================
+
+    -- Соседи (4-связность) — локально, чтобы не зависеть от Grid:Neighbors.
+    local function Neighbors4(index)
+        local col, row = RC(index)
+        local result = {}
+        if row > 0 then result[#result + 1] = CR(col, row - 1) end
+        if row < ROWS - 1 then result[#result + 1] = CR(col, row + 1) end
+        if col > 0 then result[#result + 1] = CR(col - 1, row) end
+        if col < COLS - 1 then result[#result + 1] = CR(col + 1, row) end
+        return result
+    end
+
+    -- Связное пятно: BFS от center до count клеток.
+    local function BuildLakeCells(center, count)
+        local cells = {}
+        local visited = {}
+        local queue = { center }
+        local head = 1
+        visited[center] = true
+
+        while head <= #queue and #cells < count do
+            local cur = queue[head]
+            head = head + 1
+            cells[#cells + 1] = cur
+
+            local neigh = Neighbors4(cur)
+            -- перемешать соседей, чтобы пятно не было «однобоким»
+            for i = #neigh, 2, -1 do
+                local j = math.random(i)
+                neigh[i], neigh[j] = neigh[j], neigh[i]
+            end
+
+            for _, n in ipairs(neigh) do
+                if not visited[n] and #cells + (#queue - head + 1) < count + 1 then
+                    visited[n] = true
+                    queue[#queue + 1] = n
+                end
+            end
+        end
+
+        return cells
+    end
+
+    -- Публичный API: озеро.
+    function Terrain:SeedLake(opts)
+        opts = opts or {}
+
+        local count = tonumber(opts.count) or math.random(1, 5)
+        if count < 1 then count = 1 end
+        if count > 5 then count = 5 end
+
+        local center = math.random(1, TOTAL)
+        local cells = BuildLakeCells(center, count)
+
+        local depthMin = opts.depthMin or 1
+        local depthMax = opts.depthMax or 10
+        if depthMin < 1 then depthMin = 1 end
+        if depthMax > 10 then depthMax = 10 end
+        if depthMax < depthMin then depthMax = depthMin end
+
+        local made = 0
+        for _, idx in ipairs(cells) do
+            local d = math.random(depthMin, depthMax)
+            if SetWaterCell(idx, d) then made = made + 1 end
+        end
+
+        if Terrain.Render then Terrain:Render() end
+        print(string.format("|cff00ff00[NSQC4]|r Озеро: центр %d, клеток воды: %d",
+            center, made))
+        return made
+    end
+
+end)
+
+
+======================================================================
  FILE: df/Terrain/Storage.lua
 ======================================================================
 
@@ -9596,7 +11249,14 @@ end)
 -- NSQC4 / Quests / df / Terrain / Storage
 -- Хранилище ландшафта: адаптер к общему Grid + точка входа рендера.
 --
--- Для void hardness = nil (не добывается). Текстура void = nil (в Data).
+-- Для void  hardness = nil (не добывается), depth = nil.
+-- Для water hardness = nil (не добывается), depth ставит генератор воды
+--            (Terrain/Logic/Water.lua) через Grid:SetDepth — SetAt её не трогает.
+-- Для остальных hardness берётся из TerrainData, depth = nil.
+--
+-- ФИКС: при смене terrain снимаем выделение со старого типа —
+-- иначе в selections.terrain_types остаётся устаревшая запись, и
+-- Find:Pick может выбрать клетку, которая уже стала void.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -9659,6 +11319,17 @@ NSQC4.RegisterModule("quests", function()
     function Terrain:SetInitialized(v) EnsureTable().initialized = v and true or false end
 
     -- ========================================================================
+    -- Снять выделение со старого terrain в клетке (если было)
+    -- ========================================================================
+    local function ClearOldSelection(index, newTerrainId)
+        if not Grid or not Grid.IsTerrainSelected then return end
+        local isSel, oldType = Grid:IsTerrainSelected(index)
+        if isSel and oldType and oldType ~= newTerrainId then
+            Grid:SetTerrainSelected(index, oldType, false)
+        end
+    end
+
+    -- ========================================================================
     -- Реестр типов
     -- ========================================================================
     function Terrain:RegisterType(id, opts)
@@ -9689,6 +11360,9 @@ NSQC4.RegisterModule("quests", function()
         if index < 1 or index > TOTAL then return false end
         if type(terrainId) ~= "string" or terrainId == "" then return false end
 
+        -- ФИКС: снять выделение со старого terrain
+        ClearOldSelection(index, terrainId)
+
         local s = EnsureTable()
         if opts and not s.types[terrainId] then
             s.types[terrainId] = opts
@@ -9700,11 +11374,25 @@ NSQC4.RegisterModule("quests", function()
         local def = Data and Data:Get(terrainId)
 
         if terrainId == "void" then
+            -- void: ни hardness, ни depth, ни выделения
             Grid:ClearHardness(index)
+            if Grid.ClearDepth then Grid:ClearDepth(index) end
+            if Grid.ClearSelection then
+                Grid:ClearSelection("terrain", index)
+            end
+        elseif terrainId == "water" then
+            -- water: hardness не добывается, depth ставит генератор воды
+            -- (Terrain/Logic/Water.lua → Grid:SetDepth). SetAt её не трогает —
+            -- иначе при каждом SetAt глубина сбрасывалась бы.
+            Grid:ClearHardness(index)
+            -- depth НЕ трогаем: генератор воды уже поставил её (или поставит
+            -- после SetAt — порядок: SetWaterCell → SetTerrain + SetDepth).
         elseif def and def.hardness then
             Grid:SetHardness(index, def.hardness)
+            if Grid.ClearDepth then Grid:ClearDepth(index) end
         else
             Grid:ClearHardness(index)
+            if Grid.ClearDepth then Grid:ClearDepth(index) end
         end
 
         RenderCell(index)
@@ -9718,12 +11406,11 @@ NSQC4.RegisterModule("quests", function()
         local current = Grid:GetTerrain(index)
         if not current then return false end
 
-        if self:IsSelected(index) then
-            self:ToggleSelect(index)
-        end
+        ClearOldSelection(index, nil)
 
         Grid:SetTerrain(index, nil)
         Grid:ClearHardness(index)
+        if Grid.ClearDepth then Grid:ClearDepth(index) end
         ClearCellClicks(index)
         RenderCell(index)
         return true
@@ -9731,11 +11418,10 @@ NSQC4.RegisterModule("quests", function()
 
     function Terrain:Clear()
         for i = 1, TOTAL do
-            if self:IsSelected(i) then
-                self:ToggleSelect(i)
-            end
+            ClearOldSelection(i, nil)
             Grid:SetTerrain(i, nil)
             Grid:ClearHardness(i)
+            if Grid.ClearDepth then Grid:ClearDepth(i) end
             ClearCellClicks(i)
         end
         RenderAll()
@@ -9762,6 +11448,8 @@ NSQC4.RegisterModule("quests", function()
 
         local terrainId = Grid:GetTerrain(index)
         if not terrainId then return false end
+        if terrainId == "void" then return false end   -- пустоту не выделяем
+        -- water выделяем (по ТЗ ЛКМ по воде выделяет, работа — заглушка)
 
         local isSelected = Grid:IsTerrainSelected(index)
 
@@ -9806,6 +11494,9 @@ end)
 -- NSQC4 / Quests / df / Terrain / UI / Api
 -- Ландшафт — владелец клетки.
 --
+-- void рисуется чёрным квадратом: текстура WHITE8x8 (из Terrain/Data/Void),
+-- затемняется через ApplyTint(index, {0,0,0,1}) после рендера клетки.
+--
 -- Тултип клетки:
 --   - тип ландшафта, hardness (если есть)
 --   - лут в клетке (список)
@@ -9816,8 +11507,6 @@ end)
 --   - если в клетке есть лут и нет активного (не спящего) существа
 --     → клики по клетке не вешаются (SetCellOnMouseClick nil).
 --   - иначе — как обычно (Actions вешают клики по terrain/существу).
---
--- opts._landscape для тултипа существа: { index, terrainId }.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -9984,22 +11673,6 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Тултип существа + (в конце) клетка и лут
-    -- ========================================================================
-    local function ShowEntityTooltip(entity, tooltipFn, index, terrainId)
-        tooltipFn(entity and nil)
-        -- в конце — клетка и лут
-        local lines = CellLines(index, terrainId)
-        if lines and #lines > 0 then
-            GameTooltip:AddLine(" ")
-            for _, ln in ipairs(lines) do
-                GameTooltip:AddLine(ln.text, ln.r, ln.g, ln.b)
-            end
-        end
-        GameTooltip:Show()
-    end
-
-    -- ========================================================================
     -- Render (визуал клетки)
     -- ========================================================================
     function UIApi:Render(index, opts)
@@ -10073,6 +11746,11 @@ NSQC4.RegisterModule("quests", function()
                 anchors   = data.anchors   or logic.anchors,
                 highlight = selected and { 1.0, 0.8, 0.0, 1.0 } or nil,
             })
+
+            -- void — чёрный квадрат (WHITE8x8 из Data, затемняем в чёрный)
+            if terrainId == "void" then
+                ApplyTint(index, { 0, 0, 0, 1 })
+            end
         end
 
         local EntitiesApi = NSQC4.QuestsDfEntitiesUIApi
@@ -10099,7 +11777,6 @@ NSQC4.RegisterModule("quests", function()
         local hasActiveEntity = entity and not sleeping
 
         if hasActiveEntity then
-            -- тултип существа + клетка/лут
             entity.opts._landscape = { index = index, terrainId = terrainId }
 
             local tooltipFn = ResolveTooltip(entity)
@@ -10119,14 +11796,11 @@ NSQC4.RegisterModule("quests", function()
                     ShowCellTooltip(index, terrainId)
                 end)
             end
-            -- клики по существу — как обычно (Actions)
         else
-            -- нет активного существа → тултип только клетки/лута
             QuestsField:SetCellTooltip(index, function(btn)
                 ShowCellTooltip(index, terrainId)
             end)
 
-            -- если есть лут — клики по клетке не вешаем
             if hasLoot then
                 QuestsField:SetCellOnMouseClick(index, "LeftButton",  nil)
                 QuestsField:SetCellOnMouseClick(index, "RightButton", nil)
@@ -10490,24 +12164,23 @@ end)
 -- NSQC4 / Quests / df / Transform / Init
 -- Реестр преобразований + Apply (раздача лута, смена terrain, выталкивание).
 --
--- Apply(index, terrainId):
---   1. Определить def по terrainId.
---   2. Раздать лут:
---        - dropTarget == "neighbors" ИЛИ nextTerrain == "void"
---            → 4 соседа (Grid:Neighbors), на каждого 50/50
---              (для pool/ladder — сначала math.random(min,max) дропов,
---               потом каждый раздаётся по соседям 50/50)
---        - dropTarget == "self"
---            → math.random(min,max) дропов в свободные лут-якоря этой клетки
---   3. Сменить terrain на nextTerrain.
---   4. Если nextTerrain == "void" или def.eject — вытолкнуть существо
---      (через Void:EjectEntity, если загружен; иначе — fallback).
+-- Отладка:
+--   /ns_loot on | off | dump | map
+--
+-- ФИКС: при nextTerrain == "void" снимаем выделение с клетки,
+-- иначе Find:Pick может выбрать устаревшую клетку и существо уйдёт в void.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
 
     local Transform = {}
     NSQC4.QuestsDfTransform = Transform
+
+    Transform.DEBUG = true
+
+    local function dbg(...)
+        if Transform.DEBUG then print("|cff00ffff[LOOT]|r", ...) end
+    end
 
     local byTerrain = {}
     local order     = {}
@@ -10536,9 +12209,15 @@ NSQC4.RegisterModule("quests", function()
         return list
     end
 
-    -- ========================================================================
-    -- Раздать лут в эту клетку (dropTarget == "self")
-    -- ========================================================================
+    local function ClearSelectionFor(index)
+        local Grid = NSQC4.QuestsDfGrid
+        if not Grid or not Grid.IsTerrainSelected then return end
+        local isSel, oldType = Grid:IsTerrainSelected(index)
+        if isSel and oldType then
+            Grid:SetTerrainSelected(index, oldType, false)
+        end
+    end
+
     local function DropSelf(index, def)
         if not def.drop or not def.dropIcon then return 0 end
         local Drops = NSQC4.QuestsDfTransformDrops
@@ -10551,20 +12230,16 @@ NSQC4.RegisterModule("quests", function()
         local placed = 0
         for _ = 1, n do
             local a = Drops:Add(index, def.drop, def.dropIcon)
-            if not a then break end
+            if not a then
+                dbg(string.format("  self: cell %d — нет свободного якоря, дроп %s пропал", index, tostring(def.drop)))
+                break
+            end
             placed = placed + 1
+            dbg(string.format("  self: cell %d anchor %s ← %s", index, tostring(a), tostring(def.drop)))
         end
         return placed
     end
 
-    -- ========================================================================
-    -- Раздать лут по соседям (dropTarget == "neighbors" или nextTerrain == "void")
-    --   Для каждого дропа (их math.random(min,max)):
-    --     пройти по 4 соседям (перемешать), на каждого 50/50;
-    --     если выпало и есть свободный лут-якорь — положить.
-    --   Один дроп кладётся в одного соседа. Если ни один не подошёл —
-    --   дроп пропадает.
-    -- ========================================================================
     local function DropNeighbors(index, def)
         if not def.drop or not def.dropIcon then return 0 end
         local Drops = NSQC4.QuestsDfTransformDrops
@@ -10576,22 +12251,29 @@ NSQC4.RegisterModule("quests", function()
         if minN < 0 then minN = 0 end
         if maxN < minN then maxN = minN end
         local total = math.random(minN, maxN)
-        if total <= 0 then return 0 end
+        if total <= 0 then
+            dbg(string.format("  neighbors: cell %d — дропов 0 (min=%d,max=%d)", index, minN, maxN))
+            return 0
+        end
 
         local neighbors = Grid:Neighbors(index)
         local placed = 0
 
-        for _ = 1, total do
+        for i = 1, total do
             local shuffled = {}
-            for i = 1, #neighbors do shuffled[i] = neighbors[i] end
-            for i = #shuffled, 2, -1 do
-                local j = math.random(i)
-                shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+            for j = 1, #neighbors do shuffled[j] = neighbors[j] end
+            for j = #shuffled, 2, -1 do
+                local k = math.random(j)
+                shuffled[j], shuffled[k] = shuffled[k], shuffled[j]
             end
 
             local chosen = nil
+            local tries = {}
             for _, n in ipairs(shuffled) do
-                if math.random() < 0.5 then
+                local roll = math.random()
+                local ok = (roll < 0.5)
+                tries[#tries + 1] = string.format("%d:%s(%.2f)", n, ok and "Y" or "n", roll)
+                if ok then
                     local free = Drops:FreeAnchors(n)
                     if #free > 0 then
                         chosen = n
@@ -10602,22 +12284,30 @@ NSQC4.RegisterModule("quests", function()
 
             if chosen then
                 local a = Drops:Add(chosen, def.drop, def.dropIcon)
-                if a then placed = placed + 1 end
+                if a then
+                    placed = placed + 1
+                    dbg(string.format("  neighbors: drop %d/%d cell %d anchor %s ← %s  [%s]",
+                        i, total, chosen, tostring(a), tostring(def.drop), table.concat(tries, " ")))
+                else
+                    dbg(string.format("  neighbors: drop %d/%d cell %d — Add вернул nil  [%s]",
+                        i, total, chosen, table.concat(tries, " ")))
+                end
+            else
+                dbg(string.format("  neighbors: drop %d/%d — никто не подошёл  [%s]",
+                    i, total, table.concat(tries, " ")))
             end
         end
         return placed
     end
 
-    -- ========================================================================
-    -- Вытолкнуть существо из клетки (через Void:EjectEntity, если есть)
-    -- ========================================================================
     local function EjectEntity(index)
         local Void = NSQC4.QuestsDfTransformVoid
         if Void and Void.EjectEntity then
-            return Void:EjectEntity(index)
+            local ok = Void:EjectEntity(index)
+            dbg(string.format("  eject: cell %d → %s", index, ok and "ok" or "некуда"))
+            return ok
         end
 
-        -- fallback (если Void не загружен)
         local Grid = NSQC4.QuestsDfGrid
         if not Grid then return false end
         local entity = Grid:GetEntity(index)
@@ -10637,23 +12327,27 @@ NSQC4.RegisterModule("quests", function()
         Grid:SetEntityName(index, nil)
         Grid:SetEntityName(target, entity.opts and entity.opts.name)
         entity.index = target
+        dbg(string.format("  eject: cell %d → cell %d", index, target))
         return true
     end
 
-    -- ========================================================================
-    -- Apply
-    -- ========================================================================
     function Transform:Apply(index, terrainId)
         index = tonumber(index) or 0
         if index < 1 then return false end
 
         local def = self:Get(terrainId)
-        if not def then return false end
+        if not def then
+            dbg(string.format("Apply: cell %d terrain=%s — нет def, пропуск", index, tostring(terrainId)))
+            return false
+        end
 
         local Terrain = NSQC4.QuestsDfTerrain
         if not Terrain then return false end
 
-        -- 1. Лут
+        dbg(string.format("Apply: cell %d terrain=%s next=%s drop=%s min=%s max=%s target=%s",
+            index, tostring(terrainId), tostring(def.nextTerrain), tostring(def.drop),
+            tostring(def.dropMin), tostring(def.dropMax), tostring(def.dropTarget)))
+
         local isVoidNext = (def.nextTerrain == "void")
         local target = def.dropTarget or "self"
         if isVoidNext then target = "neighbors" end
@@ -10666,18 +12360,87 @@ NSQC4.RegisterModule("quests", function()
             end
         end
 
-        -- 2. Смена terrain
         if def.nextTerrain then
+            if isVoidNext then
+                ClearSelectionFor(index)
+            end
             Terrain:SetTerrain(index, def.nextTerrain)
+            dbg(string.format("  terrain: cell %d → %s", index, tostring(def.nextTerrain)))
         end
 
-        -- 3. Выталкивание
         if isVoidNext or def.eject then
             EjectEntity(index)
         end
 
         return true
     end
+
+    -- ========================================================================
+    -- Отладочные команды
+    -- ========================================================================
+    local function DumpLoot()
+        local Drops = NSQC4.QuestsDfTransformDrops
+        local Terrain = NSQC4.QuestsDfTerrain
+        if not Drops or not Terrain then
+            print("[LOOT] dump: Drops/Terrain не загружены")
+            return
+        end
+        print("[LOOT] dump — клетки с лутом:")
+        local found = 0
+        for i = 1, 100 do
+            if Drops:HasAny(i) then
+                found = found + 1
+                local t = Terrain:GetAt(i) or "?"
+                local items = Drops:GetAll(i)
+                local parts = {}
+                for _, d in ipairs(items) do
+                    parts[#parts + 1] = string.format("%s@%s", tostring(d.id), tostring(d.anchor))
+                end
+                print(string.format("  cell %d (%s): %s", i, tostring(t), table.concat(parts, ", ")))
+            end
+        end
+        if found == 0 then print("  (пусто)") else print(string.format("  всего: %d", found)) end
+    end
+
+    local function DumpMap()
+        local Drops = NSQC4.QuestsDfTransformDrops
+        local Terrain = NSQC4.QuestsDfTerrain
+        if not Drops or not Terrain then return end
+        local CH = { earth="E", grass="G", stone="S", tree="T", pool="P", void=".", ladder="L" }
+        print("[LOOT] map:")
+        for row = 9, 0, -1 do
+            local line = ""
+            for col = 0, 9 do
+                local idx = row * 10 + col + 1
+                local t = Terrain:GetAt(idx)
+                local ch = CH[t or ""] or "?"
+                local n = Drops:Count(idx)
+                if n > 0 then line = line .. string.format("%s%d ", ch, n)
+                else line = line .. ch .. "  " end
+            end
+            print("  " .. line)
+        end
+    end
+
+    SLASH_NSLOOT1 = "/ns_loot"
+    SlashCmdList["NSLOOT"] = function(msg)
+        local cmd = (msg or ""):lower():match("^(%S*)")
+        if cmd == "" or cmd == "on" then
+            Transform.DEBUG = true
+            print("[LOOT] DEBUG = true")
+        elseif cmd == "off" then
+            Transform.DEBUG = false
+            print("[LOOT] DEBUG = false")
+        elseif cmd == "dump" then
+            DumpLoot()
+        elseif cmd == "map" then
+            DumpMap()
+        else
+            print("[LOOT] /ns_loot on | off | dump | map")
+        end
+    end
+
+    print("|cff00ffff[TRANSFORM]|r Transform/Init загружен (DEBUG=" .. tostring(Transform.DEBUG) .. ")")
 
 end)
 

@@ -3,6 +3,9 @@
 -- Общий fallback-цикл поведения существа: idle → moving → working.
 --
 -- При idle→moving — звук по kind существа (gob.ogg / gom.ogg).
+--
+-- Path:Find вызывается с entity — чтобы вода была проходима только
+-- для существ с профессией «Пловец» (Resolve:CanSwim).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -58,8 +61,12 @@ NSQC4.RegisterModule("quests", function()
         if State:IsIdle(entity) then
             local pick = Find:Pick(entity)
             if not pick then return false end
-            local path = Path:Find(entity.index, pick.index)
+
+            -- entity передаём третьим параметром:
+            -- вода проходима только для пловца (Resolve:CanSwim).
+            local path = Path:Find(entity.index, pick.index, entity)
             if not path then return false end
+
             State:SetMoving(entity, pick.index, pick.terrainId, pick.profId, path)
             dbg("idle→moving", entity.id, "->", pick.index, pick.terrainId)
 

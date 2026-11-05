@@ -6,7 +6,9 @@
 -- затемняется через ApplyTint(index, {0,0,0,1}) после рендера клетки.
 --
 -- Тултип клетки:
---   - тип ландшафта, hardness (если есть)
+--   - тип ландшафта
+--   - для water — «Глубина: N / 10» (Grid:GetDepth)
+--   - для не-void (кроме water) — «Прочность: X / Y» (Grid:GetHardness)
 --   - лут в клетке (список)
 --   - если в клетке не спящее существо — его тултип + в конце клетка+лут
 --   - если существо спит — только клетка+лут
@@ -117,7 +119,7 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Строка клетки: terrain, hardness, лут
+    -- Строка клетки: terrain, глубина/прочность, лут
     -- ========================================================================
     local function CellLines(index, terrainId)
         local Grid = NSQC4.QuestsDfGrid
@@ -137,8 +139,19 @@ NSQC4.RegisterModule("quests", function()
             r = tcolor[1] or 0.85, g = tcolor[2] or 0.85, b = tcolor[3] or 0.85,
         }
 
-        -- hardness
-        if terrainId and terrainId ~= "void" then
+        -- глубина воды (water)
+        if terrainId == "water" then
+            local d = Grid.GetDepth and Grid:GetDepth(index) or nil
+            if d then
+                lines[#lines + 1] = {
+                    text = string.format("Глубина: %d / %d", d, Grid.DEPTH_MAX or 10),
+                    r = 0.55, g = 0.75, b = 1.00,
+                }
+            end
+        end
+
+        -- прочность (не void, не water — у воды своя строка «Глубина»)
+        if terrainId and terrainId ~= "void" and terrainId ~= "water" then
             local curH = Grid:GetHardness(index)
             local maxH = nil
             if Data then

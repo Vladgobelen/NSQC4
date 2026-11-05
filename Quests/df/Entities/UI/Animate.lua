@@ -5,9 +5,9 @@
 -- temp — на кнопке toIndex, слой ARTWORK/7 (слой существа).
 -- Anchor в fromIndex прячется на время анимации.
 --
--- ФИКС: при завершении (Tick) и в Stop перерисовываются ОБЕ клетки —
--- fromIndex и toIndex. Иначе клики/тултип остаются на fromIndex, где
--- существа уже нет (entity.index уже в toIndex с начала шага).
+-- Stop: обрывает анимацию и перерисовывает ОБЕ клетки.
+-- StopAll: обрывает ВСЕ активные анимации (нужно при переключении этажа,
+-- чтобы temp-текстуры старого этажа не висели на новом).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -87,7 +87,6 @@ NSQC4.RegisterModule("quests", function()
         end
     end
 
-    -- Перерисовать обе клетки — старую и новую
     local function RenderBoth(fromIndex, toIndex)
         if fromIndex and toIndex and fromIndex == toIndex then
             RenderCell(toIndex)
@@ -203,10 +202,6 @@ NSQC4.RegisterModule("quests", function()
         return true
     end
 
-    -- ========================================================================
-    -- Stop: обрываем анимацию. Перерисовываем ОБЕ клетки —
-    -- fromIndex (снять клик/тултип с пустой) и toIndex (поставить на новую).
-    -- ========================================================================
     function Animate:Stop(id)
         local a = active[id]
         if not a then return false end
@@ -222,13 +217,27 @@ NSQC4.RegisterModule("quests", function()
         return true
     end
 
+    -- ========================================================================
+    -- StopAll: оборвать ВСЕ активные анимации.
+    -- Нужно при переключении этажа: temp-текстуры старого этажа
+    -- не должны висеть на новом.
+    -- ========================================================================
+    function Animate:StopAll()
+        local ids = {}
+        for id in pairs(active) do ids[#ids + 1] = id end
+        for _, id in ipairs(ids) do
+            self:Stop(id)
+        end
+        if Animate.DEBUG then
+            print("|cff00ffff[ANIM]|r StopAll:", #ids, "анимаций остановлено")
+        end
+        return #ids
+    end
+
     function Animate:IsAnimating(id)
         return id and active[id] ~= nil
     end
 
-    -- ========================================================================
-    -- Tick: при завершении — тоже обе клетки.
-    -- ========================================================================
     function Animate:Tick()
         local now = GetTime()
         for id, a in pairs(active) do

@@ -98,6 +98,7 @@ Quests\Field\UI\API\Tooltip.lua
 # --- Единый реестр клеток ---
 Quests\df\Grid.lua
 Quests\df\Grid\Hardness.lua
+Quests\df\Grid\Depth.lua
 Quests\df\Grid\Neighbors.lua
 
 # --- Реестр профессий (плоский список имён для known_skills) ---
@@ -110,6 +111,7 @@ Quests\df\Professions\Digger.lua
 Quests\df\Professions\Lumberjack.lua
 Quests\df\Professions\Stonecutter.lua
 Quests\df\Professions\Herbalist.lua
+Quests\df\Professions\Swimmer.lua
 
 # --- Ландшафт: данные типов ---
 Quests\df\Terrain\Data\Init.lua
@@ -120,6 +122,7 @@ Quests\df\Terrain\Data\Tree.lua
 Quests\df\Terrain\Data\Pool.lua
 Quests\df\Terrain\Data\Void.lua
 Quests\df\Terrain\Data\Ladder.lua
+Quests\df\Terrain\Data\Water.lua
 
 # --- Ландшафт: ядро и логика ---
 Quests\df\Terrain\Init.lua
@@ -133,6 +136,7 @@ Quests\df\Terrain\Logic\Tree.lua
 Quests\df\Terrain\Logic\Pool.lua
 Quests\df\Terrain\Logic\Void.lua
 Quests\df\Terrain\Logic\Ladder.lua
+Quests\df\Terrain\Logic\Water.lua
 
 # --- Transform: реестр преобразований, лут, void ---
 Quests\df\Transform\Init.lua
@@ -154,7 +158,7 @@ Quests\df\Entities\Tooltip.lua
 Quests\df\Entities\UI\Api.lua
 Quests\df\Entities\UI\Animate.lua
 
-# --- TerrainActions (7 типов × 4 файла) ---
+# --- TerrainActions (8 типов × 4 файла) ---
 Quests\df\Actions\Terrain\Init.lua
 
 Quests\df\Actions\Terrain\Earth\Check.lua
@@ -191,6 +195,12 @@ Quests\df\Actions\Terrain\Ladder\Check.lua
 Quests\df\Actions\Terrain\Ladder\LeftClickSelf.lua
 Quests\df\Actions\Terrain\Ladder\LeftClickEntities.lua
 Quests\df\Actions\Terrain\Ladder\RightClickEntities.lua
+
+# --- Вода: действия (ЛКМ/ПКМ, существа) ---
+Quests\df\Actions\Terrain\Water\Check.lua
+Quests\df\Actions\Terrain\Water\LeftClickSelf.lua
+Quests\df\Actions\Terrain\Water\LeftClickEntities.lua
+Quests\df\Actions\Terrain\Water\RightClickEntities.lua
 
 # --- AI: реестр поведений (до Tick.lua!) ---
 Quests\df\AI\Behavior\Init.lua

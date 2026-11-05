@@ -1,6 +1,7 @@
 -- ============================================================================
 -- NSQC4 / Quests / df / Professions / Resolve
--- Перевод данных существа в числа, которые ждёт формула профессии.
+-- Перевод данных существа в числа, которые ждёт формула профессии,
+-- + проверка «умеет ли существо плавать» (для воды).
 --
 -- Формула любой профессии принимает:
 --   clicks(hardness, prof_pct, stat_pct)
@@ -20,8 +21,13 @@
 --   stat_pct:
 --     Resolve:StatPct(entity, stat), где stat — profDef.stat
 --
+-- CanSwim(entity):
+--   true, если у существа есть ЛЮБАЯ профессия с terrain == "water"
+--   (сейчас — "Пловец"). Вода пересекается только пловцами.
+--   Используется в AI/Path.lua (Path:Find) и AI/Move.lua (CanStepInto).
+--
 -- Ничего не знает про Grid, движение, работу, клики.
--- Только entity + terrainId (+ stat) → числа.
+-- Только entity + terrainId (+ stat) → числа / булево.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -128,6 +134,34 @@ NSQC4.RegisterModule("quests", function()
     -- ========================================================================
     function Resolve:Both(entity, terrainId, stat)
         return self:ProfPct(entity, terrainId), self:StatPct(entity, stat)
+    end
+
+    -- ========================================================================
+    -- CanSwim: умеет ли существо плавать.
+    --   true, если в known_skills есть любая профессия с terrain == "water"
+    --   (сейчас — "Пловец", зарегистрирован в df/Professions/Swimmer.lua).
+    --
+    --   Используется:
+    --     AI/Path.lua  → Path:Find(..., entity) — не пускать в воду
+    --     AI/Move.lua  → CanStepInto(nextIndex, entity) — не шагать в воду
+    --
+    --   Если profession "Пловец" в known_skills нет — false.
+    --   Если ProfessionsApi не загружен — false (безопасный дефолт).
+    -- ========================================================================
+    function Resolve:CanSwim(entity)
+        if not entity or not entity.opts then return false end
+
+        local opts = entity.opts
+        local ProfApi = NSQC4.QuestsDfProfessionsApi
+        if not ProfApi or type(opts.known_skills) ~= "table" then return false end
+
+        for name in pairs(opts.known_skills) do
+            local def = ProfApi:GetByName(name)
+            if def and def.terrain == "water" then
+                return true
+            end
+        end
+        return false
     end
 
 end)

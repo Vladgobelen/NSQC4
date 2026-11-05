@@ -2,7 +2,10 @@
 -- NSQC4 / Quests / df / Terrain / Storage
 -- Хранилище ландшафта: адаптер к общему Grid + точка входа рендера.
 --
--- Для void hardness = nil (не добывается). Текстура void = nil (в Data).
+-- Для void  hardness = nil (не добывается), depth = nil.
+-- Для water hardness = nil (не добывается), depth ставит генератор воды
+--            (Terrain/Logic/Water.lua) через Grid:SetDepth — SetAt её не трогает.
+-- Для остальных hardness берётся из TerrainData, depth = nil.
 --
 -- ФИКС: при смене terrain снимаем выделение со старого типа —
 -- иначе в selections.terrain_types остаётся устаревшая запись, и
@@ -124,15 +127,25 @@ NSQC4.RegisterModule("quests", function()
         local def = Data and Data:Get(terrainId)
 
         if terrainId == "void" then
+            -- void: ни hardness, ни depth, ни выделения
             Grid:ClearHardness(index)
-            -- ФИКС: void точно не выделен
+            if Grid.ClearDepth then Grid:ClearDepth(index) end
             if Grid.ClearSelection then
                 Grid:ClearSelection("terrain", index)
             end
+        elseif terrainId == "water" then
+            -- water: hardness не добывается, depth ставит генератор воды
+            -- (Terrain/Logic/Water.lua → Grid:SetDepth). SetAt её не трогает —
+            -- иначе при каждом SetAt глубина сбрасывалась бы.
+            Grid:ClearHardness(index)
+            -- depth НЕ трогаем: генератор воды уже поставил её (или поставит
+            -- после SetAt — порядок: SetWaterCell → SetTerrain + SetDepth).
         elseif def and def.hardness then
             Grid:SetHardness(index, def.hardness)
+            if Grid.ClearDepth then Grid:ClearDepth(index) end
         else
             Grid:ClearHardness(index)
+            if Grid.ClearDepth then Grid:ClearDepth(index) end
         end
 
         RenderCell(index)
@@ -150,6 +163,7 @@ NSQC4.RegisterModule("quests", function()
 
         Grid:SetTerrain(index, nil)
         Grid:ClearHardness(index)
+        if Grid.ClearDepth then Grid:ClearDepth(index) end
         ClearCellClicks(index)
         RenderCell(index)
         return true
@@ -160,6 +174,7 @@ NSQC4.RegisterModule("quests", function()
             ClearOldSelection(i, nil)
             Grid:SetTerrain(i, nil)
             Grid:ClearHardness(i)
+            if Grid.ClearDepth then Grid:ClearDepth(i) end
             ClearCellClicks(i)
         end
         RenderAll()
@@ -187,6 +202,7 @@ NSQC4.RegisterModule("quests", function()
         local terrainId = Grid:GetTerrain(index)
         if not terrainId then return false end
         if terrainId == "void" then return false end   -- пустоту не выделяем
+        -- water выделяем (по ТЗ ЛКМ по воде выделяет, работа — заглушка)
 
         local isSelected = Grid:IsTerrainSelected(index)
 

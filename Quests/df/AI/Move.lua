@@ -2,9 +2,17 @@
 -- NSQC4 / Quests / df / AI / Move
 -- Передвижение существа по маршруту. Скорость — по абсолютной выносливости.
 --
+-- CanStepInto(nextIndex, entity):
+--   - void        → нельзя
+--   - water       → только если entity умеет плавать (Resolve:CanSwim)
+--   - занято другим существом (не целью) → нельзя
+--
 -- ФИКС: даже если клетка-цель — void, шагать в неё нельзя.
 -- Раньше проверка IsPassable пропускалась для isTarget, и существо
 -- уходило в void, где Grid:SetEntity молча не ставил его — существо «пропадало».
+--
+-- Вода: проверка через Resolve:CanSwim(entity). Если Resolve не загружен
+-- (например, при раннем старте) — вода считается непроходимой (безопасно).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -40,12 +48,28 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Проверка: можно ли шагнуть в nextIndex (в т.ч. цель)
+    -- Проверка: можно ли шагнуть в nextIndex (в т.ч. цель).
+    --   entity — существо, которое шагает. Нужно, чтобы:
+    --     - вода была проходима только для пловца
+    --     - «занято другим» не считалось препятствием для цели
     -- ========================================================================
-    local function CanStepInto(nextIndex)
+    local function CanStepInto(nextIndex, entity)
         local c = Grid:GetCell(nextIndex)
         if not c then return false end
+
+        -- void — никогда
         if c.terrain == "void" then return false end
+
+        -- water — только для пловца
+        if c.terrain == "water" then
+            local Resolve = NSQC4.QuestsDfProfessionsResolve
+            local canSwim = false
+            if entity and Resolve and Resolve.CanSwim then
+                canSwim = Resolve:CanSwim(entity) and true or false
+            end
+            if not canSwim then return false end
+        end
+
         return true
     end
 
@@ -74,9 +98,11 @@ NSQC4.RegisterModule("quests", function()
 
         local isTarget = (idx + 1 == #path)
 
-        -- ФИКС: цель тоже должна быть не-void
-        if not CanStepInto(nextIndex) then
-            dbg(string.format("blocked %s next=%d (void или нет клетки)", tostring(entity.id), nextIndex))
+        -- ФИКС: цель тоже должна быть не-void и (для не-пловца) не-water.
+        -- entity передаём в CanStepInto — там проверка воды по Resolve:CanSwim.
+        if not CanStepInto(nextIndex, entity) then
+            dbg(string.format("blocked %s next=%d (void/water без пловца/нет клетки)",
+                tostring(entity.id), nextIndex))
             ai.path = nil
             ai.pathIdx = nil
             return nil

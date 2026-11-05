@@ -8,6 +8,14 @@
 --   - проходимость: Grid:IsPassable(index) (нет entity на клетке)
 --   - старт считается проходимым, даже если на нём стоит само существо
 --   - цель считается проходимой, даже если на ней стоит само существо
+--   - ВОДА: проходима только если entity умеет плавать
+--     (Resolve:CanSwim(entity) == true). Иначе passable = false.
+--     Проверка делается по клетке-соседу (и по цели тоже).
+--
+-- entity — необязательный третий параметр. Если передан:
+--   - Resolve:CanSwim(entity) решает, пускать ли в воду
+--   - если не передан — вода считается непроходимой (безопасный дефолт:
+--     старый вызов Path:Find(a, b) из внешнего кода не «протечёт» в воду)
 --
 -- Возвращает:
 --   { {index, index, …, target}, ... } — массив индексов от старта до цели,
@@ -51,11 +59,35 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- BFS: кратчайший путь от startIndex до targetIndex.
-    --   selfIndex — индекс клетки, на которой стоит существо
-    --               (её считаем проходимой даже если entity есть).
+    -- Можно ли войти в клетку neighbor для данного entity.
+    --   - цель всегда проходима (даже если занята существом — оно уйдёт)
+    --   - вода: только если entity умеет плавать
+    --   - остальное: Grid:IsPassable
     -- ========================================================================
-    function Path:Find(startIndex, targetIndex)
+    local function CanEnter(neighbor, targetIndex, canSwim)
+        if neighbor == targetIndex then
+            -- цель: проверим только воду (void не может быть целью из Find,
+            -- но подстрахуемся)
+            local c = Grid:GetCell(neighbor)
+            if not c then return false end
+            if c.terrain == "void" then return false end
+            if c.terrain == "water" and not canSwim then return false end
+            return true
+        end
+
+        local c = Grid:GetCell(neighbor)
+        if not c then return false end
+        if c.terrain == "void" then return false end
+        if c.terrain == "water" and not canSwim then return false end
+
+        return Grid:IsPassable(neighbor)
+    end
+
+    -- ========================================================================
+    -- BFS: кратчайший путь от startIndex до targetIndex.
+    --   entity — опционально; если передан, учитывается CanSwim(entity).
+    -- ========================================================================
+    function Path:Find(startIndex, targetIndex, entity)
         startIndex  = tonumber(startIndex)  or 0
         targetIndex = tonumber(targetIndex) or 0
 
@@ -64,6 +96,13 @@ NSQC4.RegisterModule("quests", function()
 
         if startIndex == targetIndex then
             return { startIndex }
+        end
+
+        -- Умеет ли это существо плавать (если entity не передан — false)
+        local canSwim = false
+        local Resolve = NSQC4.QuestsDfProfessionsResolve
+        if entity and Resolve and Resolve.CanSwim then
+            canSwim = Resolve:CanSwim(entity) and true or false
         end
 
         local prev    = {}
@@ -80,12 +119,7 @@ NSQC4.RegisterModule("quests", function()
 
             for _, neighbor in ipairs(Grid:Neighbors(cur)) do
                 if not visited[neighbor] then
-                    -- Проходимость: цель всегда проходима,
-                    -- стартовая клетка уже в visited.
-                    local passable = Grid:IsPassable(neighbor)
-                    if neighbor == targetIndex then passable = true end
-
-                    if passable then
+                    if CanEnter(neighbor, targetIndex, canSwim) then
                         visited[neighbor] = true
                         prev[neighbor]    = cur
                         queue[#queue + 1] = neighbor
