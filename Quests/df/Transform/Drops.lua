@@ -1,18 +1,21 @@
 -- ============================================================================
 -- NSQC4 / Quests / df / Transform / Drops
--- Хранение дропов в клетке и рендер в правый верхний угол.
+-- Лут в клетке: хранение в лут-якорях (все 9, кроме TOPLEFT) + рендер.
 --
--- Дропы живут в cell.drops = { { id, icon, anchor, count }, ... }.
--- Рендер: иконка (anchor, по умолчанию TOPRIGHT), размер 1/3 клетки.
--- Несколько дропов — стопкой со смещением вниз.
+--   cell.loot = { [anchor] = { id, icon }, ... }   -- занятые лут-якоря
+--
+-- TOPLEFT — под существо, лут туда НЕ кладётся.
 --
 -- API:
---   Drops:Add(index, { id, icon, anchor })   — добавить дроп
---   Drops:Get(index)                         — массив дропов | nil
---   Drops:Count(index, id)                   — сколько дропов с данным id
---   Drops:Clear(index)                       — убрать все дропы клетки
---   Drops:Render(index)                      — перерисовать дропы клетки
---   Drops:RenderAll()                        — перерисовать все клетки
+--   Drops:FreeAnchors(index)       → массив свободных лут-якорей
+--   Drops:HasAny(index)            → true, если занят хоть один лут-якорь
+--   Drops:Count(index)             → сколько лут-якорей занято
+--   Drops:Add(index, id, icon)     → положить в свободный лут-якорь (или nil)
+--   Drops:Get(index, anchor)       → { id, icon } | nil
+--   Drops:GetAll(index)            → массив { anchor, id, icon }
+--   Drops:Clear(index)             → убрать весь лут клетки
+--   Drops:Render(index)            → перерисовать лут клетки
+--   Drops:RenderAll()              → перерисовать все клетки
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -35,100 +38,128 @@ NSQC4.RegisterModule("quests", function()
     local CONST = NSQC4.QuestsFieldConst
     local TOTAL = CONST and (CONST.COLS * CONST.ROWS) or 100
 
-    local DROP_SIZE_PCT = 1 / 3   -- размер дропа относительно клетки
-    local DROP_GAP      = 2       -- смещение между дропами (пиксели)
+    -- Лут-якоря: все 9, кроме TOPLEFT (он под существо).
+    local LOOT_ANCHORS = {
+        "TOPCENTER", "TOPRIGHT",
+        "MIDLEFT",   "CENTER",    "MIDRIGHT",
+        "BOTLEFT",   "BOTCENTER", "BOTRIGHT",
+    }
 
-    -- ========================================================================
-    -- Внутренний доступ к cell.drops
-    -- ========================================================================
-    local function GetCell(index)
-        return Grid:GetCell(index)
-    end
+    Drops.LOOT_ANCHORS = LOOT_ANCHORS
 
-    local function EnsureDrops(index)
-        local c = GetCell(index)
+    local function EnsureLoot(index)
+        local c = Grid:GetCell(index)
         if not c then return nil end
-        if not c.drops then c.drops = {} end
-        return c.drops
+        if not c.loot then c.loot = {} end
+        return c.loot
     end
 
     -- ========================================================================
-    -- API: добавить дроп
-    --   index — 1..100
-    --   def   — { id, icon, anchor }
-    -- Возвращает запись дропа или nil.
+    -- Свободные лут-якоря клетки
     -- ========================================================================
-    function Drops:Add(index, def)
-        index = tonumber(index) or 0
-        if index < 1 or index > TOTAL then return nil end
-        if type(def) ~= "table" or not def.id then return nil end
-
-        local drops = EnsureDrops(index)
-        if not drops then return nil end
-
-        local entry = {
-            id     = def.id,
-            icon   = def.icon,
-            anchor = def.anchor or "TOPRIGHT",
-            count  = 1,
-        }
-        drops[#drops + 1] = entry
-
-        self:Render(index)
-        return entry
-    end
-
-    -- ========================================================================
-    -- API: получить дропы клетки
-    -- ========================================================================
-    function Drops:Get(index)
-        local c = GetCell(index)
-        return c and c.drops or nil
-    end
-
-    -- ========================================================================
-    -- API: сколько дропов данного id в клетке
-    -- ========================================================================
-    function Drops:Count(index, id)
-        local drops = self:Get(index)
-        if not drops then return 0 end
-        local n = 0
-        for _, d in ipairs(drops) do
-            if d.id == id then n = n + 1 end
+    function Drops:FreeAnchors(index)
+        local c = Grid:GetCell(index)
+        if not c then return {} end
+        if c.terrain == "void" then return {} end   -- в пустоте лут-якоря «заняты»
+        local loot = c.loot or {}
+        local free = {}
+        for _, a in ipairs(LOOT_ANCHORS) do
+            if not loot[a] then free[#free + 1] = a end
         end
+        return free
+    end
+
+    -- ========================================================================
+    -- Есть ли лут в клетке
+    -- ========================================================================
+    function Drops:HasAny(index)
+        local c = Grid:GetCell(index)
+        if not c or not c.loot then return false end
+        for _ in pairs(c.loot) do return true end
+        return false
+    end
+
+    function Drops:Count(index)
+        local c = Grid:GetCell(index)
+        if not c or not c.loot then return 0 end
+        local n = 0
+        for _ in pairs(c.loot) do n = n + 1 end
         return n
     end
 
     -- ========================================================================
-    -- API: очистить дропы клетки
+    -- Положить дроп в свободный лут-якорь.
+    -- Возвращает anchor или nil (если свободных нет / void).
+    -- ========================================================================
+    function Drops:Add(index, id, icon)
+        index = tonumber(index) or 0
+        if index < 1 or index > TOTAL then return nil end
+        if not id then return nil end
+
+        local free = self:FreeAnchors(index)
+        if #free == 0 then return nil end
+
+        local anchor = free[1]
+        local loot = EnsureLoot(index)
+        if not loot then return nil end
+
+        loot[anchor] = { id = id, icon = icon }
+        self:Render(index)
+        return anchor
+    end
+
+    -- ========================================================================
+    -- Получить дроп по anchor
+    -- ========================================================================
+    function Drops:Get(index, anchor)
+        local c = Grid:GetCell(index)
+        if not c or not c.loot then return nil end
+        return c.loot[anchor]
+    end
+
+    -- ========================================================================
+    -- Все дропы клетки (массив { anchor, id, icon })
+    -- ========================================================================
+    function Drops:GetAll(index)
+        local c = Grid:GetCell(index)
+        if not c or not c.loot then return {} end
+        local list = {}
+        for _, a in ipairs(LOOT_ANCHORS) do
+            local d = c.loot[a]
+            if d then
+                list[#list + 1] = { anchor = a, id = d.id, icon = d.icon }
+            end
+        end
+        return list
+    end
+
+    -- ========================================================================
+    -- Очистить лут клетки
     -- ========================================================================
     function Drops:Clear(index)
-        local c = GetCell(index)
+        local c = Grid:GetCell(index)
         if not c then return false end
-        c.drops = nil
+        c.loot = nil
         self:Render(index)
         return true
     end
 
     -- ========================================================================
-    -- Внутренний: убрать визуальные текстуры дропов с клетки
+    -- Рендер лута клетки: каждая иконка — в свой лут-якорь
     -- ========================================================================
-    local function ClearDropTextures(index)
+    local function ClearLootTextures(index)
         local btn = QuestsField.cells and QuestsField.cells[index]
         if not btn then return end
-        if btn._dropTextures then
-            for _, tex in ipairs(btn._dropTextures) do
+        if btn._lootTextures then
+            for _, tex in pairs(btn._lootTextures) do
                 tex:Hide()
                 tex:ClearAllPoints()
                 tex:SetTexture(nil)
             end
-            btn._dropTextures = nil
+            btn._lootTextures = nil
         end
     end
 
-    -- ========================================================================
-    -- Рендер дропов клетки (правый верхний угол, стопка вниз)
-    -- ========================================================================
     function Drops:Render(index)
         index = tonumber(index) or 0
         if index < 1 or index > TOTAL then return false end
@@ -136,41 +167,45 @@ NSQC4.RegisterModule("quests", function()
         local btn = QuestsField.cells and QuestsField.cells[index]
         if not btn then return false end
 
-        ClearDropTextures(index)
+        ClearLootTextures(index)
 
-        local drops = self:Get(index)
-        if not drops or #drops == 0 then return true end
+        local c = Grid:GetCell(index)
+        if not c or not c.loot then return true end
 
-        btn._dropTextures = {}
+        btn._lootTextures = {}
 
-        local cellW = btn:GetWidth()  or 0
-        local cellH = btn:GetHeight() or 0
-        local size  = math.floor(math.min(cellW, cellH) * DROP_SIZE_PCT)
-        if size < 1 then size = 1 end
-
-        local yOff = 0
-        for i, d in ipairs(drops) do
+        for anchor, d in pairs(c.loot) do
             local tex = btn:CreateTexture(nil, "ARTWORK", nil, 7)
             tex:SetDrawLayer("ARTWORK", 7)
             tex:SetTexture(d.icon)
             tex:SetTexCoord(0, 1, 0, 1)
+            -- размер и позиция — как у существа (1/3 клетки), через якорь
+            local size = btn:GetWidth() / 3
             tex:SetSize(size, size)
-
-            -- правый верхний угол, стопкой вниз
-            tex:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -2, -2 - yOff)
-
+            if anchor == "TOPCENTER" then
+                tex:SetPoint("TOP", btn, "TOP", 0, 0)
+            elseif anchor == "TOPRIGHT" then
+                tex:SetPoint("TOPRIGHT", btn, "TOPRIGHT", 0, 0)
+            elseif anchor == "MIDLEFT" then
+                tex:SetPoint("LEFT", btn, "LEFT", 0, 0)
+            elseif anchor == "CENTER" then
+                tex:SetPoint("CENTER", btn, "CENTER", 0, 0)
+            elseif anchor == "MIDRIGHT" then
+                tex:SetPoint("RIGHT", btn, "RIGHT", 0, 0)
+            elseif anchor == "BOTLEFT" then
+                tex:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 0, 0)
+            elseif anchor == "BOTCENTER" then
+                tex:SetPoint("BOTTOM", btn, "BOTTOM", 0, 0)
+            elseif anchor == "BOTRIGHT" then
+                tex:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 0, 0)
+            end
             tex:Show()
-            btn._dropTextures[#btn._dropTextures + 1] = tex
-
-            yOff = yOff + size + DROP_GAP
+            btn._lootTextures[anchor] = tex
         end
 
         return true
     end
 
-    -- ========================================================================
-    -- Рендер всех клеток
-    -- ========================================================================
     function Drops:RenderAll()
         for i = 1, TOTAL do
             self:Render(i)

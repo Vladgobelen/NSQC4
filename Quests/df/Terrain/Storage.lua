@@ -2,9 +2,7 @@
 -- NSQC4 / Quests / df / Terrain / Storage
 -- Хранилище ландшафта: адаптер к общему Grid + точка входа рендера.
 --
--- Terrain:Clear() теперь ещё и чистит Grid:ClearAllSelections("terrain"),
--- чтобы после generate/restart не оставались старые выделения
--- (grass[56], stone[57] и т.п.). Иначе существа «залипают» на них.
+-- Для void hardness = nil (не добывается). Текстура void = nil (в Data).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -106,7 +104,10 @@ NSQC4.RegisterModule("quests", function()
 
         local Data = TerrainData()
         local def = Data and Data:Get(terrainId)
-        if def and def.hardness then
+
+        if terrainId == "void" then
+            Grid:ClearHardness(index)
+        elseif def and def.hardness then
             Grid:SetHardness(index, def.hardness)
         else
             Grid:ClearHardness(index)
@@ -145,8 +146,6 @@ NSQC4.RegisterModule("quests", function()
         end
         RenderAll()
 
-        -- Чистим старые выделения, чтобы после generate/restart
-        -- существа не «залипали» на чужих terrain в клетке.
         if Grid.ClearAllSelections then
             Grid:ClearAllSelections("terrain")
         end

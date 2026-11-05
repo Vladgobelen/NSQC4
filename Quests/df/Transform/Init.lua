@@ -12,7 +12,8 @@
 --        - dropTarget == "self"
 --            → math.random(min,max) дропов в свободные лут-якоря этой клетки
 --   3. Сменить terrain на nextTerrain.
---   4. Если nextTerrain == "void" или def.eject — вытолкнуть существо.
+--   4. Если nextTerrain == "void" или def.eject — вытолкнуть существо
+--      (через Void:EjectEntity, если загружен; иначе — fallback).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -71,9 +72,10 @@ NSQC4.RegisterModule("quests", function()
     -- ========================================================================
     -- Раздать лут по соседям (dropTarget == "neighbors" или nextTerrain == "void")
     --   Для каждого дропа (их math.random(min,max)):
-    --     пройти по 4 соседям, на каждого 50/50; если выпало и есть свободный
-    --     лут-якорь — положить. Один дроп кладётся в одного соседа.
-    --   Если ни один сосед не подошёл — дроп пропадает.
+    --     пройти по 4 соседям (перемешать), на каждого 50/50;
+    --     если выпало и есть свободный лут-якорь — положить.
+    --   Один дроп кладётся в одного соседа. Если ни один не подошёл —
+    --   дроп пропадает.
     -- ========================================================================
     local function DropNeighbors(index, def)
         if not def.drop or not def.dropIcon then return 0 end
@@ -92,18 +94,16 @@ NSQC4.RegisterModule("quests", function()
         local placed = 0
 
         for _ = 1, total do
-            -- на каждого соседа 50/50; выбираем первого, кто «выпал» и имеет место
-            local chosen = nil
             local shuffled = {}
             for i = 1, #neighbors do shuffled[i] = neighbors[i] end
-            -- перемешать
             for i = #shuffled, 2, -1 do
                 local j = math.random(i)
                 shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
             end
+
+            local chosen = nil
             for _, n in ipairs(shuffled) do
                 if math.random() < 0.5 then
-                    -- есть ли свободный лут-якорь
                     local free = Drops:FreeAnchors(n)
                     if #free > 0 then
                         chosen = n
@@ -111,6 +111,7 @@ NSQC4.RegisterModule("quests", function()
                     end
                 end
             end
+
             if chosen then
                 local a = Drops:Add(chosen, def.drop, def.dropIcon)
                 if a then placed = placed + 1 end
@@ -120,9 +121,15 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Вытолкнуть существо из клетки в случайную соседнюю проходимую
+    -- Вытолкнуть существо из клетки (через Void:EjectEntity, если есть)
     -- ========================================================================
     local function EjectEntity(index)
+        local Void = NSQC4.QuestsDfTransformVoid
+        if Void and Void.EjectEntity then
+            return Void:EjectEntity(index)
+        end
+
+        -- fallback (если Void не загружен)
         local Grid = NSQC4.QuestsDfGrid
         if not Grid then return false end
         local entity = Grid:GetEntity(index)
@@ -142,12 +149,6 @@ NSQC4.RegisterModule("quests", function()
         Grid:SetEntityName(index, nil)
         Grid:SetEntityName(target, entity.opts and entity.opts.name)
         entity.index = target
-
-        local TerrainApi = NSQC4.QuestsDfTerrainUIApi
-        if TerrainApi and TerrainApi.RenderCellFromStorage then
-            TerrainApi:RenderCellFromStorage(index)
-            TerrainApi:RenderCellFromStorage(target)
-        end
         return true
     end
 

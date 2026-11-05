@@ -140,6 +140,13 @@ Quests\df\Transform\Data.lua
 Quests\df\Transform\Drops.lua
 Quests\df\Transform\Void.lua
 
+# --- Floors: этажи (Init → Storage → Generate → Switch → UI) ---
+Quests\df\Floors\Init.lua
+Quests\df\Floors\Storage.lua
+Quests\df\Floors\Generate.lua
+Quests\df\Floors\Switch.lua
+Quests\df\Floors\UI.lua
+
 # --- живые существа (база) ---
 Quests\df\Entities\Init.lua
 Quests\df\Entities\Storage.lua

@@ -1,16 +1,16 @@
 -- ============================================================================
 -- NSQC4 / Quests / df / AI / Complete
 -- Завершение работы на клетке.
---   - Клетка восстанавливается тем же типом с базовым (максимальным) HP.
---   - Профессия определяется ПО TERRAIN (earth→digger, tree→lumberjack,
+--   - Вызывает Transform:Apply(target, terrainId):
+--       * раздаёт лут (в эту клетку или соседние — по правилам Transform/Data)
+--       * меняет terrain (tree/stone/grass → earth; earth/pool/ladder → void)
+--       * выталкивает существо, если клетка стала void
+--   - Профессия: по terrain (earth→digger, tree→lumberjack,
 --     stone→stonecutter, grass→herbalist).
---   - Шанс повысить/выучить профессию зависит от родства с богом профессии:
---       одна линия (kinship == бог)        → int * 3
---       совместное (бог есть + ещё кто-то) → int * 2
---       бога нет                            → int
---   - Потолок шанса — 100%.
---
--- Шанс: math.random(1, 100) <= chancePct
+--       * одна линия (kinship == бог)        → int * 3
+--       * совместное (бог есть + ещё кто-то) → int * 2
+--       * бога нет                            → int
+--     Потолок шанса — 100%.
 --
 -- Отладка:
 --   /ns_complete on | off | dump | reset
@@ -21,12 +21,12 @@ NSQC4.RegisterModule("quests", function()
     local Complete = {}
     NSQC4.QuestsDfAIComplete = Complete
 
-    local Grid    = NSQC4.QuestsDfGrid
-    local Terrain = NSQC4.QuestsDfTerrain
-    local State   = NSQC4.QuestsDfAIState
-    local ProfApi = NSQC4.QuestsDfProfessionsApi
+    local Grid      = NSQC4.QuestsDfGrid
+    local Transform = NSQC4.QuestsDfTransform
+    local State     = NSQC4.QuestsDfAIState
+    local ProfApi   = NSQC4.QuestsDfProfessionsApi
 
-    local PROF_MAX  = 100
+    local PROF_MAX   = 100
     local CHANCE_MAX = 100
 
     local TERRAIN_TO_PROF = {
@@ -38,10 +38,10 @@ NSQC4.RegisterModule("quests", function()
 
     -- Бог профессии (бит): 1 — земля, 2 — поверхность, 4 — ремесло
     local PROF_GOD = {
-        digger      = 1,   -- земля
-        lumberjack  = 2,   -- поверхность
-        herbalist   = 2,   -- поверхность
-        stonecutter = 1,   -- камень (земля). Если решишь «ремесло» — поставь 4
+        digger      = 1,
+        lumberjack  = 2,
+        herbalist   = 2,
+        stonecutter = 1,
     }
 
     -- ========================================================================
@@ -86,11 +86,7 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Шанс с учётом родства.
-    --   int        — интеллект существа
-    --   kinship    — родство существа (1..7)
-    --   godBit     — бит бога профессии (1/2/4)
-    -- Возвращает: chancePct, mult (1/2/3), line ("single" | "mixed" | "none")
+    -- Шанс с учётом родства
     -- ========================================================================
     local function CalcChance(int, kinship, godBit)
         int     = tonumber(int) or 0
@@ -115,9 +111,14 @@ NSQC4.RegisterModule("quests", function()
         return p, 2, "mixed"
     end
 
+    local function LineStr(mult, line)
+        if line == "single" then return "x3 single"
+        elseif line == "mixed" then return "x2 mixed"
+        else return "x1 none" end
+    end
+
     -- ========================================================================
     -- Повысить/выучить профессию по terrain.
-    -- Возвращает: name, old, new, result, roll, int, chancePct, mult, line, extra
     -- ========================================================================
     local function TryUpProfession(entity, terrainId)
         dbg.calls = dbg.calls + 1
@@ -157,7 +158,6 @@ NSQC4.RegisterModule("quests", function()
         local godBit  = PROF_GOD[profId] or 0
         local chancePct, mult, line = CalcChance(int, kinship, godBit)
 
-        -- Уже есть → качаем (до 100)
         if cur > 0 then
             if cur >= PROF_MAX then
                 dbg.maxed = dbg.maxed + 1
@@ -174,7 +174,6 @@ NSQC4.RegisterModule("quests", function()
             return name, cur, cur, "miss", roll, int, chancePct, mult, line
         end
 
-        -- Нет → проверяем пустой слот
         local smax    = tonumber(opts.skills_max)     or 0
         local smaxmax = tonumber(opts.max_skills_max) or smax
 
@@ -197,12 +196,9 @@ NSQC4.RegisterModule("quests", function()
         return name, 0, 0, "learnmiss", roll, int, chancePct, mult, line
     end
 
-    local function LineStr(mult, line)
-        if line == "single" then return "x3 single"
-        elseif line == "mixed" then return "x2 mixed"
-        else return "x1 none" end
-    end
-
+    -- ========================================================================
+    -- Finish
+    -- ========================================================================
     function Complete:Finish(entity)
         if not entity or not entity.opts then return false end
 
@@ -216,6 +212,7 @@ NSQC4.RegisterModule("quests", function()
         local profDef = profId and ProfApi and ProfApi:Get(profId) or nil
         local yield   = profDef and profDef.work and profDef.work.yields or nil
 
+        -- 1. Профессия
         local pname, pold, pnew, result, proll, pint, ppct, pmult, pline, extra =
             TryUpProfession(entity, terrainId)
 
@@ -264,12 +261,14 @@ NSQC4.RegisterModule("quests", function()
             PrintStats("now")
         end
 
-        if Terrain and Terrain.SetTerrain and terrainId then
-            Terrain:SetTerrain(target, terrainId)
+        -- 2. Преобразование клетки (лут, смена terrain, выталкивание)
+        if Transform and Transform.Apply then
+            Transform:Apply(target, terrainId)
         elseif Grid then
             Grid:SetHardness(target, 0)
         end
 
+        -- 3. Сброс в idle
         if State and State.SetIdle then
             State:SetIdle(entity)
         end
@@ -277,6 +276,9 @@ NSQC4.RegisterModule("quests", function()
         return true
     end
 
+    -- ========================================================================
+    -- Слэш-команда
+    -- ========================================================================
     SLASH_NSCOMPLETE1 = "/ns_complete"
     SlashCmdList["NSCOMPLETE"] = function(msg)
         local cmd = (msg or ""):lower():match("^(%S*)")

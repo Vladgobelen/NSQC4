@@ -3,18 +3,17 @@
 -- Единое хранилище клеток 10×10.
 --
 -- Модель byName:
---   nsDbc4.quests.df.entities.byName[name] = entity  — таблица существа
---   grid[i].entityName = name                        — ссылка на существо
+--   nsDbc4.quests.df.entities.byName[name] = entity
+--   grid[i].entityName = name
 --
--- Grid:GetEntity(index) резолвит по byName → возвращает entity (как раньше).
--- Снаружи ничего не меняется: Find, Actions, UIApi, Animate продолжают
--- получать entity через Grid:GetEntity(index).
+-- Grid:GetEntity(index) резолвит по byName → entity.
 --
--- SetTerrainSelected(index, terrainId, true) снимает ВСЕ другие типы
--- в этой клетке — на клетке всегда один выделенный terrain.
--- IsTerrainSelected(index, terrainId) — проверка конкретного типа.
+-- cell = { terrain, entityName, hardness, loot }
+--   loot = { [anchor] = { id, icon }, ... }   -- лут в лут-якорях
 --
+-- SetTerrainSelected снимает все другие типы в клетке.
 -- Reserve / Release / IsReserved — резерв клетки под существо.
+-- void непроходим (IsPassable = false), существо туда не ставится.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -22,7 +21,7 @@ NSQC4.RegisterModule("quests", function()
     local Grid = {}
     NSQC4.QuestsDfGrid = Grid
 
-    Grid.DEBUG = false  -- /run NSQC4.QuestsDfGrid.DEBUG = true
+    Grid.DEBUG = false
 
     local function dbg(...)
         if Grid.DEBUG then print("|cff00ffff[GRID]|r", ...) end
@@ -43,15 +42,12 @@ NSQC4.RegisterModule("quests", function()
         local g = nsDbc4.quests.df.grid
         for i = 1, TOTAL do
             if not g[i] then
-                g[i] = { terrain = nil, entityName = nil, hardness = nil }
+                g[i] = { terrain = nil, entityName = nil, hardness = nil, loot = nil }
             end
         end
         return g
     end
 
-    -- ========================================================================
-    -- Реестр существ по имени
-    -- ========================================================================
     local function EnsureByName()
         nsDbc4 = nsDbc4 or {}
         nsDbc4.quests = nsDbc4.quests or {}
@@ -85,19 +81,19 @@ NSQC4.RegisterModule("quests", function()
     function Grid:ClearCell(index)
         index = tonumber(index) or 0
         if index < 1 or index > TOTAL then return end
-        EnsureGrid()[index] = { terrain = nil, entityName = nil, hardness = nil }
+        EnsureGrid()[index] = { terrain = nil, entityName = nil, hardness = nil, loot = nil }
     end
 
     function Grid:ClearAll()
         local g = EnsureGrid()
         for i = 1, TOTAL do
-            g[i] = { terrain = nil, entityName = nil, hardness = nil }
+            g[i] = { terrain = nil, entityName = nil, hardness = nil, loot = nil }
         end
         local s = EnsureSelections()
         s.terrain_types = {}
         s.entity = {}
         s.reserved = {}
-        EnsureByName()  -- гарантируем, что таблица есть; чистит Entities:Clear
+        EnsureByName()
     end
 
     -- ========================================================================
@@ -115,14 +111,15 @@ NSQC4.RegisterModule("quests", function()
 
     -- ========================================================================
     -- Существо в клетке
-    --   SetEntityName(index, name) — записать имя-ссылку
-    --   GetEntityName(index)       — имя (строка)
-    --   GetEntity(index)           — entity из byName (таблица, как раньше)
-    --   SetEntity(index, entity)   — записать имя из entity (для совместимости)
     -- ========================================================================
     function Grid:SetEntityName(index, name)
         local c = self:GetCell(index)
-        if c then c.entityName = name end
+        if not c then return end
+        if c.terrain == "void" and name then
+            dbg("SetEntityName: нельзя ставить существо в void", index)
+            return
+        end
+        c.entityName = name
     end
 
     function Grid:GetEntityName(index)
@@ -136,10 +133,13 @@ NSQC4.RegisterModule("quests", function()
         return EnsureByName()[c.entityName]
     end
 
-    -- Совместимость: старый вызов Grid:SetEntity(index, entity)
     function Grid:SetEntity(index, entity)
         local c = self:GetCell(index)
         if not c then return end
+        if c.terrain == "void" and entity then
+            dbg("SetEntity: нельзя ставить существо в void", index)
+            return
+        end
         if entity and entity.opts and entity.opts.name then
             c.entityName = entity.opts.name
         else
@@ -219,7 +219,7 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Резерв (по entityName или id — как передали)
+    -- Резерв
     -- ========================================================================
     function Grid:Reserve(index, who)
         index = tonumber(index) or 0
@@ -266,6 +266,7 @@ NSQC4.RegisterModule("quests", function()
     function Grid:IsPassable(index)
         local c = self:GetCell(index)
         if not c then return false end
+        if c.terrain == "void" then return false end
         return not c.entityName
     end
 
@@ -296,6 +297,6 @@ NSQC4.RegisterModule("quests", function()
         print(string.format("[GRID] reserved=%d  [%s]", rcnt, table.concat(rcells, " ")))
     end
 
-    print("|cff00ffff[GRID-DEBUG]|r Единый реестр клеток инициализирован (byName).")
+    print("|cff00ffff[GRID-DEBUG]|r Единый реестр клеток инициализирован (byName, loot, void).")
 
 end)
