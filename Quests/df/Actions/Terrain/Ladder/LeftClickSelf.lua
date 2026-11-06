@@ -6,6 +6,12 @@
 --   3. Toggle выделения. Сообщение — по hp/max:
 --        hp >= max → готова
 --        hp <  max → задача на постройку
+--
+-- ВЫДЕЛЕНИЕ С ОТТЕНКОМ:
+--   Цвет задаёт сам объект (SELECT_TINT). Для лестницы — по материалу
+--   постройки (wood/stone/metal/gold), по умолчанию — коричневый (дерево).
+--   Поле только красит (QuestsField:SetCellSelectTint). При де-выделении
+--   поле снимает тинт само (Grid:SetTerrainSelected(..., false)).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -20,6 +26,24 @@ NSQC4.RegisterModule("quests", function()
     if not QuestsField then return end
 
     local Grid = NSQC4.QuestsDfGrid
+
+    -- Цвета выделения ladder — по материалу постройки.
+    local SELECT_TINT_BY_MATERIAL = {
+        wood  = { 0.55, 0.35, 0.20, 1.0 },
+        stone = { 0.60, 0.60, 0.60, 1.0 },
+        metal = { 0.80, 0.80, 0.90, 1.0 },
+        gold  = { 1.00, 0.85, 0.10, 1.0 },
+    }
+    local SELECT_TINT_DEFAULT = SELECT_TINT_BY_MATERIAL.wood
+
+    local function ResolveLadderTint(idx)
+        -- ВАЖНО: Grid.GetBuilding (точка) для проверки, Grid:GetBuilding
+        -- (двоеточие) для вызова. Иначе Lua видит Grid:GetBuilding как
+        -- вызов метода без аргументов и падает «function arguments expected».
+        local b = Grid and Grid.GetBuilding and Grid:GetBuilding(idx)
+        local material = b and b.material or "wood"
+        return SELECT_TINT_BY_MATERIAL[material] or SELECT_TINT_DEFAULT
+    end
 
     A.Types["ladder"] = A.Types["ladder"] or {}
 
@@ -48,23 +72,19 @@ NSQC4.RegisterModule("quests", function()
             if hasLoot then return false end
 
             -- 3. Toggle выделения + сообщение по hp/max
-            local cell = QuestsField.cells and QuestsField.cells[idx]
             if not Grid then return false end
 
             local isSelected = Grid:IsTerrainSelected(idx)
 
             if isSelected then
                 Grid:SetTerrainSelected(idx, "ladder", false)
-                if cell and cell.texture then
-                    cell.texture:SetVertexColor(1, 1, 1, 1)
-                end
                 print("|cffff8800[NSQC4]|r Снято выделение ladder в клетке " .. idx ..
                       " — не трогают.")
             else
                 Grid:SetTerrainSelected(idx, "ladder", true)
-                if cell and cell.texture then
-                    cell.texture:SetVertexColor(0.5, 0.5, 0.5, 1)
-                end
+                local tint = ResolveLadderTint(idx)
+                QuestsField:SetCellSelectTint(idx,
+                    tint[1], tint[2], tint[3], tint[4])
 
                 local b   = Grid:GetBuilding(idx)
                 local hp  = b and tonumber(b.hp)  or 0

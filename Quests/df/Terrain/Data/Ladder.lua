@@ -1,23 +1,6 @@
 -- ============================================================================
 -- NSQC4 / Quests / df / Terrain / Data / Ladder
--- Параметры лестницы:
---   hardness  — 0 (лестница не «добывается», у неё свои hp/max в buildings)
---   texture   — 00l
---   tint      — для готовой (белый)
---   tints     — tint по материалу (строящаяся)
---
--- ПАРАМЕТРЫ СТРОИТЕЛЬСТВА/СЛОМА (без хардкода в Work.lua):
---   hpPerMaterial     — сколько HP строится за 1 единицу материала
---   returnPerMaterial — сколько HP слома = 1 единица материала возвращается
---
---   По материалу (materials[material] = { hpPer, returnPer }):
---     wood  — hpPer 100, returnPer 100
---     stone — hpPer 100, returnPer 100
---     metal — hpPer 100, returnPer 100
---     gold  — hpPer 100, returnPer 100
---   (все по 100; меняй точечно, если для stone/metal нужно иначе)
---
---   Если материала нет в materials — fallback на дефолты.
+-- Параметры лестницы.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -29,11 +12,9 @@ NSQC4.RegisterModule("quests", function()
 
     local IMG = "Interface\\AddOns\\NSQC4\\Media\\Images\\"
 
-    -- Дефолты (если материал не указан в materials)
     local DEFAULT_HP_PER_MATERIAL     = 100
     local DEFAULT_RETURN_PER_MATERIAL = 100
 
-    -- По материалу
     local MATERIALS = {
         wood  = { hpPer = 100, returnPer = 100 },
         stone = { hpPer = 100, returnPer = 100 },
@@ -54,19 +35,11 @@ NSQC4.RegisterModule("quests", function()
             gold  = { 1.00, 0.85, 0.10, 1 },
         },
 
-        -- ====================================================================
-        -- Параметры стройки/слома (используются в Work.lua через
-        -- TerrainData:GetLadderParams(material)):
-        -- ====================================================================
         hpPerMaterial     = DEFAULT_HP_PER_MATERIAL,
         returnPerMaterial = DEFAULT_RETURN_PER_MATERIAL,
         materials         = MATERIALS,
     })
 
-    -- ========================================================================
-    -- Хелпер: вернуть { hpPer, returnPer } для материала.
-    --   material — "wood"|"stone"|... (nil → дефолт).
-    -- ========================================================================
     function Data:GetLadderParams(material)
         local def = self:Get("ladder")
         if not def then

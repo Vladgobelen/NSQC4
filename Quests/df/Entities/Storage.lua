@@ -7,6 +7,12 @@
 -- Entities:Spawn(id, index, opts) — opts.name должен быть свободен в byName.
 -- Если занят — Spawn возвращает nil (Spawner должен был сгенерировать
 -- уникальное имя сам).
+--
+-- ШАГ 9 (через API поля):
+--   Все перерисовки клеток — через QuestsField:RefreshCell(index).
+--   Полная очистка (Clear) — один QuestsField:RefreshAllCells() вместо
+--   ClearAllVisuals (no-op) + цикл RenderCell(i) по 100.
+--   df больше не зовёт TerrainUIApi:RenderCellFromStorage напрямую.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -21,22 +27,30 @@ NSQC4.RegisterModule("quests", function()
     local Grid = NSQC4.QuestsDfGrid
     if not Grid then return end
 
+    local QuestsField = NSQC4.QuestsField
+
     local function ByName()
         return Entities:EnsureByName()
     end
 
+    -- ========================================================================
+    -- Перерисовка клетки: через API поля.
+    -- ========================================================================
     local function RenderCell(index)
-        local TerrainApi = NSQC4.QuestsDfTerrainUIApi
-        if TerrainApi and TerrainApi.RenderCellFromStorage then
-            TerrainApi:RenderCellFromStorage(index)
+        if QuestsField and QuestsField.RefreshCell then
+            return QuestsField:RefreshCell(index)
         end
+        return false
     end
 
+    -- ========================================================================
+    -- Перерисовка всего поля: через API поля.
+    -- ========================================================================
     local function RenderAll()
-        local TerrainApi = NSQC4.QuestsDfTerrainUIApi
-        if TerrainApi and TerrainApi.RenderAll then
-            TerrainApi:RenderAll()
+        if QuestsField and QuestsField.RefreshAllCells then
+            return QuestsField:RefreshAllCells()
         end
+        return false
     end
 
     local function StopAnimation(id)
@@ -191,15 +205,15 @@ NSQC4.RegisterModule("quests", function()
         return self:Spawn(entity.id, newIndex, entity.opts) ~= nil
     end
 
+    -- ========================================================================
+    -- Полная очистка.
+    --   Раньше: ClearAllVisuals (no-op) + цикл RenderCell(i) по 100.
+    --   Теперь: один QuestsField:RefreshAllCells() — поле перечитает Grid
+    --   (там уже пусто) и сбросит все слои само.
+    -- ========================================================================
     function Entities:Clear()
         local Animate = NSQC4.QuestsDfEntitiesAnimate
         local byName = ByName()
-
-        -- Скрыть все фреймы существ (Api._entityFrames) — они не привязаны к byName
-        local EntApi = NSQC4.QuestsDfEntitiesUIApi
-        if EntApi and EntApi.ClearAllVisuals then
-            EntApi:ClearAllVisuals()
-        end
 
         for name, e in pairs(byName) do
             if Animate and e.id then Animate:Stop(e.id) end
@@ -212,9 +226,7 @@ NSQC4.RegisterModule("quests", function()
             byName[name] = nil
         end
 
-        for i = 1, TOTAL do
-            RenderCell(i)
-        end
+        RenderAll()
     end
 
     -- ========================================================================

@@ -22,6 +22,12 @@
 -- ЗВУК РАБОТЫ:
 --   Убран из тика. Теперь звук — в Hover.lua (при наведении на работающее
 --   существо, раз в SOUND_INTERVAL секунд). См. Field/UI/API/Hover.lua.
+--
+-- ШАГ 8 (через API поля):
+--   После изменения данных (Grid:SetHardness / TakeStored / material
+--   dropped) клетка перерисовывается через QuestsField:RefreshCell(bIndex).
+--   df больше не зовёт TerrainUIApi:RenderCellFromStorage напрямую — это
+--   работа поля (см. Field/UI/API/Refresh.lua).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -36,6 +42,16 @@ NSQC4.RegisterModule("quests", function()
 
     local Grid = NSQC4.QuestsDfGrid
     if not Grid then return end
+
+    local QuestsField = NSQC4.QuestsField
+
+    -- Перерисовать клетку после изменения данных Grid.
+    local function RefreshCell(index)
+        if QuestsField and QuestsField.RefreshCell then
+            return QuestsField:RefreshCell(index)
+        end
+        return false
+    end
 
     local TERRAIN_TO_STAT = {
         tree  = { stat = "agility",   vitality = true  },
@@ -115,8 +131,7 @@ NSQC4.RegisterModule("quests", function()
             b.hp = totalHP
             ai.work = nil
             ai.wasBuilding = true
-            local T = NSQC4.QuestsDfTerrainUIApi
-            if T and T.RenderCellFromStorage then T:RenderCellFromStorage(bIndex) end
+            RefreshCell(bIndex)
             dbg(string.format("TickBuild cell=%d: DONE hp=%d/%d", bIndex, totalHP, totalHP))
             return true
         end
@@ -164,8 +179,7 @@ NSQC4.RegisterModule("quests", function()
             b.hp = totalHP
             ai.work = nil
             ai.wasBuilding = true
-            local T = NSQC4.QuestsDfTerrainUIApi
-            if T and T.RenderCellFromStorage then T:RenderCellFromStorage(bIndex) end
+            RefreshCell(bIndex)
             dbg(string.format("TickBuild cell=%d: DONE hp=%d/%d", bIndex, totalHP, totalHP))
             return true
         end
@@ -198,8 +212,7 @@ NSQC4.RegisterModule("quests", function()
             b.hp = 0
             ai.work = nil
             ai.wasBuilding = true
-            local T = NSQC4.QuestsDfTerrainUIApi
-            if T and T.RenderCellFromStorage then T:RenderCellFromStorage(bIndex) end
+            RefreshCell(bIndex)
             return true
         end
 
@@ -232,8 +245,7 @@ NSQC4.RegisterModule("quests", function()
             b.hp = 0
             ai.work = nil
             ai.wasBuilding = true
-            local T = NSQC4.QuestsDfTerrainUIApi
-            if T and T.RenderCellFromStorage then T:RenderCellFromStorage(bIndex) end
+            RefreshCell(bIndex)
             return true
         end
         return false

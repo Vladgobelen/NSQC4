@@ -2,26 +2,20 @@
 -- NSQC4 / Quests / df / AI / Find
 -- Выбор цели для существа.
 --
+-- ФИКС (строитель — бонус):
+--   Раньше задачу на постройку лестницы брало ТОЛЬКО существо с профессией
+--   «Строитель» (HasBuilder). Если ни у кого её нет — задача висела.
+--
+--   Теперь задачу на постройку берёт ЛЮБОЕ существо. «Строитель» — бонус:
+--   если он есть, CalcClicks даёт меньше кликов (быстрее). Если нет —
+--   строит медленнее, но строит. Выучить «Строителя» можно по ходу через
+--   Complete:TryUpProfession (если есть свободный слот skills_max).
+--
+--   HasBuilder оставлен как утилита (логи/приоритет), но в условиях
+--   выбора не используется.
+--
 -- ОТЛАДКА:
 --   /ns_find on | off | dump
---   Find.DEBUG = true/false
---
---   При DEBUG=true каждый Pick печатает:
---     [FIND] =========================================================
---     [FIND] Pick entity=NAME kind=goblin canSwim=false
---     [FIND] ladder tasks: N
---     [FIND]   ladder 12 selected=yes hp=500/1000 mode=build by=nil
---     [FIND]   ladder 12 → task build (material=wood)
---     [FIND] selected cells: N
---     [FIND]   sel cell=19 terrain=earth fresh=yes allowed=yes reserved=no
---     [FIND]   sel cell=19 prof=digger → best
---     [FIND]   sel cell=21 terrain=tree fresh=yes allowed=yes reserved=no
---     [FIND]   sel cell=21 prof=nil (нет профессии) → rest
---     [FIND] pool: best=1 rest=0
---     [FIND] pick candidate cell=19 profId=digger → Path:Find...
---     [FIND]   path OK len=5 [74,84,94,95,19]
---     [FIND] → PICK cell=19 terrainId=earth profId=digger demolish=false
---     [FIND] → NO PICK (все недостижимы)
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -94,12 +88,15 @@ NSQC4.RegisterModule("quests", function()
         return nil
     end
 
-    local function HasBuilder(entity)
+    -- ========================================================================
+    -- HasBuilder — утилита (логи/приоритет). В условиях выбора НЕ используется.
+    -- ========================================================================
+    function Find:HasBuilder(entity)
         return FindProfForTerrain(entity, "ladder") ~= nil
     end
 
     -- ========================================================================
-    -- Свежесть выделенной клетки: terrain в Grid совпадает с terrainId в selection
+    -- Свежесть выделенной клетки: terrain в Grid совпадает с terrainId
     -- ========================================================================
     local function IsCellFresh(cell)
         if not cell then return false end
@@ -111,8 +108,7 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Проверка достижимости: Path:Find от текущей позиции до цели.
-    -- Возвращает path | nil
+    -- Проверка достижимости
     -- ========================================================================
     local function Reachable(entity, targetIndex)
         local Path = NSQC4.QuestsDfAIPath
@@ -122,8 +118,8 @@ NSQC4.RegisterModule("quests", function()
 
     -- ========================================================================
     -- Задачи по лестнице. Только ВЫДЕЛЕННЫЕ.
-    --   hp < max  → build (только если есть builder)
-    --   hp >= max → demolish (любой)
+    --   hp < max  → build (ЛЮБОЕ существо; «Строитель» — бонус)
+    --   hp >= max → demolish (любое)
     -- ========================================================================
     local function GetLadderTasks(entity)
         local result = {}
@@ -147,12 +143,11 @@ NSQC4.RegisterModule("quests", function()
                     dbg(string.format("  ladder %d selected=yes hp=%s/%s by=%s → skip (занята)",
                         idx, hp, max, tostring(rec.by)))
                 elseif hp < max then
-                    local hasB = HasBuilder(entity)
-                    dbg(string.format("  ladder %d selected=yes hp=%s/%s mat=%s → task build (hasBuilder=%s)",
+                    -- ЛЮБОЕ существо может строить. «Строитель» — бонус.
+                    local hasB = self and self.HasBuilder and self:HasBuilder(entity)
+                    dbg(string.format("  ladder %d selected=yes hp=%s/%s mat=%s → task build (hasBuilder=%s — бонус)",
                         idx, hp, max, tostring(rec.material), tostring(hasB)))
-                    if hasB then
-                        result[#result + 1] = { index = idx, mode = "build", material = rec.material }
-                    end
+                    result[#result + 1] = { index = idx, mode = "build", material = rec.material }
                 elseif hp > 0 then
                     dbg(string.format("  ladder %d selected=yes hp=%s/%s → task demolish", idx, hp, max))
                     result[#result + 1] = { index = idx, mode = "demolish" }
@@ -166,8 +161,9 @@ NSQC4.RegisterModule("quests", function()
 
     -- ========================================================================
     -- HasProfForSelected — используется Ticker'ом для приоритета.
-    -- Проверяет: есть ли у существа хоть одна задача, которую он МОЖЕТ взять
-    -- (без проверки достижимости — это дорого, а Ticker зовёт часто).
+    --   «Профи» = есть выделенная клетка под свою профессию ИЛИ
+    --             есть выделенная лестница (любая задача).
+    --   «Строитель» не обязателен — лестница доступна всем.
     -- ========================================================================
     function Find:HasProfForSelected(entity)
         if not entity or not entity.opts then return false end
@@ -175,7 +171,7 @@ NSQC4.RegisterModule("quests", function()
         local tasks = GetLadderTasks(entity)
         for _, t in ipairs(tasks) do
             if t.mode == "demolish" then return true end
-            if t.mode == "build" and HasBuilder(entity) then return true end
+            if t.mode == "build" then return true end   -- любое существо
         end
 
         local kind = entity.kind or entity.opts.kind
@@ -184,9 +180,11 @@ NSQC4.RegisterModule("quests", function()
 
         local selected = GetSelectedCells()
         for _, cell in ipairs(selected) do
-            if IsCellFresh(cell) and allowed[cell.terrainId] then
-                if FindProfForTerrain(entity, cell.terrainId) then
-                    return true
+            if cell.terrainId ~= "ladder" then
+                if IsCellFresh(cell) and allowed[cell.terrainId] then
+                    if FindProfForTerrain(entity, cell.terrainId) then
+                        return true
+                    end
                 end
             end
         end
@@ -202,7 +200,6 @@ NSQC4.RegisterModule("quests", function()
         local eName = entity.opts.name or entity.id
         local kind  = entity.kind or entity.opts.kind
 
-        -- canSwim (для диагностики)
         local Resolve = NSQC4.QuestsDfProfessionsResolve
         local canSwim = false
         if Resolve and Resolve.CanSwim then
@@ -224,8 +221,8 @@ NSQC4.RegisterModule("quests", function()
             for _, t in ipairs(tasks) do
                 if t.mode == "demolish" then
                     demolish[#demolish + 1] = t
-                elseif t.mode == "build" and HasBuilder(entity) then
-                    build[#build + 1] = t
+                elseif t.mode == "build" then
+                    build[#build + 1] = t   -- любое существо, не только Строитель
                 end
             end
 
@@ -235,7 +232,6 @@ NSQC4.RegisterModule("quests", function()
             local mode = (#demolish > 0) and "demolish" or "build"
 
             if pool and #pool > 0 then
-                -- Проверяем достижимость по очереди (начиная со случайного)
                 local order = {}
                 for i = 1, #pool do order[i] = i end
                 for i = #order, 2, -1 do
@@ -406,6 +402,6 @@ NSQC4.RegisterModule("quests", function()
         end
     end
 
-    print("|cff00ffff[FIND]|r Find загружен (DEBUG=" .. tostring(Find.DEBUG) .. ")")
+    print("|cff00ffff[FIND]|r Find загружен (DEBUG=" .. tostring(Find.DEBUG) .. "; строитель — бонус, не условие)")
 
 end)

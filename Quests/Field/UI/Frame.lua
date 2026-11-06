@@ -2,6 +2,15 @@
 -- NSQC4 / Quests / Field / UI / Frame
 -- Создание главного фрейма поля + клетки + рамка + ресайз + крестик.
 --
+-- ИЗМЕНЕНИЯ (миграция на CellRender):
+--   Везде, где раньше было
+--     self:RefreshAllAnchorSizes() + Drops:RefreshAllLootSizes()
+--   теперь один вызов:
+--     self:RefreshAllCellSizes()
+--   Он пересчитывает размеры лута/anchor/temp по btn:GetWidth() (см.
+--   Field/UI/API/CellRender.lua). Старые API оставлены как прокси в
+--   CellRender, но звать их больше не нужно.
+--
 -- ОГРАНИЧЕНИЕ РАЗМЕРА (MaxCellForScreen):
 --   min(MAX_CELL, cellSizeFromScreen), где cellSizeFromScreen — из
 --   SCREEN_PERCENT (0.9) самой узкой стороны UIParent.
@@ -87,9 +96,7 @@ NSQC4.RegisterModule("quests", function()
         self.frame:SetSize(w, h)
         self:ReflowCells()
         self:ApplyBorderAnchors()
-        if self.RefreshAllAnchorSizes then self:RefreshAllAnchorSizes() end
-        local Drops = NSQC4.QuestsDfTransformDrops
-        if Drops and Drops.RefreshAllLootSizes then Drops:RefreshAllLootSizes() end
+        if self.RefreshAllCellSizes then self:RefreshAllCellSizes() end
 
         dbg(string.format("ApplyCellSize: cs=%d frame=%dx%d", cs, w, h))
     end
@@ -149,18 +156,20 @@ NSQC4.RegisterModule("quests", function()
             self:SetBorderVisible(true)
         end
 
+        -- ФИКС: один RefreshAllCellSizes вместо AnchorSizes + LootSizes
         f:HookScript("OnSizeChanged", function()
             self:ReflowCells()
             self:ApplyBorderAnchors()
-            if self.RefreshAllAnchorSizes then self:RefreshAllAnchorSizes() end
-            local Drops = NSQC4.QuestsDfTransformDrops
-            if Drops and Drops.RefreshAllLootSizes then Drops:RefreshAllLootSizes() end
+            if self.RefreshAllCellSizes then self:RefreshAllCellSizes() end
             if self.viewMode == "overview" and self.RefreshOverviewLayout then
                 self:RefreshOverviewLayout()
             end
         end)
 
         f:Hide()
+
+        -- после создания клеток — пересчитать размеры в них
+        if self.RefreshAllCellSizes then self:RefreshAllCellSizes() end
 
         dbg(string.format("EnsureFrame: created frame %dx%d at cellSize=%d", w0, h0, cs))
         return f

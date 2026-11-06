@@ -4,7 +4,6 @@
 --
 -- def:
 --   drop        — id дропа ("earth"|"wood"|"stone"|"herb"|nil)
---   dropIcon    — иконка дропа
 --   dropMin     — минимум дропов
 --   dropMax     — максимум дропов
 --   dropTarget  — "self" | "neighbors"
@@ -12,8 +11,12 @@
 --   nextTerrain — во что превращается клетка ("earth"|"void")
 --   eject       — вытолкнуть существо (для void — да)
 --
--- Лут кладётся в лут-якоря (все 9, кроме TOPLEFT).
--- Если свободных лут-якорей нет — дроп не кладётся.
+-- ИКОНКА дропа НЕ хранится здесь — она в ICON_BY_ID (см. Drops.lua).
+-- Drops:ResolveIcon берёт иконку по d.id. Дублировать dropIcon в дефах
+-- не нужно.
+--
+-- Лут кладётся в лут-якоря (все 8, кроме TOPLEFT). Если свободных
+-- лут-якорей нет — дроп не кладётся.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -24,12 +27,9 @@ NSQC4.RegisterModule("quests", function()
         return
     end
 
-    local IMG = "Interface\\AddOns\\NSQC4\\Media\\Images\\"
-
     -- tree → 1 wood в эту клетку, клетка → earth
     Transform:Register("tree", {
         drop        = "wood",
-        dropIcon    = IMG .. "00t",
         dropMin     = 1,
         dropMax     = 1,
         dropTarget  = "self",
@@ -40,7 +40,6 @@ NSQC4.RegisterModule("quests", function()
     -- stone → 2..5 stone в эту клетку, клетка → earth
     Transform:Register("stone", {
         drop        = "stone",
-        dropIcon    = IMG .. "0ka",
         dropMin     = 2,
         dropMax     = 5,
         dropTarget  = "self",
@@ -51,7 +50,6 @@ NSQC4.RegisterModule("quests", function()
     -- grass → 1..3 herb в эту клетку, клетка → earth
     Transform:Register("grass", {
         drop        = "herb",
-        dropIcon    = IMG .. "00f",
         dropMin     = 1,
         dropMax     = 3,
         dropTarget  = "self",
@@ -62,7 +60,6 @@ NSQC4.RegisterModule("quests", function()
     -- earth → 1 earth в соседние (50/50 на каждого), клетка → void
     Transform:Register("earth", {
         drop        = "earth",
-        dropIcon    = IMG .. "00z",
         dropMin     = 1,
         dropMax     = 1,
         dropTarget  = "neighbors",
@@ -73,7 +70,6 @@ NSQC4.RegisterModule("quests", function()
     -- pool → 1..2 stone в соседние, клетка → void
     Transform:Register("pool", {
         drop        = "stone",
-        dropIcon    = IMG .. "0ka",
         dropMin     = 1,
         dropMax     = 2,
         dropTarget  = "neighbors",
@@ -84,7 +80,6 @@ NSQC4.RegisterModule("quests", function()
     -- ladder → 0..1 wood в соседние, клетка → void
     Transform:Register("ladder", {
         drop        = "wood",
-        dropIcon    = IMG .. "00t",
         dropMin     = 0,
         dropMax     = 1,
         dropTarget  = "neighbors",

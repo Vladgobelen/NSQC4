@@ -5,6 +5,15 @@
 --   2. Нет существа / спит:
 --      - есть лут → ничего не делаем (не выделяем)
 --      - нет лута → toggle выделения ландшафта
+--
+-- ВЫДЕЛЕНИЕ С ОТТЕНКОМ:
+--   Поле не знает, какой цвет у earth. Цвет задаёт сам объект —
+--   SELECT_TINT — и передаёт его в QuestsField:SetCellSelectTint.
+--   При де-выделении поле снимает тинт само (Grid:SetTerrainSelected(...,
+--   false)), поэтому здесь зовём SetCellSelectTint только при выделении.
+--
+--   btn.texture:SetVertexColor больше НЕ трогаем — этого поля нет,
+--   визуал идёт через spec.highlight (см. CellRender.lua).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -19,6 +28,9 @@ NSQC4.RegisterModule("quests", function()
     if not QuestsField then return end
 
     local Grid = NSQC4.QuestsDfGrid
+
+    -- Цвет выделения earth — коричневый.
+    local SELECT_TINT = { 0.55, 0.35, 0.20, 1.0 }
 
     A.Types["earth"] = A.Types["earth"] or {}
 
@@ -49,22 +61,18 @@ NSQC4.RegisterModule("quests", function()
             end
 
             -- 3. Иначе — toggle выделения
-            local cell = QuestsField.cells and QuestsField.cells[idx]
             if not Grid then return false end
 
             local isSelected = Grid:IsTerrainSelected(idx)
 
             if isSelected then
+                -- поле само снимет тинт (Grid:SetTerrainSelected(..., false))
                 Grid:SetTerrainSelected(idx, "earth", false)
-                if cell and cell.texture then
-                    cell.texture:SetVertexColor(1, 1, 1, 1)
-                end
                 print("|cffff8800[NSQC4]|r Снято выделение earth в клетке " .. idx)
             else
                 Grid:SetTerrainSelected(idx, "earth", true)
-                if cell and cell.texture then
-                    cell.texture:SetVertexColor(0.5, 0.5, 0.5, 1)
-                end
+                QuestsField:SetCellSelectTint(idx,
+                    SELECT_TINT[1], SELECT_TINT[2], SELECT_TINT[3], SELECT_TINT[4])
                 print("|cff00ff00[NSQC4]|r Выделено earth в клетке " .. idx)
             end
 

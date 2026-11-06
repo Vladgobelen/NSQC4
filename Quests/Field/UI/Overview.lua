@@ -2,6 +2,13 @@
 -- NSQC4 / Quests / Field / UI / Overview
 -- Режим «обзор» (вид сверху / уменьшенный масштаб).
 --
+-- ИЗМЕНЕНИЯ (миграция на CellRender):
+--   ShowOverview / HideOverview теперь зовут RefreshAllCellSizes() —
+--   размеры лута/anchor/temp пересчитываются по btn:GetWidth(), когда
+--   детальные клетки снова показываются.
+--   RefreshOverviewLayout — без изменений (это layout overview-квадратов,
+--   не клеток поля).
+--
 -- При активации:
 --   - детальные клетки (QuestsField.cells) скрываются;
 --   - показывается overviewFrame: 10×10 квадратов;
@@ -11,10 +18,9 @@
 --     нашего этажа), цвет по типу ландшафта.
 --
 -- ОРИЕНТАЦИЯ:
---   В Grid row = 0 — НИЗ, row = ROWS-1 — ВЕРХ (как в детальном виде,
---   Cells.lua: SetPoint BOTTOMLEFT + row*(cellH)). В overview используется
---   TOPLEFT-якорь, поэтому row инвертируется: (ROWS - 1 - row). Так верх
---   детального вида совпадает с верхом overview.
+--   В Grid row = 0 — НИЗ, row = ROWS-1 — ВЕРХ (как в детальном виде).
+--   В overview используется TOPLEFT-якорь, поэтому row инвертируется:
+--   (ROWS - 1 - row). Так верх детального вида совпадает с верхом overview.
 --
 -- Цвета (по ТЗ):
 --   stone  — серый
@@ -224,6 +230,9 @@ NSQC4.RegisterModule("quests", function()
 
         of:Show()
         self.viewMode = "overview"
+
+        -- ФИКС: размеры клеток могли измениться, пока их не было видно
+        if self.RefreshAllCellSizes then self:RefreshAllCellSizes() end
     end
 
     function QuestsField:HideOverview()
@@ -236,6 +245,10 @@ NSQC4.RegisterModule("quests", function()
             local btn = self.cells and self.cells[i]
             if btn then btn:Show() end
         end
+
+        -- ФИКС: пересчитать размеры лута/anchor/temp — фрейм мог измениться
+        -- в overview (ресайз не мог, но клетки были скрыты — на всякий случай).
+        if self.RefreshAllCellSizes then self:RefreshAllCellSizes() end
 
         -- Перерисовать детальный вид
         local Terrain = NSQC4.QuestsDfTerrain

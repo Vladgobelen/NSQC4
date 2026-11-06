@@ -5,6 +5,11 @@
 --   2. Нет существа / спит:
 --      - есть лут → ничего (не выделяем)
 --      - нет лута → toggle выделения pool
+--
+-- ВЫДЕЛЕНИЕ С ОТТЕНКОМ:
+--   Цвет задаёт сам объект (SELECT_TINT), поле только красит
+--   (QuestsField:SetCellSelectTint). При де-выделении поле снимает тинт
+--   само (Grid:SetTerrainSelected(..., false)).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -19,6 +24,9 @@ NSQC4.RegisterModule("quests", function()
     if not QuestsField then return end
 
     local Grid = NSQC4.QuestsDfGrid
+
+    -- Цвет выделения pool — бирюзовый.
+    local SELECT_TINT = { 0.30, 0.55, 0.85, 1.0 }
 
     A.Types["pool"] = A.Types["pool"] or {}
 
@@ -46,22 +54,17 @@ NSQC4.RegisterModule("quests", function()
                 return false
             end
 
-            local cell = QuestsField.cells and QuestsField.cells[idx]
             if not Grid then return false end
 
             local isSelected = Grid:IsTerrainSelected(idx)
 
             if isSelected then
                 Grid:SetTerrainSelected(idx, "pool", false)
-                if cell and cell.texture then
-                    cell.texture:SetVertexColor(1, 1, 1, 1)
-                end
                 print("|cffff8800[NSQC4]|r Снято выделение pool в клетке " .. idx)
             else
                 Grid:SetTerrainSelected(idx, "pool", true)
-                if cell and cell.texture then
-                    cell.texture:SetVertexColor(0.5, 0.5, 0.5, 1)
-                end
+                QuestsField:SetCellSelectTint(idx,
+                    SELECT_TINT[1], SELECT_TINT[2], SELECT_TINT[3], SELECT_TINT[4])
                 print("|cff00ff00[NSQC4]|r Выделено pool в клетке " .. idx)
             end
 

@@ -2,6 +2,12 @@
 -- NSQC4 / Quests / Field / UI / Resize
 -- Хэндл ресайза в правом нижнем углу.
 --
+-- ИЗМЕНЕНИЯ (миграция на CellRender):
+--   После ApplyCellSize зовём один self:RefreshAllCellSizes() — он
+--   пересчитывает размеры лута/anchor/temp по btn:GetWidth().
+--   Старые RefreshAllAnchorSizes / Drops:RefreshAllLootSizes больше не
+--   нужны (остаются как прокси в CellRender, но здесь не зовутся).
+--
 -- ОГРАНИЧЕНИЕ РАЗМЕРА:
 --   maxCell = min(MAX_CELL, MaxCellForScreen())
 --   MaxCellForScreen — 90% самой узкой стороны UIParent (из Frame.lua).
@@ -103,9 +109,7 @@ NSQC4.RegisterModule("quests", function()
                 f:SetSize(w, hh)
                 inst:ReflowCells()
                 inst:ApplyBorderAnchors()
-                if inst.RefreshAllAnchorSizes then inst:RefreshAllAnchorSizes() end
-                local Drops = NSQC4.QuestsDfTransformDrops
-                if Drops and Drops.RefreshAllLootSizes then Drops:RefreshAllLootSizes() end
+                if inst.RefreshAllCellSizes then inst:RefreshAllCellSizes() end
             end
 
             dbg(string.format("setSize  %.1fx%.1f  cellSize=%d", f:GetWidth(), f:GetHeight(), cs))

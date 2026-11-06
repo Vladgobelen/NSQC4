@@ -6,6 +6,11 @@
 --      + печать-заглушка «работа на воде: TODO» (по ТЗ)
 --
 -- Лут на воде пока не предусмотрен — проверку Drops:HasAny не делаем.
+--
+-- ВЫДЕЛЕНИЕ С ОТТЕНКОМ:
+--   Цвет задаёт сам объект (SELECT_TINT), поле только красит
+--   (QuestsField:SetCellSelectTint). При де-выделении поле снимает тинт
+--   само (Grid:SetTerrainSelected(..., false)).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -20,6 +25,9 @@ NSQC4.RegisterModule("quests", function()
     if not QuestsField then return end
 
     local Grid = NSQC4.QuestsDfGrid
+
+    -- Цвет выделения water — голубой.
+    local SELECT_TINT = { 0.30, 0.70, 1.00, 1.0 }
 
     A.Types["water"] = A.Types["water"] or {}
 
@@ -43,22 +51,17 @@ NSQC4.RegisterModule("quests", function()
             end
 
             -- 2. Нет существа / спит → toggle выделения воды
-            local cell = QuestsField.cells and QuestsField.cells[idx]
             if not Grid then return false end
 
             local isSelected = Grid:IsTerrainSelected(idx)
 
             if isSelected then
                 Grid:SetTerrainSelected(idx, "water", false)
-                if cell and cell.texture then
-                    cell.texture:SetVertexColor(1, 1, 1, 1)
-                end
                 print("|cffff8800[NSQC4]|r Снято выделение water в клетке " .. idx)
             else
                 Grid:SetTerrainSelected(idx, "water", true)
-                if cell and cell.texture then
-                    cell.texture:SetVertexColor(0.5, 0.5, 0.5, 1)
-                end
+                QuestsField:SetCellSelectTint(idx,
+                    SELECT_TINT[1], SELECT_TINT[2], SELECT_TINT[3], SELECT_TINT[4])
 
                 -- Глубина для печати (безопасно: если GetDepth ещё не загружен — "?")
                 local depth = "?"

@@ -2,25 +2,32 @@
 -- NSQC4 / Quests / df / AI / Move
 -- Движение от штатной точки к штатной точке.
 --
--- ШТАТНЫЕ ТОЧКИ (единое правило, GetAnchorPos):
---   свёрнутая  (expanded=false) — TOPLEFT + ins + size/2   (верхний левый угол)
---   развёрнутая (expanded=true) — центр клетки
+-- ФИКС (temp создаётся при старте шага):
+--   Раньше temp (btn+20, «существо в пути») создавался только при
+--   RenderCell с moving=true — а RenderCell звался только при клике/
+--   RenderCellFromStorage (события клетки). При движении RenderCell не
+--   звался, MoveAnchor → MoveCellEntity только двигал существующий temp.
+--   Если temp не было — существо «стояло», пока не кликнешь.
 --
--- ЕДИНЫЙ ИСТОЧНИК ИСТИНЫ:
---   entity.posX / entity.posY — позиция в координатах поля.
---   entity.opts.expanded      — флаг размера.
---   Текстура (temp/anchor) — чистая функция от них (см. Entities/UI/Api).
+--   Теперь BeginStep после установки entity.nextIndex зовёт
+--   TerrainUIApi:RenderCellFromStorage(entity.index). BuildEntitySpec
+--   увидит nextIndex ~= nil → вернёт moving=true → RenderCell создаст temp.
+--   Temp создаётся на старте каждого шага, без клика.
 --
--- СМЕНА expanded В ПУТИ:
---   Пересчитываем stepStart/stepEnd по новому expanded и корректируем
---   stepStartedAt так, чтобы posX/posY в момент смены не изменились.
+-- ШАГ 6 (полная перерисовка клетки):
+--   RenderCellFromStorage — это EntitiesUIApi, рисует ТОЛЬКО entity-слой
+--   (через SetCellEntitySpec). Когда Move меняет entity.index /
+--   entityName в Grid (старт шага, откат, конец шага), нужно
+--   перерисовывать ВСЮ клетку — terrain/build/loot/tooltip/клики — потому
+--   что от entityName зависит тултип и правая/левая кнопка.
+--   Поэтому все три места в Move зовут TerrainUIApi:RenderCellFromStorage
+--   (полный RenderCellFromStorage, а не EntitiesUIApi).
 --
 -- ЗАВЕРШЕНИЕ ШАГА (t >= 1):
---   ПОРЯДОК ВАЖЕН: сначала обновляем данные (entity.index, posX/posY,
---   ResetStep, Grid:SetEntityName), ПОТОМ один раз перерисовываем.
---   Раньше StopMoving(to) звался ДО SetEntityName(to) — Api:Render для `to`
---   не находил существа и рисовал пустую клетку → иконка «пропадала на
---   секунду» до следующего тика. Теперь — нет.
+--   1. Проверить, что to не void и не занята — иначе откат.
+--   2. Обновить данные: entity.index, posX/posY, ResetStep, SetEntityName.
+--   3. Проверить, что имя реально встало — иначе откат.
+--   4. StopMoving / RenderCellFromStorage.
 --
 -- stepTime = 100 − 99 × (vitality / 100)  секунд на клетку.
 -- ============================================================================
@@ -42,6 +49,17 @@ NSQC4.RegisterModule("quests", function()
     end
 
     local QuestsField = NSQC4.QuestsField
+
+    -- Полная перерисовка клетки (terrain + build + loot + entity + tooltip
+    -- + клики). Используется в трёх местах Move, где меняется entityName
+    -- в Grid — там нужна не только entity-слой.
+    local function RenderFullCell(index)
+        local TerrainApi = NSQC4.QuestsDfTerrainUIApi
+        if TerrainApi and TerrainApi.RenderCellFromStorage then
+            return TerrainApi:RenderCellFromStorage(index)
+        end
+        return false
+    end
 
     function Move:StepTime(entity)
         if not entity or not entity.opts then return 100 end
@@ -81,17 +99,16 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Зафиксировать начало шага: точки старта/финиша по ТЕКУЩЕМУ expanded.
+    -- Зафиксировать начало шага.
+    -- ФИКС: после установки nextIndex — полная перерисовка клетки
+    -- (TerrainUIApi:RenderCellFromStorage), чтобы BuildEntitySpec увидел
+    -- moving=true и RenderCell создал temp. TerrainUIApi собирает ВЕСЬ
+    -- spec (включая entity), поэтому это правильная точка входа.
     -- ========================================================================
     local function BeginStep(entity, nextIndex, expanded)
         local sX, sY = QuestsField:GetAnchorPos(entity.index, expanded)
         local eX, eY = QuestsField:GetAnchorPos(nextIndex, expanded)
         if not sX or not eX then return false end
-
-        local EntitiesApi = NSQC4.QuestsDfEntitiesUIApi
-        if EntitiesApi and EntitiesApi.HideAnchorAt then
-            EntitiesApi:HideAnchorAt(entity.index)
-        end
 
         entity.nextIndex     = nextIndex
         entity.stepStartX    = sX
@@ -103,13 +120,14 @@ NSQC4.RegisterModule("quests", function()
         entity.stepExpanded  = expanded
         entity.posX          = sX
         entity.posY          = sY
+
+        -- ФИКС: полная перерисовка клетки — temp появится без клика,
+        -- тултип/клики останутся консистентными.
+        RenderFullCell(entity.index)
+
         return true
     end
 
-    -- ========================================================================
-    -- Пересчитать штатные точки шага под НОВЫЙ expanded, сохранив
-    -- текущую позицию posX/posY и долю прохождения t.
-    -- ========================================================================
     local function RebaseStepForExpanded(entity, expanded)
         if not entity.nextIndex then return end
         if not entity.stepStartX then return end
@@ -158,6 +176,35 @@ NSQC4.RegisterModule("quests", function()
         return true
     end
 
+    local function AbortStep(entity, from, to, reason)
+        dbg(string.format("%s: ABORT step %s → %s (%s) — откат в %s",
+            tostring(entity.opts and entity.opts.name), tostring(from),
+            tostring(to), tostring(reason), tostring(from)))
+
+        entity.index = from
+        local expanded = IsExpanded(entity)
+        local cx, cy = QuestsField:GetAnchorPos(from, expanded)
+        if cx then entity.posX = cx; entity.posY = cy end
+        Move:ResetStep(entity)
+
+        local name = entity.opts and entity.opts.name
+        if name and Grid:GetEntityName(from) ~= name then
+            Grid:SetEntityName(from, name)
+        end
+
+        local ai = entity.opts and entity.opts.ai
+        if ai then
+            ai.path    = nil
+            ai.pathIdx = nil
+            ai.nextStepAt = nil
+        end
+
+        -- Полная перерисовка (в т.ч. тултип/клики — откат меняет entityName)
+        RenderFullCell(from)
+
+        return nil
+    end
+
     function Move:Advance(entity)
         if not entity or not entity.opts then return nil end
         local ai = entity.opts.ai
@@ -195,8 +242,7 @@ NSQC4.RegisterModule("quests", function()
         end
 
         -- --------------------------------------------------------------
-        -- СМЕНА expanded В ПУТИ: если флаг разошёлся с геометрией шага —
-        -- пересчитать концы и t без рывка.
+        -- СМЕНА expanded В ПУТИ
         -- --------------------------------------------------------------
         local curExpanded = IsExpanded(entity)
         if entity.stepExpanded ~= curExpanded then
@@ -218,35 +264,39 @@ NSQC4.RegisterModule("quests", function()
 
         -- --------------------------------------------------------------
         -- ЗАВЕРШЕНИЕ ШАГА
-        -- Порядок: СНАЧАЛА данные, ПОТОМ рендер.
         -- --------------------------------------------------------------
         if t >= 1 then
             local from = entity.index
             local to   = entity.nextIndex
 
-            -- 1. Данные: позиция, сброс шага, имена в Grid.
+            if not CanStepInto(to, entity) then
+                return AbortStep(entity, from, to, "to стала непроходимой")
+            end
+
             entity.index = to
             entity.posX  = entity.stepEndX
             entity.posY  = entity.stepEndY
-            self:ResetStep(entity)   -- nextIndex=nil, step*=nil, stepExpanded=nil
+            self:ResetStep(entity)
 
             Grid:SetEntityName(from, nil)
-            Grid:SetEntityName(to, entity.opts and entity.opts.name)
+            Grid:SetEntityName(to, name)
+
+            if Grid:GetEntityName(to) ~= name then
+                Grid:SetEntityName(from, name)
+                return AbortStep(entity, from, to, "SetEntityName не встал (void?)")
+            end
 
             ai.pathIdx    = ai.pathIdx + 1
             ai.nextStepAt = nil
 
-            -- 2. Рендер: StopMoving видит согласованное состояние
-            --    (entity.index=to, nextIndex=nil, Grid:GetEntity(to)=entity)
-            --    и рисует anchor в `to`, а не пустую клетку.
             if EntitiesApi and EntitiesApi.StopMoving then
                 EntitiesApi:StopMoving(entity, to)
             end
-            -- `from` гарантированно очистить (на случай, если там остался
-            -- temp/anchor от предыдущего шага).
-            if EntitiesApi and EntitiesApi.RenderCellFromStorage then
-                EntitiesApi:RenderCellFromStorage(from)
-            end
+            -- Полная перерисовка: from теперь пустая, to — с существом.
+            -- От entityName зависит тултип и клики, поэтому TerrainUIApi,
+            -- а не EntitiesUIApi (который рисует только entity-слой).
+            RenderFullCell(from)
+            RenderFullCell(to)
 
             local Stats = NSQC4.QuestsDfAIStats
             if Stats and Stats.TryUpVitality then Stats:TryUpVitality(entity) end
@@ -277,5 +327,6 @@ NSQC4.RegisterModule("quests", function()
         else print("[MOVE] /ns_move on | off | dump") end
     end
 
-    print("|cff00ffff[MOVE]|r Move загружен (штатные точки, rebase при смене expanded, без пропадания на финише)")
+    print("|cff00ffff[MOVE]|r Move загружен (BeginStep/AbortStep/конец шага → TerrainUIApi:RenderCellFromStorage — полная клетка).")
+
 end)

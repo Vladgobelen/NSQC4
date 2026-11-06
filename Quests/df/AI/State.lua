@@ -2,14 +2,17 @@
 -- NSQC4 / Quests / df / AI / State
 -- Единственное место, где живёт entity.opts.ai.
 --
--- ФИКСЫ:
---   1. ReserveBuildingViaGrid / ReleaseBuildingViaGrid проверяют
---      Grid:IsBuilding(idx). Для не-построек — skip. Иначе SetMoving для
---      tree/earth/grass всегда откатывался в idle.
---   2. SetIdle / Clear сбрасывают entity.nextIndex / posX / posY / step*
---      и зовут UIApi:StopMoving — иначе при сбросе в idle посреди шага
---      остаётся temp-иконка и «висящая» позиция; следующий SetMoving
---      стартует из неверной точки.
+-- ФИКСЫ (миграция на CellRender):
+--   1. ResetStepFields теперь зовёт Move:ResetStep(entity) — один источник
+--      сброса nextIndex/posX/posY/step*. Раньше поля сбрасывались вручную
+--      здесь И в Move:ResetStep — рассинхрон при добавлении новых полей.
+--   2. SetIdle / Clear сбрасывают шаг через ResetStepFields и перерисовывают
+--      клетку через EntitiesApi:StopMoving (прокси в RenderCellFromStorage).
+--   3. SetMoving / SetWorking — после установки полей шага зовут
+--      Move:ResetStep (единый сброс), затем RenderCellFromStorage(entity.index),
+--      чтобы убрать старый temp/anchor.
+--   4. ReserveBuildingViaGrid / ReleaseBuildingViaGrid проверяют
+--      Grid:IsBuilding(idx). Для не-построек — skip.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -23,25 +26,35 @@ NSQC4.RegisterModule("quests", function()
     end
 
     local function GetGrid() return NSQC4.QuestsDfGrid end
+    local function GetMove() return NSQC4.QuestsDfAIMove end
+    local function GetEntitiesApi() return NSQC4.QuestsDfEntitiesUIApi end
 
     -- ========================================================================
-    -- Сброс полей шага + temp-иконки (MoveAnchor).
+    -- Сброс полей шага (единый источник — Move:ResetStep) + перерисовка.
     -- ========================================================================
     local function ResetStepFields(entity, renderIndex)
         if not entity then return end
-        entity.nextIndex     = nil
-        entity.posX          = nil
-        entity.posY          = nil
-        entity.stepStartX    = nil
-        entity.stepStartY    = nil
-        entity.stepEndX      = nil
-        entity.stepEndY      = nil
-        entity.stepStartedAt = nil
-        entity.stepDuration  = nil
 
-        local EntitiesApi = NSQC4.QuestsDfEntitiesUIApi
-        if EntitiesApi and EntitiesApi.StopMoving then
-            EntitiesApi:StopMoving(entity, renderIndex or entity.index)
+        local Move = GetMove()
+        if Move and Move.ResetStep then
+            Move:ResetStep(entity)
+        else
+            -- fallback: если Move ещё не загружен
+            entity.nextIndex     = nil
+            entity.posX          = nil
+            entity.posY          = nil
+            entity.stepStartX    = nil
+            entity.stepStartY    = nil
+            entity.stepEndX      = nil
+            entity.stepEndY      = nil
+            entity.stepStartedAt = nil
+            entity.stepDuration  = nil
+            entity.stepExpanded  = nil
+        end
+
+        local Api = GetEntitiesApi()
+        if Api and Api.StopMoving then
+            Api:StopMoving(entity, renderIndex or entity.index)
         end
     end
 
@@ -162,7 +175,7 @@ NSQC4.RegisterModule("quests", function()
         local bIdx = ai.workTarget or ai.target
         ReleaseBuildingViaGrid(bIdx, entity.id)
 
-        -- ФИКС: сброс полей шага + temp
+        -- Единый сброс шага (через Move:ResetStep) + перерисовка
         ResetStepFields(entity, entity.index)
 
         entity.opts.ai = nil
@@ -187,8 +200,7 @@ NSQC4.RegisterModule("quests", function()
             ReleaseBuildingViaGrid(bIdx, entity.id)
         end
 
-        -- ФИКС: сброс полей шага + temp, чтобы следующий SetMoving
-        -- стартовал из центра текущей клетки, а не из «висящей» точки.
+        -- Единый сброс шага + перерисовка
         ResetStepFields(entity, entity.index)
 
         entity.opts.ai = { state = "idle" }
@@ -267,16 +279,9 @@ NSQC4.RegisterModule("quests", function()
             carrying   = old and old.carrying or nil,
         }
 
-        -- ФИКС: сброс «висящих» полей шага от предыдущего движения.
-        -- Не трогаем posX/posY — Move:Advance их сам пересчитает через
-        -- EnsurePos (если nil → центр текущей клетки).
-        entity.nextIndex     = nil
-        entity.stepStartX    = nil
-        entity.stepStartY    = nil
-        entity.stepEndX      = nil
-        entity.stepEndY      = nil
-        entity.stepStartedAt = nil
-        entity.stepDuration  = nil
+        -- Единый сброс шага (Move:ResetStep) + перерисовка клетки,
+        -- чтобы убрать старый temp/anchor от предыдущего движения.
+        ResetStepFields(entity, entity.index)
 
         dbg(string.format("→ state=moving OK (target=%s wt=%s)",
             tostring(target), tostring(wt)))
@@ -297,14 +302,8 @@ NSQC4.RegisterModule("quests", function()
         ai.nextStepAt = nil
         ai.work = ai.work or {}
 
-        -- сброс полей шага (существо уже в центре целевой клетки)
-        entity.nextIndex     = nil
-        entity.stepStartX    = nil
-        entity.stepStartY    = nil
-        entity.stepEndX      = nil
-        entity.stepEndY      = nil
-        entity.stepStartedAt = nil
-        entity.stepDuration  = nil
+        -- Единый сброс шага + перерисовка (существо в центре target)
+        ResetStepFields(entity, entity.index)
 
         dbg(string.format("SetWorking %s at %s",
             tostring(entity.opts.name or entity.id), tostring(ai.target)))
@@ -389,6 +388,6 @@ NSQC4.RegisterModule("quests", function()
         end
     end
 
-    print("|cff00ffff[STATE]|r State загружен (DEBUG=" .. tostring(State.DEBUG) .. ")")
+    print("|cff00ffff[STATE]|r State загружен (DEBUG=" .. tostring(State.DEBUG) .. "; сброс шага — через Move:ResetStep)")
 
 end)

@@ -9,12 +9,16 @@
 --   4. Generate(to), если этаж ещё не сгенерирован.
 --   5. Load(to) — восстановить grid + selections + byName.
 --   6. Set(to).
---   7. Render: Terrain:Render, Entities:Render, Drops:RenderAll.
---   8. (Отладка) принудительно скрыть все якоря существ на всякий случай.
+--   7. Render: QuestsField:RefreshAllCells() — поле само перечитает Grid
+--      и перерисует все слои (terrain/build/loot/entity/highlight) +
+--      тултипы/клики. Отдельные Terrain/Entities/Drops.Render не нужны —
+--      RefreshAllCells делает всё то же + сбрасывает состояние кликов.
 --
--- Отладка:
---   Floors.DEBUG = true (по умолчанию)
---   /ns_floors on | off
+-- ШАГ 7:
+--   Убран цикл QuestsField:ClearAnchorTextures(i) по 100 клеткам — это
+--   deprecated API (см. Anchors.lua) и лишняя работа. ClearAllVisuals —
+--   тоже больше не нужен: RefreshAllCells перечитывает Grid заново и
+--   снимает все слои сам (если entity в клетке нет — spec.entity = nil).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -30,39 +34,28 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Рендер всего поля
+    -- Рендер всего поля через API поля.
+    --   RefreshAllCells:
+    --     - перечитывает Grid для каждой клетки
+    --     - собирает ПОЛНЫЙ spec (bg/terrain/build/loot/entity/highlight)
+    --     - перевешивает тултип/клики (по state key)
+    --   Никаких ручных ClearAllVisuals / ClearAnchorTextures / RenderAll
+    --   по слоям — это работа поля.
     -- ========================================================================
     local function RenderAll()
-        local Terrain  = NSQC4.QuestsDfTerrain
-        local Entities = NSQC4.QuestsDfEntities
-        local Drops    = NSQC4.QuestsDfTransformDrops
         local QuestsField = NSQC4.QuestsField
-        local EntApi = NSQC4.QuestsDfEntitiesUIApi
-
-        dbg("Render: Terrain=" .. tostring(Terrain and "ok" or "nil") ..
-            " Entities=" .. tostring(Entities and "ok" or "nil") ..
-            " Drops=" .. tostring(Drops and "ok" or "nil") ..
-            " Field=" .. tostring(QuestsField and "ok" or "nil"))
-
-        -- Скрыть все фреймы существ (Api._entityFrames) — старый этаж
-        if EntApi and EntApi.ClearAllVisuals then
-            EntApi:ClearAllVisuals()
-            dbg("Render: ClearAllVisuals done")
+        if not QuestsField then
+            dbg("Render: QuestsField не загружен")
+            return
         end
 
-        -- Скрыть все якоря существ на всех клетках (старый этаж)
-        if QuestsField and QuestsField.ClearAnchorTextures then
-            local CONST = NSQC4.QuestsFieldConst
-            local TOTAL = CONST and (CONST.COLS * CONST.ROWS) or 100
-            for i = 1, TOTAL do
-                QuestsField:ClearAnchorTextures(i)
-            end
-            dbg("Render: ClearAnchorTextures all")
+        if not QuestsField.RefreshAllCells then
+            dbg("Render: RefreshAllCells не найден (Field/UI/API/Refresh.lua не загружен?)")
+            return
         end
 
-        if Terrain and Terrain.Render then Terrain:Render() end
-        if Entities and Entities.Render then Entities:Render() end
-        if Drops and Drops.RenderAll then Drops:RenderAll() end
+        local ok = QuestsField:RefreshAllCells()
+        dbg("Render: RefreshAllCells -> " .. tostring(ok))
     end
 
     -- ========================================================================
@@ -122,7 +115,7 @@ NSQC4.RegisterModule("quests", function()
         self:Set(to)
         dbg("Switch: Set(" .. to .. ") -> current=" .. tostring(self:Get()))
 
-        -- 6. Render
+        -- 6. Render — через API поля
         RenderAll()
 
         -- 7. Обновить кнопки этажей (если есть)

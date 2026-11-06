@@ -2,28 +2,24 @@
 -- NSQC4 / Quests / df / Init
 -- EnsureCreatures проверяет byName (есть ли уже гоблин/дворф), не Grid.
 --
+-- ИЗМЕНЕНИЯ (миграция на CellRender):
+--   RestartDfMap / GenerateDfMap / OpenOrGenerateDf после перерисовки
+--   зовут QuestsField:RefreshAllCellSizes() — размеры лута/anchor/temp
+--   пересчитываются по актуальному btn:GetWidth().
+--
 -- СПАВН СУЩЕСТВ:
 --   1. Не спавним в воду (water) и в пустоту (void).
 --   2. Оба существа — на ОДНОЙ стороне от воды: дворф выбирается из клеток,
 --      достижимых от гоблина BFS-ом без пересечения воды/void.
 --      Если таких нет — fallback: любая свободная не-вода.
 --
--- Генерация воды в GenerateDfMap:
---   - SeedRiver (река) и SeedLake (озеро) — из df/Terrain/Logic/Water.lua.
---     Каждый с шансом 50% (см. RIVER_CHANCE/LAKE_CHANCE там).
---   - Water ставит depth через Grid:SetDepth; Generate не лезет в глубину.
---   - Вода ставится ПОСЛЕ FillRandom — перетирает часть grass/stone/tree/earth.
---
 -- ПОЛНЫЙ РЕСТАРТ (RestartDfMap):
 --   - Оборвать анимации.
 --   - Очистить Terrain/Entities/Grid текущего этажа.
 --   - ПОЛНОСТЬЮ сбросить floors: visited/snapshots/min/max/current.
---     Без этого старые этажи (-1, -2, ...) остаются «visited», и
---     Switch(-1) грузит старый снимок без воды — вода не «проваливается».
 --   - Сбросить IsDfInitialized → существа заспавнятся заново.
 --   - GenerateDfMap() с нуля.
---
--- Существа спавнятся ТОЛЬКО при первой инициализации мира (IsDfInitialized).
+--   - RefreshAllCellSizes() в конце.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -60,9 +56,6 @@ NSQC4.RegisterModule("quests", function()
 
     -- ========================================================================
     -- Вспомогательное: «годится ли клетка под спавн»
-    --   - нет существа
-    --   - не вода
-    --   - не void
     -- ========================================================================
     local function IsSpawnableCell(Grid, i)
         if not Grid then return false end
@@ -73,9 +66,6 @@ NSQC4.RegisterModule("quests", function()
         return true
     end
 
-    -- ========================================================================
-    -- Вспомогательное: собрать свободные клетки (не вода, не void, без сущ.)
-    -- ========================================================================
     local function CollectFreeCells(Grid)
         local free = {}
         for i = 1, 100 do
@@ -88,7 +78,6 @@ NSQC4.RegisterModule("quests", function()
 
     -- ========================================================================
     -- BFS от startIndex по «суше» (не вода, не void, без существ).
-    -- Возвращает таблицу reachable[idx] = true.
     -- ========================================================================
     local function ReachableLand(Grid, startIndex)
         local reachable = {}
@@ -133,14 +122,12 @@ NSQC4.RegisterModule("quests", function()
 
         if hasGoblin and hasDwarf then return end
 
-        -- Свободные клетки: не вода, не void, без существ
         local free = CollectFreeCells(Grid)
         if #free == 0 then
             print("|cffff0000[NSQC4]|r EnsureCreatures: нет свободных клеток на суше.")
             return
         end
 
-        -- helper: убрать idx из free
         local function removeFromFree(list, value)
             for i = #list, 1, -1 do
                 if list[i] == value then
@@ -150,7 +137,6 @@ NSQC4.RegisterModule("quests", function()
             end
         end
 
-        -- helper: случайный элемент массива
         local function pickRandom(list)
             if #list == 0 then return nil end
             return list[math.random(#list)]
@@ -174,7 +160,6 @@ NSQC4.RegisterModule("quests", function()
             local dwarfIdx = nil
 
             if goblinIdx then
-                -- BFS от гоблина по суше
                 local reachable = ReachableLand(Grid, goblinIdx)
                 local sameSide = {}
                 for _, idx in ipairs(free) do
@@ -185,8 +170,6 @@ NSQC4.RegisterModule("quests", function()
                 dwarfIdx = pickRandom(sameSide)
             end
 
-            -- Fallback: если гоблина не было (hasGoblin==true) или
-            -- не нашлось клетки на той же стороне — любая свободная не-вода
             if not dwarfIdx then
                 dwarfIdx = pickRandom(free)
             end
@@ -230,7 +213,6 @@ NSQC4.RegisterModule("quests", function()
         end
 
         -- 2. Вода: река + озеро (после базы — перетирает часть клеток).
-        --    SeedRiver/SeedLake сами решают, появиться ли (шанс 50%).
         local placedWater = 0
         if Terrain.SeedRiver then
             local ok, res = pcall(Terrain.SeedRiver, Terrain)
@@ -247,6 +229,10 @@ NSQC4.RegisterModule("quests", function()
         end
 
         if Terrain.Render then Terrain:Render() end
+        -- ФИКС: после рендера новой карты пересчитать размеры
+        if QuestsField and QuestsField.RefreshAllCellSizes then
+            QuestsField:RefreshAllCellSizes()
+        end
         print("|cffff0000[GEN]|r Ландшафт сгенерирован.")
 
         -- Существа спавнятся ТОЛЬКО при первой генерации мира.
@@ -287,8 +273,7 @@ NSQC4.RegisterModule("quests", function()
             NSQC4.QuestsField:ClearAll()
         end
 
-        -- 3. ПОЛНЫЙ СБРОС ЭТАЖЕЙ: visited, snapshots, min/max, current.
-        --    Без этого Switch(-1) грузит старый снимок без воды.
+        -- 3. ПОЛНЫЙ СБРОС ЭТАЖЕЙ
         local floors = NSQC4.QuestsDfFloors
         if floors and floors.EnsureStorage then
             local s = floors:EnsureStorage()
@@ -300,7 +285,7 @@ NSQC4.RegisterModule("quests", function()
             print("|cffff8800[FLOORS]|r Все этажи сброшены (snapshots, visited, current=0).")
         end
 
-        -- 4. Сбросить флаг инициализации мира (чтобы существа заспавнились заново)
+        -- 4. Сбросить флаг инициализации мира
         self:SetDfInitialized(false)
 
         -- 5. Сгенерировать карту 0 с нуля
@@ -308,6 +293,11 @@ NSQC4.RegisterModule("quests", function()
 
         if Terrain and Terrain.Render then Terrain:Render() end
         if Entities and Entities.Render then Entities:Render() end
+
+        -- 6. ФИКС: пересчитать размеры клеток после полного рестарта
+        if QuestsField and QuestsField.RefreshAllCellSizes then
+            QuestsField:RefreshAllCellSizes()
+        end
 
         print("|cff00ff00[NSQC4]|r Поле полностью пересоздано с нуля!")
     end
@@ -335,8 +325,10 @@ NSQC4.RegisterModule("quests", function()
         else
             Terrain:Render()
             if NSQC4.QuestsDfEntities then NSQC4.QuestsDfEntities:Render() end
-            -- EnsureCreatures() убран: открытие поля НЕ должно доспавнивать существ.
-            -- Существа появляются только при первой генерации мира (GenerateDfMap).
+            -- ФИКС: после рендера — пересчитать размеры
+            if QuestsField and QuestsField.RefreshAllCellSizes then
+                QuestsField:RefreshAllCellSizes()
+            end
         end
 
         StartAITicker()
@@ -361,7 +353,6 @@ NSQC4.RegisterModule("quests", function()
         elseif cmd == "restart" then
             StaticPopup_Show("NSQC4_RESTART_DF")
         elseif cmd == "ensure" then
-            -- Ручной доспавн (для отладки). Осознанно оставлен как явная команда.
             EnsureCreatures()
             print("|cff00ff00[NSQC4]|r ensure: существ в byName " .. tostring(NSQC4.QuestsDfEntities:Count()))
         end

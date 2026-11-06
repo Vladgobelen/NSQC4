@@ -4,6 +4,19 @@
 --   wasBuilding = ai.wasBuilding (ставится в Work при DONE)
 --   + terrainId = ai.terrainId ("ladder" для стройки/лома)
 -- ai.workMode НЕ используется (в Work его больше нет).
+--
+-- ФИКС (строитель — бонус):
+--   Раньше для ladder без «Строителя» печаталось «ПРОФА нет для terrain=ladder»
+--   (result == "noprof"), что пугало: казалось, что задача не может быть
+--   выполнена. Теперь для ladder — «Строитель не выучен (бонус)».
+--   Логика TryUpProfession не менялась: если есть свободный слот
+--   (skills_max < max_skills_max) — шанс выучить «Строителя»;
+--   если уже выучен — шанс поднять на 1.
+--
+-- ШАГ 8 (через API поля):
+--   После смены terrain (Transform:Apply → SetTerrain) клетка
+--   перерисовывается через QuestsField:RefreshCell(target). df больше не
+--   зовёт TerrainUIApi:RenderCellFromStorage напрямую.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -15,6 +28,15 @@ NSQC4.RegisterModule("quests", function()
     local Transform = NSQC4.QuestsDfTransform
     local State     = NSQC4.QuestsDfAIState
     local ProfApi   = NSQC4.QuestsDfProfessionsApi
+
+    local QuestsField = NSQC4.QuestsField
+
+    local function RefreshCell(index)
+        if QuestsField and QuestsField.RefreshCell then
+            return QuestsField:RefreshCell(index)
+        end
+        return false
+    end
 
     local PROF_MAX   = 100
     local CHANCE_MAX = 100
@@ -206,7 +228,11 @@ NSQC4.RegisterModule("quests", function()
                     pname, ppct or 0, LineStr(pmult, pline))
             end
         elseif result == "noprof" then
-            profStr = string.format(" | ПРОФА нет для terrain=%s", tostring(terrainId))
+            if terrainId == "ladder" then
+                profStr = " | Строитель не выучен (бонус)"
+            else
+                profStr = string.format(" | ПРОФА нет для terrain=%s", tostring(terrainId))
+            end
         else
             profStr = " | ПРОФА skip"
         end
@@ -220,13 +246,9 @@ NSQC4.RegisterModule("quests", function()
 
         -- ====================================================================
         -- BUILD / DEMOLISH: режим — по wasBuilding + terrainId.
-        -- workMode не используется.
         -- ====================================================================
         if wasBuilding and Grid and Grid.IsBuilding then
             if terrainId == "ladder" then
-                -- как отличить build от demolish? По текущему hp:
-                --   hp >= max → build (достроено)
-                --   hp <= 0   → demolish (сломано)
                 local b = Grid:GetBuilding(workTarget)
                 local hp  = b and tonumber(b.hp)  or 0
                 local max = b and tonumber(b.max) or 0
@@ -242,8 +264,8 @@ NSQC4.RegisterModule("quests", function()
                     if Terrain and Terrain.SetTerrain then
                         Terrain:SetTerrain(workTarget, "void")
                     end
+                    RefreshCell(workTarget)
                 else
-                    -- неполное: не должно происходить (DONE по hp)
                     print(string.format(
                         "|cffffaa00[NSQC4]|r Лестница в клетке %d: hp=%d/%d (непонятное состояние).",
                         workTarget, hp, max))
@@ -273,6 +295,10 @@ NSQC4.RegisterModule("quests", function()
                 elseif Grid then
                     Grid:SetHardness(target, 0)
                 end
+                -- Transform:Apply меняет terrain через Terrain:SetTerrain,
+                -- который сам зовёт RenderCellFromStorage. Но на всякий случай
+                -- — RefreshCell, если Apply не сработал (fallback ветка).
+                RefreshCell(target)
             end
         end
 

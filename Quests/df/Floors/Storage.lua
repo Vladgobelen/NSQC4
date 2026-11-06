@@ -2,7 +2,7 @@
 -- NSQC4 / Quests / df / Floors / Storage
 -- Хранение состояния этажей + отладка.
 --
--- МОДЕЛЬ ДАННЫХ (исправлено):
+-- МОДЕЛЬ ДАННЫХ:
 --   byName — ГЛОБАЛЬНЫЙ реестр живых существ. Таблица entity живёт, пока
 --   существо живо. Удаляется ТОЛЬКО в:
 --     - Entities:Clear()    — полная генерация мира (RestartDfMap/Generate)
@@ -16,7 +16,9 @@
 --   При SaveFloor(n):
 --     - снимок берёт только тех, кто реально привязан к Grid (c.entityName)
 --     - с Grid снимаются entityName тех существ, которые НЕ входят в снимок
---       этого этажа (они «на другом этаже»), чтобы Grid не помнил чужих.
+--       И их НЕТ в byName (или index не совпадает) — т.е. реально ушедших.
+--       Живых существ с совпадающим index НЕ трогаем — иначе гоблин
+--       «исчезает» (был в byName, index=57, а Grid.entityName[57] сняли).
 --     - byName НЕ трогается — таблицы живут.
 --
 --   При LoadFloor(n):
@@ -162,11 +164,6 @@ NSQC4.RegisterModule("quests", function()
 
     -- ========================================================================
     -- Снимок существ этажа (byName + Grid)
-    --   Сохраняет и состояние шага (nextIndex/posX/posY/step*/stepT),
-    --   чтобы при загрузке продолжить движение, а не начинать заново.
-    --
-    --   В снимок попадают ТОЛЬКО существа, привязанные к Grid (c.entityName).
-    --   Остальные остаются в byName и «живут» на других этажах.
     -- ========================================================================
     local function SnapshotEntities()
         local list = {}
@@ -216,24 +213,41 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- Снять entityName с клеток Grid для существ, НЕ входящих в снимок этажа.
-    --   Вызывается после SnapshotEntities: снимок уже собран, теперь Grid
-    --   «забывает» чужих существ, чтобы они не всплыли при рендере.
-    --   Таблицы этих существ остаются в byName — они на другом этаже.
+    -- Снять entityName с клеток Grid для существ, которые РЕАЛЬНО ушли
+    -- с этажа (нет в byName, или index не совпадает с клеткой).
+    --
+    -- ФИКС: раньше снималось у ВСЕХ, кого нет в снимке — это «теряло»
+    -- живых существ (гоблин в byName, index=57, но Grid.entityName[57]
+    -- снимался, и CellRender переставал его видеть).
+    --
+    -- Теперь:
+    --   - нет в byName → снимаем (существо удалено/ушло)
+    --   - в byName, но index ≠ клетка → снимаем (старое имя)
+    --   - в byName, index == клетка → ОСТАВЛЯЕМ (живое, снимок мог быть
+    --     сделан до спавна)
     -- ========================================================================
     local function DetachNonSnapshotEntities(snapList)
         if not Grid then return end
-        local inSnap = {}
-        for _, rec in ipairs(snapList or {}) do
-            inSnap[rec.name] = true
-        end
+
+        local byName = ByName()
 
         for i = 1, TOTAL do
             local c = Grid:GetCell(i)
-            if c and c.entityName and not inSnap[c.entityName] then
-                dbg(string.format("Detach: cell %d entityName %s (не в снимке этажа)",
-                    i, tostring(c.entityName)))
-                c.entityName = nil
+            if c and c.entityName then
+                local e = byName[c.entityName]
+
+                if not e then
+                    dbg(string.format("Detach: cell %d entityName %s (нет в byName) — снимаю",
+                        i, tostring(c.entityName)))
+                    c.entityName = nil
+                elseif e.index and e.index ~= i then
+                    dbg(string.format("Detach: cell %d entityName %s (index %d≠%d) — снимаю",
+                        i, tostring(c.entityName), e.index or -1, i))
+                    c.entityName = nil
+                else
+                    dbg(string.format("Detach: cell %d entityName %s — ОСТАВЛЯЮ (в byName, index=%d)",
+                        i, tostring(c.entityName), e.index or -1))
+                end
             end
         end
     end
@@ -299,13 +313,12 @@ NSQC4.RegisterModule("quests", function()
     -- ========================================================================
     -- Восстановить существ из снимка.
     --
-    -- ГЛАВНОЕ ОТЛИЧИЕ ОТ СТАРОЙ ВЕРСИИ:
-    --   byName НЕ затирается. Мы только обновляем/добавляем записи из снимка.
-    --   Существа, которых нет в снимке, остаются в byName (они на другом
-    --   этаже). Их таблицы живут до явного Despawn/Clear.
+    -- byName НЕ затирается. Только обновляем/добавляем записи из снимка.
+    -- Существа, которых нет в снимке, остаются в byName (они на другом
+    -- этаже). Их таблицы живут до явного Despawn/Clear.
     --
-    --   stepT восстанавливается: stepStartedAt = now - stepT * stepDuration,
-    --   чтобы движение продолжилось с той же точки, а не началось заново.
+    -- stepT восстанавливается: stepStartedAt = now - stepT * stepDuration,
+    -- чтобы движение продолжилось с той же точки, а не началось заново.
     -- ========================================================================
     local function RestoreEntities(snapList)
         local E = NSQC4.QuestsDfEntities
@@ -429,8 +442,8 @@ NSQC4.RegisterModule("quests", function()
     -- ========================================================================
     -- SaveFloor(n)
     --   1. Собрать снимок существ ТОЛЬКО с текущего Grid (по entityName).
-    --   2. Снять entityName с клеток Grid для тех, кто не в снимке
-    --      (они уходят на другой этаж). Таблицы в byName остаются жить.
+    --   2. Снять entityName с клеток Grid для тех, кого реально нет
+    --      (не в byName или index не совпадает). Живых не трогаем.
     --   3. Записать снимок.
     -- ========================================================================
     function Floors:SaveFloor(n)
@@ -438,7 +451,7 @@ NSQC4.RegisterModule("quests", function()
         local s = EnsureStorage()
 
         local ents = SnapshotEntities()        -- 1. кто на этом этаже
-        DetachNonSnapshotEntities(ents)        -- 2. Grid забывает чужих
+        DetachNonSnapshotEntities(ents)        -- 2. отвязать реально ушедших
 
         s.snapshots[n] = {
             grid       = SnapshotGrid(),
@@ -459,10 +472,11 @@ NSQC4.RegisterModule("quests", function()
 
     -- ========================================================================
     -- LoadFloor(n)
-    --   1. Скрыть все визуальные фреймы существ (ClearAllVisuals).
+    --   1. Скрыть все визуальные фреймы существ (ClearAllVisuals — no-op).
     --   2. Восстановить Grid + selections из снимка.
     --   3. Восстановить/обновить существ из снимка. byName НЕ затирается.
     --   4. Существа не из снимка остаются в byName — они на другом этаже.
+    --   5. Доспавнить недостающих (гоблин/дворф), если их нет в byName.
     -- ========================================================================
     function Floors:LoadFloor(n)
         n = tonumber(n) or 0
@@ -477,15 +491,25 @@ NSQC4.RegisterModule("quests", function()
 
         if not snap then
             dbg(string.format("LoadFloor(%d): нет снимка → очищаю Grid (byName не трогаю)", n))
-            -- Очищаем Grid, но НЕ byName. Существа остаются жить —
-            -- они просто не привязаны к клеткам этого этажа.
             if Grid and Grid.ClearAll then Grid:ClearAll() end
+            -- ФИКС: доспавнить недостающих (иначе после Generate(-1) без
+            -- снимка гоблин/дворф останутся только в byName без Grid)
+            if NSQC4._EnsureDfCreatures then
+                NSQC4._EnsureDfCreatures()
+            end
             return false
         end
 
         RestoreGrid(snap.grid)
         RestoreSelections(snap.selections)
         RestoreEntities(snap.entities)
+
+        -- ФИКС: доспавнить недостающих — если снимок не содержал гоблина/
+        -- дворфа (например, этаж сгенерирован через Generate(-1) с
+        -- Entities:Clear, а снимок 0 был до появления существ).
+        if NSQC4._EnsureDfCreatures then
+            NSQC4._EnsureDfCreatures()
+        end
 
         local byNameCount = 0
         for _ in pairs(ByName()) do byNameCount = byNameCount + 1 end
@@ -613,6 +637,6 @@ NSQC4.RegisterModule("quests", function()
         end
     end
 
-    print("|cff00ffff[FLOORS]|r Floors/Storage загружен (byName глобальный, таблицы живут до Despawn/Clear; DEBUG=" .. tostring(Floors.DEBUG) .. ")")
+    print("|cff00ffff[FLOORS]|r Floors/Storage загружен (Detach по byName; DEBUG=" .. tostring(Floors.DEBUG) .. ")")
 
 end)

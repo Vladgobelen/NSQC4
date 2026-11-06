@@ -2,96 +2,75 @@
 -- NSQC4 / Quests / Field / UI / API / Clear
 -- Полная очистка визуала клетки и всего поля.
 --
--- ФИКС: btn._lootBorders[anchor] — массив из 4 текстур (sides), а не один
--- фрейм. Раньше было border:Hide() на массиве → "attempt to call method
--- 'Hide' (a nil value)". Теперь цикл по sides.
+-- ВСЁ рисование теперь в CellRender.lua. ClearCell:
+--   1. зовёт ClearCellRender(index) — снимает bg/terrain/build/loot/anchor/temp;
+--   2. сбрасывает btn._crSpec / btn._crLastEntity — чтобы следующая обёртка
+--      SetCellTexture/SetCellBuild не «дополняла» старый spec;
+--   3. снимает тултип/клики/ховер-состояние (_tooltipFn/_onEnter/_onLeave/
+--      _lastStateKey/_hoverInitialized);
+--   4. рамку кнопки — по IsBorderless().
 --
--- ФИКС: сбрасываем btn._tooltipFn / _lastStateKey / _hoverInitialized —
--- иначе после ClearCell остаются «висящие» ссылки, и Hover:RefreshTooltip
--- может звать tooltipFn на пустой клетке.
+-- Поля btn.texture / btn.build / btn.hoverTexture / btn.anchors /
+-- btn._lootTextures / btn._lootBorders БОЛЬШЕ НЕ СУЩЕСТВУЮТ как отдельные
+-- источники правды — их заменяет btn._cr (см. CellRender.lua).
+-- Если где-то в старом коде на них ещё ссылаются — это надо убрать
+-- (см. шаги 5–7 миграции).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
+
     local QuestsField = NSQC4.QuestsFieldClass
     local CONST       = NSQC4.QuestsFieldConst
     if not QuestsField or not CONST then return end
 
     local COLS, ROWS = CONST.COLS, CONST.ROWS
+    local TOTAL = COLS * ROWS
 
+    -- ========================================================================
+    -- Очистка одной клетки
+    -- ========================================================================
     function QuestsField:ClearCell(index)
         self:EnsureFrame()
-        local btn = self.cells[index]
+        local btn = self.cells and self.cells[index]
         if not btn then return end
 
-        -- 1. Основная текстура (ландшафт)
-        if btn.texture then
-            btn.texture:SetTexture(nil)
-            btn.texture:SetVertexColor(1, 1, 1, 1)
-            btn.texture:Hide()
+        -- 1. Снять весь рендер (bg/terrain/build/loot/anchor/temp) через CellRender
+        if self.ClearCellRender then
+            self:ClearCellRender(index)
         end
 
-        -- 2. Ховер-текстура
-        if btn.hoverTexture then
-            btn.hoverTexture:SetTexture(nil)
-            btn.hoverTexture:Hide()
-        end
+        -- 2. Сбросить накопленный spec и последний entity-spec
+        btn._crSpec        = nil
+        btn._crLastEntity  = nil
 
-        -- 3. Текст (основной и ховер)
-        if btn.text_main then
-            btn.text_main:SetText("")
-            btn.text_main:Hide()
-        end
-        if btn.text_hover then
-            btn.text_hover:SetText("")
-            btn.text_hover:Hide()
-        end
+        -- 3. Снять тултип/клики/ховер (как раньше)
+        btn._onEnter          = nil
+        btn._onLeave          = nil
+        btn._tooltipFn        = nil
+        btn._lastStateKey     = nil
+        btn._hoverInitialized = nil
+        btn._hovered          = false
+        btn._mouseHandlers    = nil
+        btn:SetScript("OnClick", nil)
+        btn:RegisterForClicks()
+        btn:SetScript("OnEnter", nil)
+        btn:SetScript("OnLeave", nil)
 
-        -- 4. Иконки-якоря (существо) — без рамок
-        if btn.anchors then
-            for _, anchor in pairs(btn.anchors) do
-                anchor:SetTexture(nil)
-                anchor:Hide()
-            end
-        end
-
-        -- 5. Лут-текстуры + их рамки
-        if btn._lootTextures then
-            for _, tex in pairs(btn._lootTextures) do
-                tex:Hide()
-                tex:ClearAllPoints()
-                tex:SetTexture(nil)
-            end
-            btn._lootTextures = nil
-        end
-        if btn._lootBorders then
-            for _, sides in pairs(btn._lootBorders) do
-                for _, tex in ipairs(sides) do
-                    tex:Hide()
-                    tex:ClearAllPoints()
-                    tex:SetTexture(nil)
-                end
-            end
-            btn._lootBorders = nil
-        end
-
-        -- 6. Рамка кнопки — по IsBorderless()
+        -- 4. Рамка кнопки — по IsBorderless()
         if self:IsBorderless() then
             btn:SetBackdropBorderColor(0, 0, 0, 0)
         else
             btn:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
         end
-
-        -- 7. Ховер-обработчики + тултип + state key
-        btn._onEnter = nil
-        btn._onLeave = nil
-        btn._tooltipFn = nil
-        btn._lastStateKey = nil
-        btn._hoverInitialized = nil
     end
 
+    -- ========================================================================
+    -- Очистка всего поля
+    -- ========================================================================
     function QuestsField:ClearAll()
-        for i = 1, COLS * ROWS do
+        for i = 1, TOTAL do
             self:ClearCell(i)
         end
     end
+
 end)

@@ -12,23 +12,27 @@
 --   loot  = { [anchor] = { id, icon }, ... }   -- лут в лут-якорях
 --   depth = 1..10 | nil                        -- глубина воды (Grid/Depth.lua)
 --
--- SetTerrainSelected снимает все другие типы в клетке.
+-- ВЫДЕЛЕНИЕ (шаг 10 — через API поля):
+--   SetTerrainSelected снимает все другие типы в клетке И перерисовывает
+--   клетку через QuestsField:RefreshCell(index) — поле само перечитает
+--   данные Grid, соберёт полный spec (highlight) и перевесит тултип/клики.
+--   df больше не зовёт TerrainUIApi:RenderCellFromStorage напрямую.
+--
+-- ВЫДЕЛЕНИЕ С ОТТЕНКОМ (шаг 2):
+--   При выделении df-объект задаёт оттенок через
+--   QuestsField:SetCellSelectTint(index, r,g,b,a).
+--   При де-выделении SetTerrainSelected(..., false) снимает тинт сам —
+--   чтобы df не звал ClearCellSelectTint в каждом LeftClickSelf.
+--   RefreshCell читает btn._crSelectTint в приоритете над ResolveHighlight
+--   (см. df/Terrain/UI/Api.lua → BuildSpec).
+--
 -- Reserve / Release / IsReserved — резерв клетки под существо.
 --
 -- ПРОХОДИМОСТЬ (IsPassable):
 --   Grid:IsPassable(index)          — «сырая»: void → false, занято → false.
---                                     Вода считается проходимой (terrain ~= void,
---                                     нет entityName). Для тех, кто не знает
---                                     про entity.
+--                                     Вода считается проходимой.
 --   Grid:IsPassable(index, entity)  — с учётом entity: вода проходима ТОЛЬКО
 --                                     если Resolve:CanSwim(entity) == true.
---                                     Иначе вода → false.
---                                     Это вторая линия защиты: Path/Move
---                                     уже фильтруют по Resolve:CanSwim, но
---                                     если кто-то забудет — Grid не пропустит.
---
---   Обратная совместимость: старые вызовы IsPassable(index) без entity
---   работают как раньше.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -45,6 +49,18 @@ NSQC4.RegisterModule("quests", function()
     local CONST = NSQC4.QuestsFieldConst
     if not CONST then return end
     local TOTAL = CONST.COLS * CONST.ROWS
+
+    local QuestsField = NSQC4.QuestsField
+
+    -- Перерисовать клетку через API поля.
+    --   Если поле/RefreshCell ещё не загружены (ранняя инициализация) —
+    --   тихо возвращаем false, никто не падает.
+    local function RefreshCell(index)
+        if QuestsField and QuestsField.RefreshCell then
+            return QuestsField:RefreshCell(index)
+        end
+        return false
+    end
 
     -- ========================================================================
     -- Хранилище клеток
@@ -164,6 +180,13 @@ NSQC4.RegisterModule("quests", function()
 
     -- ========================================================================
     -- Выделение
+    --
+    -- Шаг 10: после изменения выделения — перерисовать клетку через
+    -- QuestsField:RefreshCell(index). Это перечитывает Grid и собирает
+    -- полный spec (highlight + тултип + клики), а не накладывает заплатку.
+    --
+    -- Шаг 2: при де-выделении снимаем btn._crSelectTint — чтобы df не
+    -- звал ClearCellSelectTint в каждом LeftClickSelf.
     -- ========================================================================
     function Grid:SetTerrainSelected(index, terrainId, isSelected)
         local s = EnsureSelections()
@@ -180,7 +203,15 @@ NSQC4.RegisterModule("quests", function()
             if s.terrain_types[terrainId] then
                 s.terrain_types[terrainId][index] = nil
             end
+            -- Снять оттенок выделения: df задаёт его через SetCellSelectTint
+            -- при выделении; при де-выделении поле чистит само.
+            local btn = QuestsField and QuestsField.cells and QuestsField.cells[index]
+            if btn then btn._crSelectTint = nil end
         end
+
+        -- Перерисовать клетку через API поля.
+        RefreshCell(index)
+
         dbg("SetTerrainSelected", index, terrainId, isSelected and "ON" or "OFF")
     end
 
@@ -207,12 +238,22 @@ NSQC4.RegisterModule("quests", function()
         return s[layer] and s[layer][id] == true
     end
 
+    -- ========================================================================
+    -- ClearSelection: для layer="terrain" снимаем ВСЕ выделения этого
+    -- id-клетки и перерисовываем клетку (иначе highlight остаётся).
+    -- Раньше перерисовки не было — теперь через API поля.
+    -- ========================================================================
     function Grid:ClearSelection(layer, id)
         if layer == "terrain" then
             local s = EnsureSelections()
+            local touched = false
             for terrainId, list in pairs(s.terrain_types) do
-                if list[id] then list[id] = nil end
+                if list[id] then
+                    list[id] = nil
+                    touched = true
+                end
             end
+            if touched then RefreshCell(id) end
         else
             self:SetSelected(layer, id, false)
         end
@@ -277,35 +318,14 @@ NSQC4.RegisterModule("quests", function()
 
     -- ========================================================================
     -- Проходимость
-    --
-    --   Grid:IsPassable(index) — «сырая» проверка, БЕЗ entity:
-    --     - void → false
-    --     - есть entityName → false
-    --     - вода → true (для тех, кто не знает про entity)
-    --
-    --   Grid:IsPassable(index, entity) — с учётом entity:
-    --     - void → false
-    --     - есть entityName → false
-    --     - вода → только если Resolve:CanSwim(entity) == true
-    --     - остальное → true
-    --
-    --   «Никто без пловца не пройдёт по воде» обеспечивается второй формой:
-    --   Path/Move зовут Grid:IsPassable(neighbor, entity) — вода
-    --   заблокирована для не-пловцов. Если кто-то забудет про Resolve в
-    --   Path/Move, Grid всё равно не пропустит — двойная защита.
     -- ========================================================================
     function Grid:IsPassable(index, entity)
         local c = self:GetCell(index)
         if not c then return false end
 
-        -- void — никогда
         if c.terrain == "void" then return false end
-
-        -- занято существом — никогда (для «сырой» проверки)
         if c.entityName then return false end
 
-        -- вода: без entity — «сырая» проходимость true;
-        --        с entity — только для пловца
         if c.terrain == "water" and entity then
             local Resolve = NSQC4.QuestsDfProfessionsResolve
             local canSwim = false
@@ -345,6 +365,6 @@ NSQC4.RegisterModule("quests", function()
         print(string.format("[GRID] reserved=%d  [%s]", rcnt, table.concat(rcells, " ")))
     end
 
-    print("|cff00ffff[GRID-DEBUG]|r Единый реестр клеток инициализирован (byName, loot, depth, void, water).")
+    print("|cff00ffff[GRID-DEBUG]|r Единый реестр клеток инициализирован (шаг 10: SetTerrainSelected/ClearSelection → QuestsField:RefreshCell; де-выделение снимает _crSelectTint).")
 
 end)

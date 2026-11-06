@@ -1,19 +1,19 @@
 -- ============================================================================
 -- NSQC4 / Quests / df / Transform / Drops
--- Лут: слой OVERLAY.
+-- Лут: данные + сборка spec.loot для поля.
 --
--- ЕДИНОЕ ПРАВИЛО: у всех лут-якорей одна логика размера/слоя/позиции.
--- Текстура берётся по d.id из таблицы ICON_BY_ID (fallback → d.icon → nil).
+-- ВАЖНО (шаг 5b — через API поля):
+--   Дропы БОЛЬШЕ НЕ лезут в btn._crSpec и НЕ зовут RenderCell со
+--   собранным spec. Всё, что делает Drops:
+--     - хранит c.loot[anchor] = { id, icon }
+--     - отдаёт BuildLootSpec(index) → массив { anchor, texture, border }
+--     - зовёт QuestsField:SetCellLootSpec(index, list) — поле само мержит
+--       слой loot в btn._crSpec и перерисовывает
 --
--- ПОРЯДОК СЛОЁВ (все — текстуры на btn, один frame level btn+10):
---   sublevel 2 — бордер лута (4 тонкие текстуры)
---   sublevel 3 — иконка лута
---   sublevel 4 — anchor существа (Anchors.lua)
---   sublevel 5 — temp существа (Entities/UI/Api.lua)
+--   RefreshAllLootSizes → no-op (поле пересчитывает размеры само через
+--   QuestsField:RefreshAllCellSizes, вызывается из Frame/Resize/Overview).
 --
--- РАНЬШЕ бордер лута был ФРЕЙМОМ btn+11 — выше любых текстур btn+10,
--- поэтому существа оказывались ПОД дропами. Теперь бордер — текстуры
--- с sublevel 2, и всё в одном frame level: лут < anchor < temp.
+-- ICON_BY_ID — единственный резолвер иконки по id дропа.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -29,7 +29,6 @@ NSQC4.RegisterModule("quests", function()
 
     local CONST = NSQC4.QuestsFieldConst
     local TOTAL = CONST and (CONST.COLS * CONST.ROWS) or 100
-    local ANCHOR_INSET = CONST and CONST.ANCHOR_INSET or 0
 
     local IMG = "Interface\\AddOns\\NSQC4\\Media\\Images\\"
 
@@ -48,20 +47,12 @@ NSQC4.RegisterModule("quests", function()
     }
     Drops.LOOT_ANCHORS = LOOT_ANCHORS
 
-    local LOOT_LAYER    = "OVERLAY"
-    local LOOT_SUBLEVEL = 3
-
-    local BORDER_LAYER    = "OVERLAY"
-    local BORDER_SUBLEVEL = 2      -- ниже лута(3), anchor(4), temp(5)
-    local BORDER_SIZE     = 1
-
     Drops.DEBUG = false
 
     local function dbg(...)
         if Drops.DEBUG then print("|cff00ffff[DROPS]|r", ...) end
     end
 
-    -- Единый резолвер иконки: ICON_BY_ID[id] → d.icon → nil
     local function ResolveIcon(d)
         if not d then return nil end
         if d.id and ICON_BY_ID[d.id] then return ICON_BY_ID[d.id] end
@@ -76,6 +67,66 @@ NSQC4.RegisterModule("quests", function()
         return c.loot
     end
 
+    -- ========================================================================
+    -- Сборка spec.loot для поля
+    --   Возвращает массив { anchor, texture, border=true } или nil.
+    -- ========================================================================
+    function Drops:BuildLootSpec(index)
+        local c = Grid:GetCell(index)
+        if not c or not c.loot then return nil end
+
+        local list = {}
+        for _, anchor in ipairs(LOOT_ANCHORS) do
+            local d = c.loot[anchor]
+            if d then
+                local icon = ResolveIcon(d)
+                if icon then
+                    list[#list + 1] = {
+                        anchor  = anchor,
+                        texture = icon,
+                        border  = true,
+                    }
+                end
+            end
+        end
+        if #list == 0 then return nil end
+        return list
+    end
+
+    -- ========================================================================
+    -- Рендер клетки: отдать поле готовый loot-spec.
+    --   Поле (SetCellLootSpec) само:
+    --     - берёт btn._crSpec
+    --     - заменяет .loot
+    --     - зовёт RenderCell (там spec сохраняется обратно)
+    -- ========================================================================
+    function Drops:Render(index)
+        index = tonumber(index) or 0
+        if index < 1 or index > TOTAL then return false end
+        return QuestsField:SetCellLootSpec(index, self:BuildLootSpec(index))
+    end
+
+    function Drops:RenderAll()
+        for i = 1, TOTAL do
+            self:Render(i)
+        end
+    end
+
+    -- ========================================================================
+    -- @deprecated
+    -- Размеры теперь пересчитывает поле (QuestsField:RefreshAllCellSizes).
+    -- Оставлено no-op для совместимости с Frame/Resize/Overview, которые
+    -- ещё могут звать Drops.RefreshAllLootSizes.
+    -- ========================================================================
+    function Drops:RefreshAllLootSizes()
+        if QuestsField.RefreshAllCellSizes then
+            QuestsField:RefreshAllCellSizes()
+        end
+    end
+
+    -- ========================================================================
+    -- Данные (без изменений)
+    -- ========================================================================
     function Drops:FreeAnchors(index)
         local c = Grid:GetCell(index)
         if not c then return {} end
@@ -138,7 +189,7 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- Add теперь принимает только id. Иконка — из ICON_BY_ID.
-    function Drops:Add(index, id)
+    function Drops:Add(index, id, iconOverride)
         index = tonumber(index) or 0
         if index < 1 or index > TOTAL then return nil end
         if not id then return nil end
@@ -147,7 +198,7 @@ NSQC4.RegisterModule("quests", function()
         local anchor = free[1]
         local loot = EnsureLoot(index)
         if not loot then return nil end
-        loot[anchor] = { id = id }
+        loot[anchor] = { id = id, icon = iconOverride }
         self:Render(index)
         return anchor
     end
@@ -179,148 +230,6 @@ NSQC4.RegisterModule("quests", function()
         return true
     end
 
-    -- ========================================================================
-    -- Очистка текстур лута и его бордеров
-    -- ========================================================================
-    local function ClearLootBorders(btn)
-        if not btn._lootBorders then return end
-        for _, sides in pairs(btn._lootBorders) do
-            for _, tex in ipairs(sides) do
-                tex:Hide()
-                tex:ClearAllPoints()
-                tex:SetTexture(nil)
-            end
-        end
-        btn._lootBorders = nil
-    end
-
-    local function ClearLootTextures(index)
-        local btn = QuestsField.cells and QuestsField.cells[index]
-        if not btn then return end
-        if btn._lootTextures then
-            for _, tex in pairs(btn._lootTextures) do
-                tex:Hide()
-                tex:ClearAllPoints()
-                tex:SetTexture(nil)
-            end
-            btn._lootTextures = nil
-        end
-        ClearLootBorders(btn)
-    end
-
-    -- ========================================================================
-    -- Бордер лута: 4 тонкие текстуры на btn с sublevel 2.
-    -- ========================================================================
-    local function SetLootBorder(index, anchor, lootTex)
-        local btn = QuestsField.cells and QuestsField.cells[index]
-        if not btn or not lootTex then return end
-        if not btn._lootBorders then btn._lootBorders = {} end
-        local sides = btn._lootBorders[anchor]
-        if not sides then
-            sides = {}
-            for i = 1, 4 do
-                local t = btn:CreateTexture(nil, BORDER_LAYER, nil, BORDER_SUBLEVEL)
-                t:SetTexture("Interface\\Buttons\\WHITE8x8")
-                t:SetVertexColor(0, 0, 0, 1)
-                sides[i] = t
-            end
-            btn._lootBorders[anchor] = sides
-        end
-
-        local top, bottom, left, right = sides[1], sides[2], sides[3], sides[4]
-
-        top:ClearAllPoints()
-        top:SetPoint("TOPLEFT",  lootTex, "TOPLEFT",  -BORDER_SIZE,  BORDER_SIZE)
-        top:SetPoint("TOPRIGHT", lootTex, "TOPRIGHT",  BORDER_SIZE,  BORDER_SIZE)
-        top:SetHeight(BORDER_SIZE)
-        top:Show()
-
-        bottom:ClearAllPoints()
-        bottom:SetPoint("BOTTOMLEFT",  lootTex, "BOTTOMLEFT",  -BORDER_SIZE, -BORDER_SIZE)
-        bottom:SetPoint("BOTTOMRIGHT", lootTex, "BOTTOMRIGHT",  BORDER_SIZE, -BORDER_SIZE)
-        bottom:SetHeight(BORDER_SIZE)
-        bottom:Show()
-
-        left:ClearAllPoints()
-        left:SetPoint("TOPLEFT",    lootTex, "TOPLEFT",    -BORDER_SIZE, -BORDER_SIZE)
-        left:SetPoint("BOTTOMLEFT", lootTex, "BOTTOMLEFT", -BORDER_SIZE,  BORDER_SIZE)
-        left:SetWidth(BORDER_SIZE)
-        left:Show()
-
-        right:ClearAllPoints()
-        right:SetPoint("TOPRIGHT",    lootTex, "TOPRIGHT",    BORDER_SIZE, -BORDER_SIZE)
-        right:SetPoint("BOTTOMRIGHT", lootTex, "BOTTOMRIGHT", BORDER_SIZE,  BORDER_SIZE)
-        right:SetWidth(BORDER_SIZE)
-        right:Show()
-    end
-
-    -- Единое правило позиции для всех анкоров
-    local function AnchorPoint(tex, btn, anchor)
-        local ins = ANCHOR_INSET
-        if anchor == "TOPCENTER" then
-            tex:SetPoint("TOP", btn, "TOP", 0, -ins)
-        elseif anchor == "TOPRIGHT" then
-            tex:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -ins, -ins)
-        elseif anchor == "MIDLEFT" then
-            tex:SetPoint("LEFT", btn, "LEFT", ins, 0)
-        elseif anchor == "CENTER" then
-            tex:SetPoint("CENTER", btn, "CENTER", 0, 0)
-        elseif anchor == "MIDRIGHT" then
-            tex:SetPoint("RIGHT", btn, "RIGHT", -ins, 0)
-        elseif anchor == "BOTLEFT" then
-            tex:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", ins, ins)
-        elseif anchor == "BOTCENTER" then
-            tex:SetPoint("BOTTOM", btn, "BOTTOM", 0, ins)
-        elseif anchor == "BOTRIGHT" then
-            tex:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -ins, ins)
-        end
-    end
-
-    function Drops:Render(index)
-        index = tonumber(index) or 0
-        if index < 1 or index > TOTAL then return false end
-        local btn = QuestsField.cells and QuestsField.cells[index]
-        if not btn then return false end
-        ClearLootTextures(index)
-        local c = Grid:GetCell(index)
-        if not c or not c.loot then return true end
-        btn._lootTextures = {}
-        for anchor, d in pairs(c.loot) do
-            local icon = ResolveIcon(d)
-            local tex = btn:CreateTexture(nil, LOOT_LAYER, nil, LOOT_SUBLEVEL)
-            tex:SetTexture(icon)
-            tex:SetTexCoord(0, 1, 0, 1)
-            local size = btn:GetWidth() / 3 - 2
-            tex:SetSize(size, size)
-            AnchorPoint(tex, btn, anchor)
-            tex:Show()
-            btn._lootTextures[anchor] = tex
-            SetLootBorder(index, anchor, tex)
-        end
-        return true
-    end
-
-    function Drops:RefreshAllLootSizes()
-        for i = 1, TOTAL do
-            local btn = QuestsField.cells and QuestsField.cells[i]
-            if btn and btn._lootTextures then
-                local size = btn:GetWidth() / 3 - 2
-                for anchor, tex in pairs(btn._lootTextures) do
-                    if tex:IsShown() then
-                        tex:SetSize(size, size)
-                        SetLootBorder(i, anchor, tex)
-                    end
-                end
-            end
-        end
-    end
-
-    function Drops:RenderAll()
-        for i = 1, TOTAL do
-            self:Render(i)
-        end
-    end
-
     SLASH_NSDROPS1 = "/ns_drops"
     SlashCmdList["NSDROPS"] = function(msg)
         local cmd = (msg or ""):lower():match("^(%S*)")
@@ -335,6 +244,6 @@ NSQC4.RegisterModule("quests", function()
         end
     end
 
-    print("|cff00ffff[DROPS]|r Drops загружен (бордер лута — текстуры sublevel 2, существа выше).")
+    print("|cff00ffff[DROPS]|r Drops загружен (шаг 5b: через QuestsField:SetCellLootSpec, без btn._crSpec).")
 
 end)

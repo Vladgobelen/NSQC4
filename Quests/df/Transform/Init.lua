@@ -2,6 +2,9 @@
 -- NSQC4 / Quests / df / Transform / Init
 -- Реестр преобразований + Apply (раздача лута, смена terrain, выталкивание).
 --
+-- ИКОНКА ДРОПА: не здесь. Drops:Add(index, id) сам резолвит иконку по id
+-- через ICON_BY_ID (см. Drops.lua). dropIcon из дефов УБРАН (шаг 5.1).
+--
 -- Отладка:
 --   /ns_loot on | off | dump | map
 --
@@ -56,8 +59,12 @@ NSQC4.RegisterModule("quests", function()
         end
     end
 
+    -- ========================================================================
+    -- Дроп в эту же клетку (self)
+    --   dropIcon НЕ передаём — Drops:Add резолвит иконку по id.
+    -- ========================================================================
     local function DropSelf(index, def)
-        if not def.drop or not def.dropIcon then return 0 end
+        if not def.drop then return 0 end
         local Drops = NSQC4.QuestsDfTransformDrops
         if not Drops then return 0 end
         local minN = tonumber(def.dropMin) or 1
@@ -67,19 +74,25 @@ NSQC4.RegisterModule("quests", function()
         local n = math.random(minN, maxN)
         local placed = 0
         for _ = 1, n do
-            local a = Drops:Add(index, def.drop, def.dropIcon)
+            local a = Drops:Add(index, def.drop)
             if not a then
-                dbg(string.format("  self: cell %d — нет свободного якоря, дроп %s пропал", index, tostring(def.drop)))
+                dbg(string.format("  self: cell %d — нет свободного якоря, дроп %s пропал",
+                    index, tostring(def.drop)))
                 break
             end
             placed = placed + 1
-            dbg(string.format("  self: cell %d anchor %s ← %s", index, tostring(a), tostring(def.drop)))
+            dbg(string.format("  self: cell %d anchor %s ← %s",
+                index, tostring(a), tostring(def.drop)))
         end
         return placed
     end
 
+    -- ========================================================================
+    -- Дроп в соседние (neighbors)
+    --   dropIcon НЕ передаём — Drops:Add резолвит иконку по id.
+    -- ========================================================================
     local function DropNeighbors(index, def)
-        if not def.drop or not def.dropIcon then return 0 end
+        if not def.drop then return 0 end
         local Drops = NSQC4.QuestsDfTransformDrops
         local Grid  = NSQC4.QuestsDfGrid
         if not Drops or not Grid then return 0 end
@@ -90,7 +103,8 @@ NSQC4.RegisterModule("quests", function()
         if maxN < minN then maxN = minN end
         local total = math.random(minN, maxN)
         if total <= 0 then
-            dbg(string.format("  neighbors: cell %d — дропов 0 (min=%d,max=%d)", index, minN, maxN))
+            dbg(string.format("  neighbors: cell %d — дропов 0 (min=%d,max=%d)",
+                index, minN, maxN))
             return 0
         end
 
@@ -121,7 +135,7 @@ NSQC4.RegisterModule("quests", function()
             end
 
             if chosen then
-                local a = Drops:Add(chosen, def.drop, def.dropIcon)
+                local a = Drops:Add(chosen, def.drop)
                 if a then
                     placed = placed + 1
                     dbg(string.format("  neighbors: drop %d/%d cell %d anchor %s ← %s  [%s]",
@@ -138,6 +152,9 @@ NSQC4.RegisterModule("quests", function()
         return placed
     end
 
+    -- ========================================================================
+    -- EjectEntity: вытолкнуть существо (fallback, если Void не загружен)
+    -- ========================================================================
     local function EjectEntity(index)
         local Void = NSQC4.QuestsDfTransformVoid
         if Void and Void.EjectEntity then
@@ -169,13 +186,17 @@ NSQC4.RegisterModule("quests", function()
         return true
     end
 
+    -- ========================================================================
+    -- Apply
+    -- ========================================================================
     function Transform:Apply(index, terrainId)
         index = tonumber(index) or 0
         if index < 1 then return false end
 
         local def = self:Get(terrainId)
         if not def then
-            dbg(string.format("Apply: cell %d terrain=%s — нет def, пропуск", index, tostring(terrainId)))
+            dbg(string.format("Apply: cell %d terrain=%s — нет def, пропуск",
+                index, tostring(terrainId)))
             return false
         end
 
@@ -232,9 +253,11 @@ NSQC4.RegisterModule("quests", function()
                 local items = Drops:GetAll(i)
                 local parts = {}
                 for _, d in ipairs(items) do
-                    parts[#parts + 1] = string.format("%s@%s", tostring(d.id), tostring(d.anchor))
+                    parts[#parts + 1] = string.format("%s@%s",
+                        tostring(d.id), tostring(d.anchor))
                 end
-                print(string.format("  cell %d (%s): %s", i, tostring(t), table.concat(parts, ", ")))
+                print(string.format("  cell %d (%s): %s",
+                    i, tostring(t), table.concat(parts, ", ")))
             end
         end
         if found == 0 then print("  (пусто)") else print(string.format("  всего: %d", found)) end
@@ -244,7 +267,7 @@ NSQC4.RegisterModule("quests", function()
         local Drops = NSQC4.QuestsDfTransformDrops
         local Terrain = NSQC4.QuestsDfTerrain
         if not Drops or not Terrain then return end
-        local CH = { earth="E", grass="G", stone="S", tree="T", pool="P", void=".", ladder="L" }
+        local CH = { earth="E", grass="G", stone="S", tree="T", pool="P", void=".", ladder="L", water="W" }
         print("[LOOT] map:")
         for row = 9, 0, -1 do
             local line = ""

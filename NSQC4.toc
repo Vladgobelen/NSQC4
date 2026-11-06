@@ -85,6 +85,16 @@ Quests\Field\UI\Frame.lua
 Quests\Field\UI\Overview.lua
 
 # --- API поля ---
+# Порядок важен:
+#   1) CellRender — база: остальные API и весь df-слой зовут RenderCell.
+#   2) SelectTint / CellLayers / Refresh — новые API поля (шаги 1, 5a, 7):
+#      используют RenderCell и QuestsField.cells.
+#   3) Textures / Anchors / Text / Mouse / Hover / ContextMenu / Clear /
+#      Tooltip — старые API, совместимость.
+Quests\Field\UI\API\CellRender.lua
+Quests\Field\UI\API\SelectTint.lua
+Quests\Field\UI\API\CellLayers.lua
+Quests\Field\UI\API\Refresh.lua
 Quests\Field\UI\API\Textures.lua
 Quests\Field\UI\API\Anchors.lua
 Quests\Field\UI\API\Text.lua
@@ -162,7 +172,6 @@ Quests\df\Entities\Storage.lua
 Quests\df\Entities\Tooltip.lua
 Quests\df\Entities\UI\Api.lua
 Quests\df\Entities\UI\Animate.lua
-Quests\df\Entities\UI\Anchors.lua
 
 # --- TerrainActions (8 типов × 4 файла) ---
 Quests\df\Actions\Terrain\Init.lua

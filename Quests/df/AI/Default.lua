@@ -19,6 +19,11 @@
 --   положили в клетку (Grid:AddStored) → строим порциями по 100 HP →
 --   материал кончился → need_material → снова к материалу → … → DONE.
 --
+-- ШАГ 8 (через API поля):
+--   После изменения данных Grid (AddStored / SetCarrying снят и т.п.)
+--   клетка перерисовывается через QuestsField:RefreshCell(bIdx). df больше
+--   не зовёт TerrainUIApi:RenderCellFromStorage напрямую.
+--
 -- ОТЛАДКА:
 --   /ns_def on | off | dump [name]
 -- ============================================================================
@@ -39,6 +44,15 @@ NSQC4.RegisterModule("quests", function()
     local Move     = NSQC4.QuestsDfAIMove
     local Work     = NSQC4.QuestsDfAIWork
     local Complete = NSQC4.QuestsDfAIComplete
+
+    local QuestsField = NSQC4.QuestsField
+
+    local function RefreshCell(index)
+        if QuestsField and QuestsField.RefreshCell then
+            return QuestsField:RefreshCell(index)
+        end
+        return false
+    end
 
     if not (State and Find and Path and Move and Work and Complete) then
         print("|cffff0000[NSQC4]|r AI/Default: не все зависимости загружены.")
@@ -157,8 +171,7 @@ NSQC4.RegisterModule("quests", function()
                 dbg(string.format("%s deposited %s → cell %s stored=%d",
                     tostring(name), tostring(carry.material), tostring(bIdx),
                     Grid:GetStored(bIdx)))
-                local T = NSQC4.QuestsDfTerrainUIApi
-                if T and T.RenderCellFromStorage then T:RenderCellFromStorage(bIdx) end
+                RefreshCell(bIdx)
             end
 
             State:SetWorking(entity)
@@ -304,24 +317,19 @@ NSQC4.RegisterModule("quests", function()
             local r = Move:Advance(entity)
 
             if r == "arrived" then
-                -- дошли до центра последней клетки
                 OnArrived(entity, ai, name)
                 return true
 
             elseif r == "moved" then
-                -- дошли до центра промежуточной — продолжаем (следующий тик)
                 return true
 
             elseif r == "moving" then
-                -- между центрами, ещё в пути
                 return true
 
             elseif r == "wait" then
-                -- ждём nextStepAt
                 return true
 
             else
-                -- nil / ошибка / блокировка
                 dbg(string.format("%s moving: Move=%s → idle", tostring(name), tostring(r)))
                 State:SetIdle(entity)
                 return false
