@@ -28,50 +28,77 @@ NSQC4.RegisterModule("ui_frames_move", function()
     db.frames = db.frames or {}
     db.captureDelay = db.captureDelay or 5
 
+    -- ========================================================================
+    -- Отладка: подробный лог
+    -- ========================================================================
     local debugEnabled = false
+    local LOG_PREFIX = "|cFF66CCFF[FCMOVE]|r "
+
+    local function L(fmt, ...)
+        if debugEnabled then
+            print(LOG_PREFIX .. string.format(fmt, ...))
+        end
+    end
+
+    local function NameOf(obj)
+        if not obj then return "nil" end
+        if obj.GetName then
+            local n = obj:GetName()
+            if n and n ~= "" then return n end
+        end
+        if obj.GetObjectType then
+            return "<" .. tostring(obj:GetObjectType()) .. ">"
+        end
+        return "<obj>"
+    end
 
     -- ========================================================================
     -- Утилиты геометрии
     -- ========================================================================
     local function CaptureGeometry(frame)
         if not frame then return nil end
-        local g = {}
-        if frame.GetPoint then
-            local p, _, rp, x, y = frame:GetPoint()
+        local g = { points = {} }
+        local n = frame.GetNumPoints and frame:GetNumPoints() or 0
+        for i = 1, n do
+            local p, relTo, rp, x, y = frame:GetPoint(i)
             if p then
-                g.point = p
-                g.relPoint = rp or "CENTER"
-                g.x = x or 0
-                g.y = y or 0
+                table.insert(g.points, {
+                    point      = p,
+                    relToName  = (relTo and relTo.GetName and relTo:GetName()) or nil,
+                    relToType  = (relTo and relTo.GetObjectType and relTo:GetObjectType()) or nil,
+                    relPoint   = rp or "CENTER",
+                    x          = x or 0,
+                    y          = y or 0,
+                })
             end
         end
-        if frame.GetNumPoints and frame.GetPoint then
-            g.points = {}
-            for i = 1, frame:GetNumPoints() do
-                local p, relTo, rp, x, y = frame:GetPoint(i)
-                if p then
-                    table.insert(g.points, {
-                        point = p,
-                        relTo = (relTo and relTo.GetName and relTo:GetName()) or nil,
-                        relPoint = rp or "CENTER",
-                        x = x or 0,
-                        y = y or 0,
-                    })
-                end
-            end
+        -- дублируем первую точку для совместимости со старым форматом
+        local first = g.points[1]
+        if first then
+            g.point     = first.point
+            g.relToName = first.relToName
+            g.relPoint  = first.relPoint
+            g.x         = first.x
+            g.y         = first.y
         end
-        if frame.GetWidth then g.width = frame:GetWidth() end
-        if frame.GetHeight then g.height = frame:GetHeight() end
-        if frame.GetScale then g.scale = frame:GetScale() end
+        g.width  = frame.GetWidth  and frame:GetWidth()
+        g.height = frame.GetHeight and frame:GetHeight()
+        g.scale  = frame.GetScale  and frame:GetScale()
+        L("CaptureGeometry: %s -> %d point(s), size=%sx%s scale=%s",
+            NameOf(frame), #g.points, tostring(g.width), tostring(g.height), tostring(g.scale))
         return g
     end
 
     local function FormatGeometry(g)
         if not g then return "nil" end
         local parts = {}
-        if g.point then
-            parts[#parts+1] = string.format("point=%s relPoint=%s x=%s y=%s",
-                tostring(g.point), tostring(g.relPoint), tostring(g.x), tostring(g.y))
+        if g.points then
+            for i, pt in ipairs(g.points) do
+                parts[#parts+1] = string.format(
+                    "pt[%d]=%s->%s.%s(%.1f,%.1f)",
+                    i, tostring(pt.point), tostring(pt.relToName or "<anon>"),
+                    tostring(pt.relPoint), pt.x, pt.y)
+            end
         end
         if g.width or g.height then
             parts[#parts+1] = string.format("size=%sx%s", tostring(g.width), tostring(g.height))
@@ -79,21 +106,33 @@ NSQC4.RegisterModule("ui_frames_move", function()
         if g.scale then
             parts[#parts+1] = "scale=" .. tostring(g.scale)
         end
-        if g.points then
-            parts[#parts+1] = "points=" .. #g.points
-        end
         return table.concat(parts, " | ")
+    end
+
+    local function DumpGeometry(frame, label)
+        if not frame then
+            L("%s: frame=nil", label); return
+        end
+        L("%s: object=%s key=%s", label, NameOf(frame), tostring(GetObjectKey(frame)))
+        L("  size=%sx%s scale=%s",
+            tostring(frame:GetWidth()), tostring(frame:GetHeight()), tostring(frame:GetScale()))
+        local n = frame.GetNumPoints and frame:GetNumPoints() or 0
+        L("  numPoints=%d", n)
+        for i = 1, n do
+            local p, relTo, rp, x, y = frame:GetPoint(i)
+            L("    pt[%d]: %s -> %s.%s  x=%.1f y=%.1f",
+                i, tostring(p), NameOf(relTo), tostring(rp), x or 0, y or 0)
+        end
     end
 
     local function DebugCompare(frame, key, where)
         if not debugEnabled or not frame then return end
-        local nowG = CaptureGeometry(frame)
-        local data = key and db.frames[key]
+        local nowG  = CaptureGeometry(frame)
+        local data  = key and db.frames[key]
         local savedG = data and data.geometry or nil
-        local name = frame.GetName and (frame:GetName() or "unnamed") or "?"
-        print(string.format("|cFFFF8080[GEO]|r %s | %s", where or "?", name))
-        print("|cFFFF8080[GEO]|r   now:   " .. FormatGeometry(nowG))
-        print("|cFFFF8080[GEO]|r   saved: " .. FormatGeometry(savedG))
+        L("%s | %s", where or "?", NameOf(frame))
+        L("  now:   %s", FormatGeometry(nowG))
+        L("  saved: %s", FormatGeometry(savedG))
     end
 
     -- ========================================================================
@@ -128,22 +167,22 @@ NSQC4.RegisterModule("ui_frames_move", function()
 
     local function DebugFrame(frame, label)
         if not debugEnabled or not frame then return end
-        local name = frame.GetName and frame:GetName() or "nil"
-        local otype = frame.GetObjectType and frame:GetObjectType() or "?"
+        local name    = frame.GetName and frame:GetName() or "nil"
+        local otype   = frame.GetObjectType and frame:GetObjectType() or "?"
         local movable = frame.IsMovable and tostring(frame:IsMovable()) or "?"
-        print(string.format("|cFFFF8080[DBG]|r %s: name=%s type=%s movable=%s",
-            label or "frame", tostring(name), tostring(otype), movable))
+        L("%s: name=%s type=%s movable=%s",
+            label or "frame", tostring(name), tostring(otype), movable)
     end
 
     local function DebugChain(frame)
         if not debugEnabled or not frame then return end
         local i, cur = 0, frame
         while cur and i < 10 do
-            local name = cur.GetName and cur:GetName() or "nil"
-            local otype = cur.GetObjectType and cur:GetObjectType() or "?"
+            local name    = cur.GetName and cur:GetName() or "nil"
+            local otype   = cur.GetObjectType and cur:GetObjectType() or "?"
             local movable = cur.IsMovable and tostring(cur:IsMovable()) or "?"
-            print(string.format("|cFFFF8080[DBG]|r   chain[%d]: %s (%s) movable=%s",
-                i, tostring(name), tostring(otype), movable))
+            L("  chain[%d]: %s (%s) movable=%s",
+                i, tostring(name), tostring(otype), movable)
             cur = cur.GetParent and cur:GetParent() or nil
             i = i + 1
         end
@@ -205,7 +244,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
             local name = frame:GetName()
             if name and name ~= "" then return name end
         end
-        local otype = frame.GetObjectType and frame:GetObjectType() or "Frame"
+        local otype  = frame.GetObjectType and frame:GetObjectType() or "Frame"
         local parent = frame.GetParent and frame:GetParent()
         if parent and parent.GetName then
             local pname = parent:GetName()
@@ -217,57 +256,81 @@ NSQC4.RegisterModule("ui_frames_move", function()
     -- ========================================================================
     -- Применение / восстановление геометрии
     -- ========================================================================
-    local function ApplyGeometry(frame, g)
-        if not frame or not g then return end
+    local function ResolveRelTo(pt)
+        if pt.relToName and _G[pt.relToName] then return _G[pt.relToName] end
+        return UIParent
+    end
 
-        -- Размер
+    local function ApplyGeometry(frame, g, ctx)
+        if not frame or not g then
+            L("ApplyGeometry[%s]: frame/g is nil (frame=%s g=%s)",
+                tostring(ctx), tostring(frame ~= nil), tostring(g ~= nil))
+            return
+        end
+        L("ApplyGeometry[%s] START for %s", tostring(ctx), NameOf(frame))
+        DumpGeometry(frame, "  before")
+
+        -- 1) сначала точки привязки
+        if g.points and #g.points > 0 and frame.ClearAllPoints and frame.SetPoint then
+            frame:ClearAllPoints()
+            for i, pt in ipairs(g.points) do
+                local relTo = ResolveRelTo(pt)
+                frame:SetPoint(pt.point, relTo, pt.relPoint, pt.x, pt.y)
+                L("  SetPoint[%d] %s -> %s.%s (%.1f, %.1f)",
+                    i, pt.point, NameOf(relTo), pt.relPoint, pt.x, pt.y)
+            end
+        elseif g.point and frame.ClearAllPoints and frame.SetPoint then
+            -- старый формат без points
+            local relTo = (g.relToName and _G[g.relToName]) or UIParent
+            frame:ClearAllPoints()
+            frame:SetPoint(g.point, relTo, g.relPoint, g.x, g.y)
+            L("  SetPoint (legacy) %s -> %s.%s (%.1f, %.1f)",
+                g.point, NameOf(relTo), g.relPoint, g.x, g.y)
+        else
+            L("  no points to apply")
+        end
+
+        -- 2) размер
         if g.width and g.height and frame.SetSize then
             frame:SetSize(g.width, g.height)
+            L("  SetSize(%s, %s)", g.width, g.height)
         end
 
-        -- Скейл
-        if g.scale and frame.SetScale then
+        -- 3) scale — только если отличается от текущего!
+        if g.scale and frame.SetScale and frame:GetScale() ~= g.scale then
             frame:SetScale(g.scale)
+            L("  SetScale(%s)", g.scale)
         end
 
-        -- Точки привязки
-        if frame.ClearAllPoints and frame.SetPoint then
-            if g.points and #g.points > 0 then
-                frame:ClearAllPoints()
-                for _, pt in ipairs(g.points) do
-                    local relTo = (pt.relTo and _G[pt.relTo]) or UIParent
-                    frame:SetPoint(pt.point, relTo, pt.relPoint, pt.x, pt.y)
-                end
-            elseif g.point then
-                frame:ClearAllPoints()
-                frame:SetPoint(g.point, UIParent, g.relPoint, g.x, g.y)
-            end
-        end
+        DumpGeometry(frame, "  after")
     end
 
     local function ApplyPositionByKey(key)
+        L("ApplyPositionByKey: key=%s", tostring(key))
         local frame = GetFrameByKey(key)
         if not frame then
-            if debugEnabled then print("|cFFFF8080[GEO]|r Apply: frame not found for " .. tostring(key)) end
-            return
+            L("  !! frame NOT FOUND for key=%s", tostring(key))
+            return false
         end
         local data = db.frames[key]
-        if not data or not data.geometry then return end
-
-        DebugCompare(frame, key, "Apply BEFORE: " .. key)
-        ApplyGeometry(frame, data.geometry)
-        DebugCompare(frame, key, "Apply AFTER: " .. key)
+        if not data or not data.geometry then
+            L("  !! no saved geometry for key=%s", tostring(key))
+            return false
+        end
+        ApplyGeometry(frame, data.geometry, "apply:" .. tostring(key))
+        return true
     end
 
     local function ResetFrameByKey(key)
+        L("ResetFrameByKey: key=%s", tostring(key))
         local frame = GetFrameByKey(key)
-        if frame then
-            local data = db.frames[key]
-            if data and data.defaultGeometry then
-                DebugCompare(frame, key, "Reset BEFORE: " .. key)
-                ApplyGeometry(frame, data.defaultGeometry)
-                DebugCompare(frame, key, "Reset AFTER: " .. key)
-            end
+        local data  = db.frames[key]
+        if frame and data and data.defaultGeometry then
+            ApplyGeometry(frame, data.defaultGeometry, "reset:" .. tostring(key))
+        else
+            L("  !! reset skipped (frame=%s data=%s defaultGeom=%s)",
+                tostring(frame ~= nil), tostring(data ~= nil),
+                tostring(data and data.defaultGeometry ~= nil))
         end
         db.frames[key] = nil
         if NSQC4.FramesMove_RefreshList then NSQC4.FramesMove_RefreshList() end
@@ -276,11 +339,13 @@ NSQC4.RegisterModule("ui_frames_move", function()
     local function ResetAll()
         for key in pairs(db.frames) do
             local frame = GetFrameByKey(key)
-            local data = db.frames[key]
+            local data  = db.frames[key]
             if frame and data and data.defaultGeometry then
-                DebugCompare(frame, key, "ResetAll BEFORE: " .. key)
-                ApplyGeometry(frame, data.defaultGeometry)
-                DebugCompare(frame, key, "ResetAll AFTER: " .. key)
+                ApplyGeometry(frame, data.defaultGeometry, "resetall:" .. tostring(key))
+            else
+                L("ResetAll: skip %s (frame=%s defaultGeom=%s)",
+                    tostring(key), tostring(frame ~= nil),
+                    tostring(data and data.defaultGeometry ~= nil))
             end
         end
         db.frames = {}
@@ -288,15 +353,14 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     local function ApplyAllSaved()
-        if debugEnabled then
-            print("|cFFFF8080[GEO]|r ===== ApplyAllSaved START =====")
-        end
+        local total = 0
+        for _ in pairs(db.frames) do total = total + 1 end
+        L("===== ApplyAllSaved: %d frame(s) =====", total)
+        local ok, fail = 0, 0
         for key in pairs(db.frames) do
-            ApplyPositionByKey(key)
+            if ApplyPositionByKey(key) then ok = ok + 1 else fail = fail + 1 end
         end
-        if debugEnabled then
-            print("|cFFFF8080[GEO]|r ===== ApplyAllSaved END =====")
-        end
+        L("===== ApplyAllSaved DONE: ok=%d fail=%d =====", ok, fail)
     end
 
     -- ========================================================================
@@ -309,9 +373,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
         local data = db.frames[key]
         if not data then return end
         data.geometry = CaptureGeometry(frame)
-        if debugEnabled then
-            DebugCompare(frame, key, "Save: " .. key)
-        end
+        L("SaveCurrentPosition: key=%s geometry=%s", tostring(key), FormatGeometry(data.geometry))
         if NSQC4.FramesMove_RefreshList then NSQC4.FramesMove_RefreshList() end
     end
 
@@ -321,6 +383,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
             moveOverlay:SetParent(nil)
             moveOverlay = nil
         end
+        L("StopMoveMode")
         print("|cFF00FF00NSQC4:|r режим перемещения выключен.")
     end
 
@@ -329,11 +392,9 @@ NSQC4.RegisterModule("ui_frames_move", function()
 
         local target = frame
 
-        if debugEnabled then
-            print("|cFF00FF00[DBG]|r === StartMoveForFrame ===")
-            DebugFrame(frame, "выбранный")
-            DebugChain(frame)
-        end
+        L("=== StartMoveForFrame ===")
+        DebugFrame(frame, "выбранный")
+        DebugChain(frame)
 
         local key = GetObjectKey(target)
         if not key then
@@ -345,9 +406,8 @@ NSQC4.RegisterModule("ui_frames_move", function()
             local data = db.frames[key]
             if not data.defaultGeometry then
                 data.defaultGeometry = CaptureGeometry(target)
-                if debugEnabled then
-                    DebugCompare(target, key, "defaultGeometry captured: " .. key)
-                end
+                L("defaultGeometry captured: key=%s geom=%s",
+                    tostring(key), FormatGeometry(data.defaultGeometry))
             end
         end
 
@@ -356,9 +416,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
             moveOverlay:SetParent(nil)
         end
 
-        if debugEnabled then
-            DebugCompare(target, key, "StartMoveForFrame BEFORE overlay: " .. tostring(key))
-        end
+        DebugCompare(target, key, "StartMoveForFrame BEFORE overlay: " .. tostring(key))
 
         local ov = CreateFrame("Frame", nil, target)
         ov:SetAllPoints(target)
@@ -377,14 +435,14 @@ NSQC4.RegisterModule("ui_frames_move", function()
 
         ov:SetScript("OnMouseDown", function(self, button)
             if button == "LeftButton" then
-                if debugEnabled then DebugCompare(target, key, "OnMouseDown BEFORE: " .. tostring(key)) end
+                DebugCompare(target, key, "OnMouseDown BEFORE: " .. tostring(key))
                 target:SetMovable(true)
                 target:EnableMouse(true)
                 target:StartMoving()
-                if debugEnabled then DebugCompare(target, key, "OnMouseDown AFTER StartMoving: " .. tostring(key)) end
+                DebugCompare(target, key, "OnMouseDown AFTER StartMoving: " .. tostring(key))
             elseif button == "RightButton" then
                 target:StopMovingOrSizing()
-                if debugEnabled then DebugCompare(target, key, "OnMouseDown RB AFTER Stop: " .. tostring(key)) end
+                DebugCompare(target, key, "OnMouseDown RB AFTER Stop: " .. tostring(key))
                 if key then ApplyPositionByKey(key) end
                 StopMoveMode()
             end
@@ -393,7 +451,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
         ov:SetScript("OnMouseUp", function(self, button)
             if button == "LeftButton" then
                 target:StopMovingOrSizing()
-                if debugEnabled then DebugCompare(target, key, "OnMouseUp AFTER Stop: " .. tostring(key)) end
+                DebugCompare(target, key, "OnMouseUp AFTER Stop: " .. tostring(key))
                 SaveCurrentPosition(target, key)
                 StopMoveMode()
             end
@@ -455,9 +513,11 @@ NSQC4.RegisterModule("ui_frames_move", function()
                     local frame = GetMouseFrame()
                     if frame then
                         txt:SetText("Захвачено: " .. GetObjectDisplayName(frame))
+                        L("Countdown captured frame: %s", NameOf(frame))
                         callback(frame)
                     else
                         txt:SetText("Фрейм не найден!")
+                        L("Countdown: frame NOT FOUND")
                     end
                     local hideTimer = CreateFrame("Frame")
                     hideTimer.last = GetTime()
@@ -562,8 +622,8 @@ NSQC4.RegisterModule("ui_frames_move", function()
         child:SetHeight(math.max(#keys * ENTRY_H, 10))
 
         for i, key in ipairs(keys) do
-            local data = db.frames[key]
-            local frame = GetFrameByKey(key)
+            local data    = db.frames[key]
+            local frame   = GetFrameByKey(key)
             local display = frame and GetObjectDisplayName(frame) or key
 
             local row = CreateFrame("Frame", nil, child)
@@ -612,11 +672,13 @@ NSQC4.RegisterModule("ui_frames_move", function()
                 local pdata = db.frames[pkey]
                 if not pdata.defaultGeometry then
                     pdata.defaultGeometry = CaptureGeometry(parent)
+                    L("parent defaultGeometry captured: key=%s geom=%s",
+                        tostring(pkey), FormatGeometry(pdata.defaultGeometry))
                 end
                 print("|cFF00FF00NSQC4:|r родитель добавлен в список: " .. GetObjectDisplayName(parent))
-                if debugEnabled then DebugCompare(parent, pkey, "^ parent BEFORE: " .. pkey) end
+                DebugCompare(parent, pkey, "^ parent BEFORE: " .. pkey)
                 StartMoveForFrame(parent)
-                if debugEnabled then DebugCompare(parent, pkey, "^ parent AFTER: " .. pkey) end
+                DebugCompare(parent, pkey, "^ parent AFTER: " .. pkey)
                 NSQC4.FramesMove_RefreshList()
             end)
 
@@ -626,6 +688,9 @@ NSQC4.RegisterModule("ui_frames_move", function()
                 GameTooltip:SetText("Объект: " .. key, 1, 1, 1)
                 if data and data.geometry then
                     GameTooltip:AddLine("Сохранено: " .. FormatGeometry(data.geometry), 0, 1, 0)
+                end
+                if data and data.defaultGeometry then
+                    GameTooltip:AddLine("По умолчанию: " .. FormatGeometry(data.defaultGeometry), 0.7, 0.7, 1)
                 end
                 GameTooltip:Show()
             end)
@@ -700,6 +765,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
         saveBtn:SetText("Сохранить")
         saveBtn:SetScript("OnClick", function()
             db.captureDelay = math.floor(slider:GetValue())
+            L("Settings saved: captureDelay=%d", db.captureDelay)
             f:Hide()
         end)
 
@@ -725,6 +791,32 @@ NSQC4.RegisterModule("ui_frames_move", function()
         elseif msg == "debug" then
             debugEnabled = not debugEnabled
             print("|cFF00FF00NSQC4:|r отладка " .. (debugEnabled and "включена" or "выключена") .. ".")
+            if debugEnabled then
+                local total = 0
+                for k in pairs(db.frames) do
+                    total = total + 1
+                    local d = db.frames[k]
+                    L("db entry: key=%s", tostring(k))
+                    L("  saved:   %s", FormatGeometry(d.geometry))
+                    L("  default: %s", FormatGeometry(d.defaultGeometry))
+                end
+                L("db total entries: %d", total)
+            end
+        elseif msg == "list" then
+            debugEnabled = true
+            print(LOG_PREFIX .. "===== DB DUMP =====")
+            local total = 0
+            for k, d in pairs(db.frames) do
+                total = total + 1
+                print(LOG_PREFIX .. "key=" .. tostring(k))
+                print(LOG_PREFIX .. "  saved:   " .. FormatGeometry(d.geometry))
+                print(LOG_PREFIX .. "  default: " .. FormatGeometry(d.defaultGeometry))
+            end
+            print(LOG_PREFIX .. "total: " .. total)
+        elseif msg == "applynow" then
+            -- принудительно применить с полной отладкой
+            debugEnabled = true
+            ApplyAllSaved()
         else
             local f = CreateMainFrame()
             if f:IsShown() then
@@ -747,13 +839,52 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- Восстановление при загрузке
+    -- Восстановление при входе в мир
     -- ========================================================================
+    -- Модули грузятся уже после логина, поэтому PLAYER_LOGIN не нужен.
+    -- Применяем на PLAYER_ENTERING_WORLD и повторно с задержкой,
+    -- чтобы перебить поздний layout от Blizzard/аддонов.
     local restoreFrame = CreateFrame("Frame")
-    restoreFrame:RegisterEvent("PLAYER_LOGIN")
-    restoreFrame:SetScript("OnEvent", function(self)
-        self:UnregisterEvent("PLAYER_LOGIN")
+    restoreFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    restoreFrame:SetScript("OnEvent", function(self, event, isInitialLogin, isReloadingUi)
+        self:UnregisterEvent(event)
+        L("PLAYER_ENTERING_WORLD (login=%s reload=%s) -> schedule apply",
+            tostring(isInitialLogin), tostring(isReloadingUi))
+
+        -- Мгновенная попытка — вдруг всё готово
         ApplyAllSaved()
+
+        -- Плюс повторы: Blizzard/аддоны могут перестроить фреймы позже
+        local delays = { 0.5, 2, 5 }
+        for _, d in ipairs(delays) do
+            local t = CreateFrame("Frame")
+            local elapsed = 0
+            t:SetScript("OnUpdate", function(self2, dt)
+                elapsed = elapsed + dt
+                if elapsed >= d then
+                    self2:SetScript("OnUpdate", nil)
+                    L("delayed apply (+%.1fs)", d)
+                    ApplyAllSaved()
+                end
+            end)
+        end
+    end)
+
+    -- На случай смены масштаба UI / разрешения
+    local scaleWatch = CreateFrame("Frame")
+    scaleWatch:RegisterEvent("UI_SCALE_CHANGED")
+    scaleWatch:RegisterEvent("DISPLAY_SIZE_CHANGED")
+    scaleWatch:SetScript("OnEvent", function(self, event)
+        L("%s -> delayed apply", tostring(event))
+        local t = CreateFrame("Frame")
+        local elapsed = 0
+        t:SetScript("OnUpdate", function(self2, dt)
+            elapsed = elapsed + dt
+            if elapsed >= 1 then
+                self2:SetScript("OnUpdate", nil)
+                ApplyAllSaved()
+            end
+        end)
     end)
 
     -- ========================================================================

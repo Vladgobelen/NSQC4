@@ -1,0 +1,404 @@
+======================================================================
+ LUA DUMP: /home/diver/Games/wc/CircleL/Interface/AddOns/NSQC4/Quests/NSDB
+ Date: 2026-11-09 22:46:16
+======================================================================
+
+======================================================================
+ FILE: Clear.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / NSDB / Clear
+-- Одна логика: Clear(scope) — очистить все параметры таблицы.
+--   Сама таблица остаётся (пустая).
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local NSDB = NSQC4.NSDB
+    if not NSDB then return end
+
+    function NSDB:Clear(scope)
+        if not self:ValidName(scope) then return false end
+        local t = self:Walk(scope)
+        if not t then return false end
+        for k in pairs(t) do
+            t[k] = nil
+        end
+        return true
+    end
+
+end)
+
+
+======================================================================
+ FILE: Debug.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / NSDB / Debug
+-- Одна логика: /ns_db tables | dump <scope> | clear <scope> | drop <scope>.
+-- dump рекурсивный: показывает вложенные таблицы.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local NSDB = NSQC4.NSDB
+    if not NSDB then return end
+
+    local function DumpTree(t, prefix, depth)
+        if depth > 6 then return end
+        local keys = {}
+        for k in pairs(t) do keys[#keys + 1] = k end
+        table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+        for _, k in ipairs(keys) do
+            local v = t[k]
+            if type(v) == "table" then
+                print(string.format("  %s%s = {", prefix, tostring(k)))
+                DumpTree(v, prefix .. "  ", depth + 1)
+                print(string.format("  %s}", prefix))
+            else
+                print(string.format("  %s%s = %s", prefix, tostring(k), tostring(v)))
+            end
+        end
+    end
+
+    SLASH_NSDB1 = "/ns_db"
+    SlashCmdList["NSDB"] = function(msg)
+        local cmd, arg = (msg or ""):match("^(%S*)%s*(.-)$")
+        cmd = (cmd or ""):lower()
+        arg = arg or ""
+
+        if cmd == "" or cmd == "tables" then
+            local root = NSDB:Root()
+            local names = {}
+            for n in pairs(root) do names[#names + 1] = n end
+            table.sort(names)
+            print(string.format("[NSDB] таблиц верхнего уровня: %d", #names))
+            for _, n in ipairs(names) do
+                print(string.format("  %s", n))
+            end
+
+        elseif cmd == "dump" then
+            if arg == "" then
+                print("[NSDB] /ns_db dump <scope>")
+                return
+            end
+            local t = NSDB:Walk(arg)
+            if not t then
+                print("[NSDB] нет таблицы: " .. arg)
+                return
+            end
+            print(string.format("[NSDB] %s = {", arg))
+            DumpTree(t, "  ", 0)
+            print("}")
+
+        elseif cmd == "clear" then
+            if arg == "" then
+                print("[NSDB] /ns_db clear <scope>")
+                return
+            end
+            print(string.format("[NSDB] clear %s → %s", arg,
+                tostring(NSDB:Clear(arg))))
+
+        elseif cmd == "drop" then
+            if arg == "" then
+                print("[NSDB] /ns_db drop <scope>")
+                return
+            end
+            print(string.format("[NSDB] drop %s → %s", arg,
+                tostring(NSDB:DropTable(arg))))
+
+        else
+            print("[NSDB] /ns_db tables | dump <scope> | clear <scope> | drop <scope>")
+        end
+    end
+
+    print("|cff00ffff[NSDB]|r База данных загружена. /ns_db tables | dump <scope>")
+
+end)
+
+
+======================================================================
+ FILE: Delete.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / NSDB / Delete
+-- Одна логика: Delete(scope, key) → true | false.
+--   true, если ключ был и удалён.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local NSDB = NSQC4.NSDB
+    if not NSDB then return end
+
+    function NSDB:Delete(scope, key)
+        if not self:ValidName(scope) then return false end
+        if key == nil then return false end
+
+        local t = self:Walk(scope)
+        if not t then return false end
+        if t[key] == nil then return false end
+        t[key] = nil
+        return true
+    end
+
+end)
+
+
+======================================================================
+ FILE: DropTable.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / NSDB / DropTable
+-- Одна логика: DropTable(scope) — удалить таблицу по пути.
+--
+--   DropTable("field")       → nsDbc4.quests.field = nil
+--   DropTable("field.pos")   → nsDbc4.quests.field.pos = nil
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local NSDB = NSQC4.NSDB
+    if not NSDB then return end
+
+    function NSDB:DropTable(scope)
+        if not self:ValidName(scope) then return false end
+
+        -- Разбить на родителя и последний сегмент.
+        local parentPath, lastName = scope:match("^(.*)%.([^%.]+)$")
+        local parent
+        if parentPath then
+            parent = self:Walk(parentPath)
+        else
+            parent = self:Root()
+            lastName = scope
+        end
+
+        if not parent then return false end
+        if parent[lastName] == nil then return false end
+        parent[lastName] = nil
+        return true
+    end
+
+end)
+
+
+======================================================================
+ FILE: Get.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / NSDB / Get
+-- Одна логика: Get(scope, key) → value | nil.
+--   Таблицы/ключа нет — nil (без ошибки).
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local NSDB = NSQC4.NSDB
+    if not NSDB then return end
+
+    function NSDB:Get(scope, key)
+        if not self:ValidName(scope) then return nil end
+        if key == nil then return nil end
+
+        local t = self:Walk(scope)
+        if not t then return nil end
+        return t[key]
+    end
+
+end)
+
+
+======================================================================
+ FILE: Has.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / NSDB / Has
+-- Одна логика: Has(scope, key) → true | false.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local NSDB = NSQC4.NSDB
+    if not NSDB then return end
+
+    function NSDB:Has(scope, key)
+        if not self:ValidName(scope) then return false end
+        if key == nil then return false end
+
+        local t = self:Walk(scope)
+        if not t then return false end
+        return t[key] ~= nil
+    end
+
+end)
+
+
+======================================================================
+ FILE: HasTable.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / NSDB / HasTable
+-- Одна логика: HasTable(scope) → true | false.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local NSDB = NSQC4.NSDB
+    if not NSDB then return end
+
+    function NSDB:HasTable(scope)
+        if not self:ValidName(scope) then return false end
+        return self:Walk(scope) ~= nil
+    end
+
+end)
+
+
+======================================================================
+ FILE: Init.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / NSDB / Init
+-- Namespace базы данных + общие утилиты (ValidName).
+-- Никаких методов хранения — они в отдельных файлах.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local NSDB = {}
+    NSQC4.NSDB = NSDB
+
+    function NSDB:ValidName(name)
+        return type(name) == "string" and name ~= ""
+    end
+
+end)
+
+
+======================================================================
+ FILE: Root.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / NSDB / Root
+-- Одна логика: корень базы (nsDbc4.quests) + навигация по пути scope.
+--
+--   Root()              -- nsDbc4.quests (гарантирует)
+--   Walk(scope)         -- таблица по пути, БЕЗ создания промежуточных
+--   WalkCreate(scope)   -- таблица по пути, С созданием промежуточных
+--
+-- scope = "field.pos" → nsDbc4.quests.field.pos
+-- scope = "field"     → nsDbc4.quests.field
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local NSDB = NSQC4.NSDB
+    if not NSDB then return end
+
+    function NSDB:Root()
+        nsDbc4 = nsDbc4 or {}
+        nsDbc4.quests = nsDbc4.quests or {}
+        return nsDbc4.quests
+    end
+
+    -- Walk(scope) → таблица | nil (не создаёт).
+    function NSDB:Walk(scope)
+        if type(scope) ~= "string" or scope == "" then return nil end
+        local cur = self:Root()
+        for part in scope:gmatch("[^%.]+") do
+            cur = cur[part]
+            if cur == nil then return nil end
+            if type(cur) ~= "table" then return nil end
+        end
+        return cur
+    end
+
+    -- WalkCreate(scope) → таблица (создаёт промежуточные).
+    function NSDB:WalkCreate(scope)
+        if type(scope) ~= "string" or scope == "" then return nil end
+        local cur = self:Root()
+        for part in scope:gmatch("[^%.]+") do
+            if type(cur[part]) ~= "table" then
+                cur[part] = {}
+            end
+            cur = cur[part]
+        end
+        return cur
+    end
+
+end)
+
+
+======================================================================
+ FILE: Set.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / NSDB / Set
+-- Одна логика: Set(scope, key, value) — записать параметр.
+--
+--   scope — путь таблицы ("field", "field.pos")
+--   key   — имя параметра ("x", "cellSize")
+--   value = nil → Delete(scope, key).
+--   Таблица по пути scope создаётся, если нет.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local NSDB = NSQC4.NSDB
+    if not NSDB then return end
+
+    function NSDB:Set(scope, key, value)
+        if not self:ValidName(scope) then return false end
+        if key == nil then return false end
+
+        local t = self:WalkCreate(scope)
+        if not t then return false end
+
+        if value == nil then
+            t[key] = nil
+        else
+            t[key] = value
+        end
+        return true
+    end
+
+end)
+
+
+======================================================================
+ FILE: Table.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / NSDB / Table
+-- Одна логика: Table(scope) — создать/получить таблицу по пути scope.
+--
+--   Table("field")       → nsDbc4.quests.field
+--   Table("field.pos")   → nsDbc4.quests.field.pos
+--   Создаёт, если нет.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local NSDB = NSQC4.NSDB
+    if not NSDB then return end
+
+    function NSDB:Table(scope)
+        if not self:ValidName(scope) then return nil end
+        return self:WalkCreate(scope)
+    end
+
+end)
+
+

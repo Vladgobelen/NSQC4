@@ -1,0 +1,11 @@
+Таблицы (scope — путь с точкой, например "field" или "field.pos"):
+    NSDB:Table(scope) — создать/получить таблицу по пути, вернуть её.
+    NSDB:HasTable(scope) — true, если таблица по пути существует.
+    NSDB:DropTable(scope) — удалить таблицу по пути целиком.
+    NSDB:Clear(scope) — очистить все параметры таблицы (сама таблица остаётся).
+
+Параметры (key — имя параметра внутри scope):
+    NSDB:Set(scope, key, value) — записать параметр (value = nil → удалить).
+    NSDB:Get(scope, key) — прочитать параметр (nil, если нет).
+    NSDB:Delete(scope, key) — удалить параметр (true, если был).
+    NSDB:Has(scope, key) — true, если параметр есть.

@@ -5,6 +5,9 @@
 ## Version: 1.3
 ## SavedVariables: nsDbc4
 
+# ============================================================================
+# Core
+# ============================================================================
 Core\Settings\Settings.lua
 Core\ModuleRegistry.lua
 Core\Settings\Modifiers.lua
@@ -17,11 +20,19 @@ Core\SlashPanel.lua
 Core\MinimapIcon.lua
 Core\Charter.lua
 Core\Settings\OptionsPanel.lua
+
+# ============================================================================
+# BS
+# ============================================================================
 BS\Stats.lua
 BS\ItemLevel.lua
 BS\PlayerScore.lua
 BS\ItemScore.lua
 BS\Chat.lua
+
+# ============================================================================
+# Guild
+# ============================================================================
 Guild\KickInactive.lua
 Guild\AutoPromote.lua
 Guild\Demote.lua
@@ -34,6 +45,10 @@ Guild\BlackList.lua
 Guild\RaidName.lua
 Guild\r.lua
 RaidName.lua
+
+# ============================================================================
+# Interface
+# ============================================================================
 Interface\Mail.lua
 Interface\ChatButtons.lua
 Interface\AOReputation.lua
@@ -45,13 +60,25 @@ Interface\ListUI.lua
 Interface\PlayerInfo.lua
 Interface\InfoFrame.lua
 Interface\Bugs\Bugs.lua
+
+# ============================================================================
+# Events
+# ============================================================================
 Events\Cats.lua
+
+# ============================================================================
+# Interface (продолжение)
+# ============================================================================
 Interface\Vendor.lua
 Interface\ui_frames\Chat.lua
 Interface\ui_frames\Layers.lua
 Interface\ui_frames\Alpha.lua
 Interface\ui_frames\Move.lua
 Interface\WIMGuard.lua
+
+# ============================================================================
+# GP
+# ============================================================================
 GP\GP.lua
 GP\ExternalGP.lua
 GP\AUK.lua
@@ -62,6 +89,10 @@ GP\LogReceiver.lua
 GP\PveSeason.lua
 GP\Roll.lua
 GP\TargetGP.lua
+
+# ============================================================================
+# Course
+# ============================================================================
 Course\Modules.lua
 Course\UI.lua
 Course\Logic.lua
@@ -69,223 +100,114 @@ Course\Reminder.lua
 Course\CodeShare.lua
 Course\Triggers.lua
 Course\Init.lua
+
 VERSION.lua
 
-# ==========================================
-# QUESTS — ядро поля 10×10
-# ==========================================
+# ============================================================================
+# NSQC4 / Quests / NSDB
+# ============================================================================
+Quests\NSDB\Init.lua
+Quests\NSDB\Root.lua
+Quests\NSDB\Get.lua
+Quests\NSDB\Set.lua
+Quests\NSDB\Has.lua
+Quests\NSDB\HasTable.lua
+Quests\NSDB\Table.lua
+Quests\NSDB\Delete.lua
+Quests\NSDB\Clear.lua
+Quests\NSDB\DropTable.lua
+Quests\NSDB\Debug.lua
+
+# ============================================================================
+# NSQC4 / Quests / Field
+# ============================================================================
+# --- ядро ---
+Quests\Field\Core\Class.lua
+Quests\Field\Const.lua
 Quests\Field\Init.lua
-Quests\Field\Storage.lua
-Quests\Field\UI\Cells.lua
-Quests\Field\UI\Border.lua
-Quests\Field\UI\Resize.lua
-Quests\Field\UI\Frame.lua
+Quests\Field\Core\Storage.lua
 
-# --- Обзор (вид сверху / уменьшенный масштаб) ---
-Quests\Field\UI\Overview.lua
+# --- frame ---
+Quests\Field\Frame\Create.lua
+Quests\Field\Frame\Show.lua
 
-# --- API поля ---
-# Порядок важен:
-#   1) CellRender — база: остальные API и весь df-слой зовут RenderCell.
-#   2) SelectTint / CellLayers / Refresh — новые API поля (шаги 1, 5a, 7):
-#      используют RenderCell и QuestsField.cells.
-#   3) Textures / Anchors / Text / Mouse / Hover / ContextMenu / Clear /
-#      Tooltip — старые API, совместимость.
-Quests\Field\UI\API\CellRender.lua
-Quests\Field\UI\API\SelectTint.lua
-Quests\Field\UI\API\CellLayers.lua
-Quests\Field\UI\API\Refresh.lua
-Quests\Field\UI\API\Textures.lua
-Quests\Field\UI\API\Anchors.lua
-Quests\Field\UI\API\Text.lua
-Quests\Field\UI\API\Mouse.lua
-Quests\Field\UI\API\Hover.lua
-Quests\Field\UI\API\ContextMenu.lua
-Quests\Field\UI\API\Clear.lua
-Quests\Field\UI\API\Tooltip.lua
+# --- клетки ---
+Quests\Field\Cells\Create.lua
+Quests\Field\Cells\Reflow.lua
+Quests\Field\Cells\Border.lua
 
-# ==========================================
-# QUESTS — профиль "df"
-# ==========================================
+# --- подложка/рамка ---
+Quests\Field\Border\Backdrop.lua
+Quests\Field\Border\Visible.lua
+Quests\Field\Border\Drag.lua
+Quests\Field\Border\Click.lua
 
-# --- Единый реестр клеток ---
-Quests\df\Grid.lua
-Quests\df\Grid\Hardness.lua
-Quests\df\Grid\Depth.lua
-Quests\df\Grid\Buildings.lua
-Quests\df\Grid\Neighbors.lua
+# --- крестик ---
+Quests\Field\Close\Button.lua
 
-# --- Реестр профессий (плоский список имён для known_skills) ---
-Quests\df\Professions.lua
+# --- ресайз ---
+Quests\Field\Resize\Resize.lua
+Quests\Field\Resize\Apply.lua
+Quests\Field\Resize\Handle.lua
 
-# --- Реестр профессий (API + реализации) ---
-Quests\df\Professions\Init.lua
-Quests\df\Professions\Resolve.lua
-Quests\df\Professions\Digger.lua
-Quests\df\Professions\Lumberjack.lua
-Quests\df\Professions\Stonecutter.lua
-Quests\df\Professions\Herbalist.lua
-Quests\df\Professions\Swimmer.lua
-Quests\df\Professions\Builder.lua
+# --- кнопки панелей: геометрия, панели, анимация, регистрация ---
+Quests\Field\UI\Buttons\CellCoords.lua
+Quests\Field\UI\Buttons\Panel.lua
+Quests\Field\UI\Buttons\Press.lua
+Quests\Field\UI\Buttons\Register.lua
 
-# --- Ландшафт: данные типов ---
-Quests\df\Terrain\Data\Init.lua
-Quests\df\Terrain\Data\Earth.lua
-Quests\df\Terrain\Data\Grass.lua
-Quests\df\Terrain\Data\Stone.lua
-Quests\df\Terrain\Data\Tree.lua
-Quests\df\Terrain\Data\Pool.lua
-Quests\df\Terrain\Data\Void.lua
-Quests\df\Terrain\Data\Ladder.lua
-Quests\df\Terrain\Data\Water.lua
+# --- кнопки панелей: отрисовка, хит-тест, клик, мышь ---
+Quests\Field\UI\Buttons\Draw.lua
+Quests\Field\UI\Buttons\Hit.lua
+Quests\Field\UI\Buttons\Click.lua
+Quests\Field\UI\Buttons\Mouse.lua
 
-# --- Ландшафт: ядро и логика ---
-Quests\df\Terrain\Init.lua
-Quests\df\Terrain\Storage.lua
-Quests\df\Terrain\UI\Api.lua
-Quests\df\Terrain\Logic\Init.lua
-Quests\df\Terrain\Logic\Earth.lua
-Quests\df\Terrain\Logic\Grass.lua
-Quests\df\Terrain\Logic\Stone.lua
-Quests\df\Terrain\Logic\Tree.lua
-Quests\df\Terrain\Logic\Pool.lua
-Quests\df\Terrain\Logic\Void.lua
-Quests\df\Terrain\Logic\Ladder.lua
-Quests\df\Terrain\Logic\Water.lua
+# --- свитчеры панелей ---
+Quests\Field\Switcher\Init.lua
+Quests\Field\Switcher\Draw.lua
+Quests\Field\Switcher\Click.lua
+Quests\Field\Switcher\Mouse.lua
 
-# --- Transform: реестр преобразований, лут, void ---
-Quests\df\Transform\Init.lua
-Quests\df\Transform\Data.lua
-Quests\df\Transform\Drops.lua
-Quests\df\Transform\Void.lua
+# --- UI: Окна, Лейблы, Радио ---
+Quests\Field\UI\Window\Init.lua
+Quests\Field\UI\Window\API.lua
+Quests\Field\UI\Window\Layout.lua
+Quests\Field\UI\Label\Init.lua
+Quests\Field\UI\Label\Refresh.lua
 
-# --- Floors: этажи (Init → Storage → Generate → Switch → UI) ---
-Quests\df\Floors\Init.lua
-Quests\df\Floors\Storage.lua
-Quests\df\Floors\Generate.lua
-Quests\df\Floors\Switch.lua
-Quests\df\Floors\UI.lua
+# --- универсальный рендерер кнопок (NSQC4.UIButton) ---
+Quests\Field\UI\Buttons\Init.lua
 
-# --- живые существа (база) ---
-Quests\df\Entities\Init.lua
-Quests\df\Entities\Storage.lua
-Quests\df\Entities\Tooltip.lua
-Quests\df\Entities\UI\Api.lua
-Quests\df\Entities\UI\Animate.lua
+# --- радио-группы ---
+Quests\Field\UI\Radio\Init.lua
+Quests\Field\UI\Radio\Refresh.lua
 
-# --- TerrainActions (8 типов × 4 файла) ---
-Quests\df\Actions\Terrain\Init.lua
+# --- настройки поля ---
+Quests\Field\Settings\Init.lua
+Quests\Field\Settings\Content.lua
+Quests\Field\Settings\Radio.lua
 
-Quests\df\Actions\Terrain\Earth\Check.lua
-Quests\df\Actions\Terrain\Earth\LeftClickSelf.lua
-Quests\df\Actions\Terrain\Earth\LeftClickEntities.lua
-Quests\df\Actions\Terrain\Earth\RightClickEntities.lua
+# --- мышь поля и точка входа ---
+Quests\Field\Frame\Mouse.lua
+Quests\Field\Bootstrap.lua
 
-Quests\df\Actions\Terrain\Grass\Check.lua
-Quests\df\Actions\Terrain\Grass\LeftClickSelf.lua
-Quests\df\Actions\Terrain\Grass\LeftClickEntities.lua
-Quests\df\Actions\Terrain\Grass\RightClickEntities.lua
-
-Quests\df\Actions\Terrain\Stone\Check.lua
-Quests\df\Actions\Terrain\Stone\LeftClickSelf.lua
-Quests\df\Actions\Terrain\Stone\LeftClickEntities.lua
-Quests\df\Actions\Terrain\Stone\RightClickEntities.lua
-
-Quests\df\Actions\Terrain\Tree\Check.lua
-Quests\df\Actions\Terrain\Tree\LeftClickSelf.lua
-Quests\df\Actions\Terrain\Tree\LeftClickEntities.lua
-Quests\df\Actions\Terrain\Tree\RightClickEntities.lua
-
-Quests\df\Actions\Terrain\Pool\Check.lua
-Quests\df\Actions\Terrain\Pool\LeftClickSelf.lua
-Quests\df\Actions\Terrain\Pool\LeftClickEntities.lua
-Quests\df\Actions\Terrain\Pool\RightClickEntities.lua
-
-Quests\df\Actions\Terrain\Void\Check.lua
-Quests\df\Actions\Terrain\Void\LeftClickSelf.lua
-Quests\df\Actions\Terrain\Void\LeftClickEntities.lua
-Quests\df\Actions\Terrain\Void\RightClickEntities.lua
-
-Quests\df\Actions\Terrain\Ladder\Check.lua
-Quests\df\Actions\Terrain\Ladder\LeftClickSelf.lua
-Quests\df\Actions\Terrain\Ladder\LeftClickEntities.lua
-Quests\df\Actions\Terrain\Ladder\RightClickEntities.lua
-
-# --- Вода: действия (ЛКМ/ПКМ, существа) ---
-Quests\df\Actions\Terrain\Water\Check.lua
-Quests\df\Actions\Terrain\Water\LeftClickSelf.lua
-Quests\df\Actions\Terrain\Water\LeftClickEntities.lua
-Quests\df\Actions\Terrain\Water\RightClickEntities.lua
-
-# --- AI: реестр поведений (до Tick.lua!) ---
-Quests\df\AI\Behavior\Init.lua
-
-# --- AI: подсистемы ---
-Quests\df\AI\Init.lua
-Quests\df\AI\Ticker.lua
-Quests\df\AI\State.lua
-Quests\df\AI\Path.lua
-Quests\df\AI\Find.lua
-Quests\df\AI\Stats.lua
-Quests\df\AI\Move.lua
-Quests\df\AI\Sound.lua
-Quests\df\AI\Work.lua
-Quests\df\AI\Complete.lua
-Quests\df\AI\Default.lua
-
-# --- Goblin: база + поведение ---
-Quests\df\Goblin\Init.lua
-Quests\df\Goblin\Allowed.lua
-Quests\df\Goblin\Behavior\Init.lua
-Quests\df\Goblin\Behavior\Peaceful.lua
-Quests\df\Goblin\Behavior\Aggressive.lua
-Quests\df\Goblin\Names.lua
-Quests\df\Goblin\Gods.lua
-Quests\df\Goblin\Stats.lua
-Quests\df\Goblin\Descriptions.lua
-Quests\df\Goblin\Spawner.lua
-Quests\df\Goblin\Tooltip.lua
-
-# --- Dwarf: база + поведение ---
-Quests\df\Dwarf\Init.lua
-Quests\df\Dwarf\Allowed.lua
-Quests\df\Dwarf\Behavior\Init.lua
-Quests\df\Dwarf\Behavior\Peaceful.lua
-Quests\df\Dwarf\Behavior\Aggressive.lua
-Quests\df\Dwarf\Names.lua
-Quests\df\Dwarf\Gods.lua
-Quests\df\Dwarf\Stats.lua
-Quests\df\Dwarf\Descriptions.lua
-Quests\df\Dwarf\Spawner.lua
-Quests\df\Dwarf\Tooltip.lua
-
-# --- главный инит проекта df (вызывает Ticker:Start) ---
-Quests\df\Init.lua
-
-# --- AI: диспетчер поведения. СТРОГО ПОСЛЕДНИМ (переопределяет AI:TickEntity) ---
-Quests\df\AI\Tick.lua
-
-# ==========================================
+# ============================================================================
 # NOWIM (ЧАТ)
-# ==========================================
-Interface\nowim\Config.lua
-Interface\nowim\Utils.lua
-Interface\nowim\Aliases.lua
-Interface\nowim\Storage.lua
-Interface\nowim\Network.lua
-Interface\nowim\ChatHook.lua
-Interface\nowim\ChatEngine.lua
-
-Interface\nowim\UI\ChatView\ConfigUI.lua
-
-Interface\nowim\UI\ChatView\Window.lua
-Interface\nowim\UI\ChatView\Scroll.lua
-Interface\nowim\UI\ChatView\Chat.lua
-Interface\nowim\UI\ChatView\Input.lua
-
-Interface\nowim\UI\RightPanel.lua
-Interface\nowim\UI\LeftPanel.lua
-Interface\nowim\UI\Tabs.lua
-Interface\nowim\UI\ConstSettings.lua
-
-Interface\nowim\Init.lua
+# ============================================================================
+Interface\owim\Config.lua
+Interface\owim\Utils.lua
+Interface\owim\Aliases.lua
+Interface\owim\Storage.lua
+Interface\owim\Network.lua
+Interface\owim\ChatHook.lua
+Interface\owim\ChatEngine.lua
+Interface\owim\UI\ChatView\ConfigUI.lua
+Interface\owim\UI\ChatView\Window.lua
+Interface\owim\UI\ChatView\Scroll.lua
+Interface\owim\UI\ChatView\Chat.lua
+Interface\owim\UI\ChatView\Input.lua
+Interface\owim\UI\RightPanel.lua
+Interface\owim\UI\LeftPanel.lua
+Interface\owim\UI\Tabs.lua
+Interface\owim\UI\ConstSettings.lua
+Interface\owim\Init.lua
