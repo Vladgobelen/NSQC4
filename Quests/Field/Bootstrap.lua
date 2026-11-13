@@ -7,7 +7,7 @@
 -- ОТЛАДКА: [BOOT]. Отключить — BOOT_DEBUG = false.
 -- ============================================================================
 NSQC4.RegisterModule("quests", function()
-    local BOOT_DEBUG = true
+    local BOOT_DEBUG = false
     local function dbg(...)
         if BOOT_DEBUG then print("|cffffaa00[BOOT]|r", ...) end
     end
