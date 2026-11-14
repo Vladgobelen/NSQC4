@@ -161,16 +161,28 @@ Quests\Field\UI\Buttons\Panel.lua
 Quests\Field\UI\Buttons\Press.lua
 Quests\Field\UI\Buttons\Register.lua
 
-# --- кнопки панелей: отрисовка, хит-тест, клик, мышь ---
-Quests\Field\UI\Buttons\Draw.lua
+# --- кнопки панелей: отрисовка (разбито на Visible/Position/Appearance/Size/Refresh) ---
+Quests\Field\UI\Buttons\Draw\Visible.lua
+Quests\Field\UI\Buttons\Draw\Position.lua
+Quests\Field\UI\Buttons\Draw\Appearance.lua
+Quests\Field\UI\Buttons\Draw\Size.lua
+Quests\Field\UI\Buttons\Draw\Refresh.lua
+
+# --- кнопки панелей: хит-тест, мышь ---
 Quests\Field\UI\Buttons\Hit.lua
-Quests\Field\UI\Buttons\Click.lua
 Quests\Field\UI\Buttons\Mouse.lua
+
+# --- кнопки панелей: клик (разбито на Click/Release/Tooltip) ---
+Quests\Field\UI\Buttons\Click\Click.lua
+Quests\Field\UI\Buttons\Click\Release.lua
+Quests\Field\UI\Buttons\Click\Tooltip.lua
 
 # --- свитчеры панелей ---
 Quests\Field\Switcher\Init.lua
 Quests\Field\Switcher\Draw.lua
-Quests\Field\Switcher\Click.lua
+Quests\Field\Switcher\Click\Hit.lua
+Quests\Field\Switcher\Click\Action.lua
+Quests\Field\Switcher\Click\Tooltip.lua
 Quests\Field\Switcher\Mouse.lua
 
 # --- UI: Окна, Лейблы, Радио ---
