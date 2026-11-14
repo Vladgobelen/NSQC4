@@ -1,7 +1,7 @@
 -- ============================================================================
 -- NSQC4 / Quests / Field / Init
--- Одна логика: создание класса QuestsFieldClass + экземпляра NSQC4.Field.
--- Никаких вызовов методов и никаких слэшей — это делает Bootstrap.lua.
+-- Одна логика: создание класса QuestsFieldClass.
+-- НЕ создаёт экземпляр — это делает Core/Instance/Create.lua.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -24,7 +24,5 @@ NSQC4.RegisterModule("quests", function()
         self.onFloorUp     = nil
         self.onFloorDown   = nil
     end
-
-    NSQC4.Field = QuestsField.new()
 
 end, 280)

@@ -8,8 +8,10 @@
 --   }
 --   self._pressTex  = texture          -- одна текстура «вдавливания» клетки
 --
--- Цвет линий — серый 0.25 (как было у SetBackdropBorderColor).
--- SetBorderless → Hide/Show линий (см. Cells/Border.lua).
+-- Слои:
+--   линии  ARTWORK sublevel 4   (видимый серый 0.5 — контраст и на чёрной
+--                                подложке, и на фоне мира)
+--   press  OVERLAY sublevel 5   (как было)
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -20,7 +22,7 @@ NSQC4.RegisterModule("quests", function()
 
     local COLS, ROWS = CONST.COLS, CONST.ROWS
 
-    local LINE_COLOR  = { 0.25, 0.25, 0.25, 1 }
+    local LINE_COLOR  = { 0.5, 0.5, 0.5, 1 }
     local PRESS_ALPHA = 0.35
 
     function QuestsField:CreateCells()
@@ -33,7 +35,7 @@ NSQC4.RegisterModule("quests", function()
 
         -- Вертикальные линии: COLS + 1
         for i = 1, COLS + 1 do
-            local tex = f:CreateTexture(nil, "BACKGROUND", nil, 1)
+            local tex = f:CreateTexture(nil, "ARTWORK", nil, 4)
             tex:SetTexture("Interface\\Buttons\\WHITE8x8")
             tex:SetVertexColor(LINE_COLOR[1], LINE_COLOR[2], LINE_COLOR[3], LINE_COLOR[4])
             tex:SetWidth(1)
@@ -43,7 +45,7 @@ NSQC4.RegisterModule("quests", function()
 
         -- Горизонтальные линии: ROWS + 1
         for i = 1, ROWS + 1 do
-            local tex = f:CreateTexture(nil, "BACKGROUND", nil, 1)
+            local tex = f:CreateTexture(nil, "ARTWORK", nil, 4)
             tex:SetTexture("Interface\\Buttons\\WHITE8x8")
             tex:SetVertexColor(LINE_COLOR[1], LINE_COLOR[2], LINE_COLOR[3], LINE_COLOR[4])
             tex:SetHeight(1)
@@ -57,8 +59,8 @@ NSQC4.RegisterModule("quests", function()
         press:SetVertexColor(0, 0, 0, PRESS_ALPHA)
         press:Hide()
 
-        self.gridLines  = lines
-        self._pressTex  = press
+        self.gridLines = lines
+        self._pressTex = press
 
         return lines
     end

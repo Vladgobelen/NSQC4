@@ -5,9 +5,9 @@
 -- НЕ создаёт окно, НЕ регистрирует контент окна.
 -- Окно создаётся лениво при первом клике (W:Register + W:Toggle).
 --
--- Мышь окна настраивается здесь же — по той же схеме, что поле:
---   win:SetScript("OnMouseDown"/"OnMouseUp", Dispatch)
---   Dispatch перебирает обработчики из win._mouseHandlers
+-- Мышь окна настраивается через единый механизм (как у поля):
+--   W.SetupWindowMouse(win) — навешивает Dispatch на окно (аналог Field/Mouse.lua)
+--   W.AddWindowMouseHandler(win, fn) — регистрация обработчиков (аналог AddMouseHandler)
 -- ============================================================================
 NSQC4.RegisterModule("quests", function()
     local QuestsField = NSQC4.QuestsFieldClass
@@ -19,7 +19,7 @@ NSQC4.RegisterModule("quests", function()
 
     -- ========================================================================
     -- SetupWindowMouse — навесить Dispatch на окно.
-    -- Та же логика, что Field/Frame/Mouse.lua для поля.
+    -- Та же логика, что Field/Frame/Mouse.lua для поля, но для окна.
     -- ========================================================================
     local function SetupWindowMouse(win)
         if not win or win._mouseSetup then return end

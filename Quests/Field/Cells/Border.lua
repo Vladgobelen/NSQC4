@@ -1,10 +1,6 @@
 -- ============================================================================
 -- NSQC4 / Quests / Field / Cells / Border
 -- Одна логика: включение/выключение линий сетки.
---
---   SetBorderless(v)  -- true → линий нет (Hide), gap = -1
---                     -- false → линии есть (Show), gap = 0
---   IsBorderless()    -- true | false
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -30,12 +26,14 @@ NSQC4.RegisterModule("quests", function()
             end
         end
 
-        -- gap -1 при borderless — линии не видны, клетки «слипаются»
         if self.frame and self.ReflowCells then
             self:ReflowCells()
         end
 
-        self:Save()
+        -- Сохраняем только флаг
+        if self.SaveFlag then
+            self:SaveFlag("borderless", self.borderless)
+        end
     end
 
 end, 340)

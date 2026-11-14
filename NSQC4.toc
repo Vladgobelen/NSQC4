@@ -125,7 +125,12 @@ Quests\NSDB\Debug.lua
 Quests\Field\Core\Class.lua
 Quests\Field\Const.lua
 Quests\Field\Init.lua
-Quests\Field\Core\Storage.lua
+Quests\Field\Core\Instance\Create.lua
+
+# --- хранилище (разбито на Defaults / Load / Save) ---
+Quests\Field\Core\Storage\Defaults.lua
+Quests\Field\Core\Storage\Load.lua
+Quests\Field\Core\Storage\Save.lua
 
 # --- frame ---
 Quests\Field\Frame\Create.lua
@@ -189,7 +194,10 @@ Quests\Field\Settings\Radio.lua
 
 # --- мышь поля и точка входа ---
 Quests\Field\Frame\Mouse.lua
-Quests\Field\Bootstrap.lua
+Quests\Field\Bootstrap\Init.lua
+Quests\Field\Bootstrap\Slash.lua
+Quests\Field\Bootstrap\SlashPanel.lua
+Quests\Field\Bootstrap\Diagnostics.lua
 
 # ============================================================================
 # NOWIM (ЧАТ)

@@ -1,15 +1,4 @@
--- ============================================================================
--- NSQC4 / Quests / Field / Border / Backdrop
--- Одна логика: подложка-рамка (только визуал, без мыши).
---
--- Подложка — ТЕКСТУРА на field.frame, sublevel -1 (ниже клеток и кнопок).
--- Заголовок — FontString на field.frame, OVERLAY.
--- Никакой дочерний frame не создаётся, поэтому кнопки (OVERLAY 10)
--- и свитчеры (OVERLAY 11) всегда выше подложки.
--- ============================================================================
-
 NSQC4.RegisterModule("quests", function()
-
     local QuestsField = NSQC4.QuestsFieldClass
     if not QuestsField then return end
 
@@ -19,19 +8,29 @@ NSQC4.RegisterModule("quests", function()
         local f = self.frame
         if not f then return nil end
 
-        -- подложка (текстура, sublevel -1 — ниже клеток 0 и кнопок 10)
-        local tex = f:CreateTexture(nil, "BACKGROUND", nil, -1)
-        tex:SetAllPoints(f)
+        -- Создаем ОТДЕЛЬНЫЙ фрейм для подложки
+        local bgFrame = CreateFrame("Frame", nil, f)
+        
+        -- ЖЕСТКО ставим его на самый низкий FrameLevel
+        bgFrame:SetFrameLevel(1) 
+        bgFrame:SetAllPoints(f)
+
+        -- Рисуем текстуру внутри этого фрейма
+        local tex = bgFrame:CreateTexture(nil, "BACKGROUND")
+        tex:SetAllPoints(bgFrame)
         tex:SetTexture("Interface\\Buttons\\WHITE8x8")
         tex:SetVertexColor(0, 0, 0, 0.85)
+        tex:Show()
 
-        -- заголовок (над полем)
+        -- Заголовок оставляем на основном фрейме, но повыше
         local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         title:SetPoint("BOTTOM", f, "TOP", 0, 4)
         title:SetText("|cffffd100Поле квестов|r |cff808080(ЛКМ — тянуть, ПКМ — рамка)|r")
 
-        self.backdrop      = tex
+        -- Сохраняем ссылку на текстуру для Visible.lua
+        self.backdrop = tex
         self.backdropTitle = title
+        self._backdropFrame = bgFrame -- сохраняем фрейм на всякий случай
 
         if self.SetBorderVisible then
             self:SetBorderVisible(self.borderVisible)
@@ -39,5 +38,4 @@ NSQC4.RegisterModule("quests", function()
 
         return tex
     end
-
 end, 350)

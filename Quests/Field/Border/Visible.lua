@@ -1,19 +1,6 @@
 -- ============================================================================
 -- NSQC4 / Quests / Field / Border / Visible
--- Одна логика: видимость подложки (alpha 1 ↔ 0.01).
---
---   SetBorderVisible(v)     -- v = true → alpha 1 + title Show
---                             -- v = false → alpha 0.01 + title Hide
---   ToggleBorderVisible()   -- SetBorderVisible(not IsBorderVisible())
---   IsBorderVisible()       -- true | false
---
--- Подложка — текстура (Border/Backdrop.lua), self.backdrop.
--- Заголовок — FontString, self.backdropTitle.
---
--- Сохранение — в nsDbc4.quests.field.borderVisible (boolean).
--- Загрузка — при Load() (Core/Storage.lua) в self.borderVisible.
---
--- После смены — пересчёт кнопок панелей (opts.visible 2/3) и свитчеров.
+-- Одна логика: видимость подложки (alpha 1 ↔ 0.1) и заголовка.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -35,14 +22,14 @@ NSQC4.RegisterModule("quests", function()
             b:SetAlpha(1)
             if self.backdropTitle then self.backdropTitle:Show() end
         else
-            b:SetAlpha(0.01)
+            b:SetAlpha(0.1)
             if self.backdropTitle then self.backdropTitle:Hide() end
         end
 
-        self:Save()
-
-        if self.RefreshAllButtons then self:RefreshAllButtons() end
-        if self.RefreshSwitchers   then self:RefreshSwitchers()   end
+        -- Сохраняем флаг (не всю геометрию)
+        if self.SaveFlag then
+            self:SaveFlag("borderVisible", self.borderVisible)
+        end
     end
 
     function QuestsField:ToggleBorderVisible()

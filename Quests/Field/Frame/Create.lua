@@ -4,6 +4,11 @@
 --
 -- Читает: QuestsFieldConst, self.saved.
 -- Пишет:  self.frame, self.cellSize.
+--
+-- ФОН НЕ создаётся здесь — его рисует Border/Backdrop.lua
+-- (текстура BACKGROUND sublevel -1, ниже сетки/кнопок/свитчеров).
+--
+-- ОТЛАДКА: [FRAME]. Отключить — FRAME_DEBUG = false.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -11,6 +16,11 @@ NSQC4.RegisterModule("quests", function()
     local QuestsField = NSQC4.QuestsFieldClass
     local CONST       = NSQC4.QuestsFieldConst
     if not QuestsField or not CONST then return end
+
+    local FRAME_DEBUG = true
+    local function dbg(...)
+        if FRAME_DEBUG then print("|cffffaa00[FRAME]|r", ...) end
+    end
 
     local COLS, ROWS     = CONST.COLS, CONST.ROWS
     local CELL_GAP       = CONST.CELL_GAP
@@ -51,7 +61,10 @@ NSQC4.RegisterModule("quests", function()
     -- CreateFrame
     -- ========================================================================
     function QuestsField:CreateFrame()
-        if self.frame then return self.frame end
+        if self.frame then
+            dbg("frame уже существует, возвращаю")
+            return self.frame
+        end
 
         if not self.saved then self:Load() end
         local saved = self.saved or {}
@@ -66,6 +79,8 @@ NSQC4.RegisterModule("quests", function()
 
         local w0, h0 = FrameSizeForCell(cs)
 
+        dbg(string.format("создаю frame: cs=%d w=%d h=%d", cs, w0, h0))
+
         local f = CreateFrame("Frame", "NSQC4FieldFrame", UIParent)
         self.frame = f
         f:SetFrameStrata("MEDIUM")
@@ -73,17 +88,26 @@ NSQC4.RegisterModule("quests", function()
         f:SetClampedToScreen(false)
         f:SetSize(w0, h0)
 
-        f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-        f:SetBackdropColor(0, 0, 0, 0.35)
+        -- ВАЖНО: фон НЕ создаётся здесь.
+        -- Фон рисует Border/Backdrop.lua:
+        --   local tex = f:CreateTexture(nil, "BACKGROUND", nil, -1)
+        --   tex:SetAllPoints(f)
+        --   tex:SetVertexColor(0, 0, 0, 0.85)
+        -- sublevel -1 — ниже сетки (BACKGROUND, sublevel 1),
+        -- кнопок (OVERLAY, 10) и свитчеров (OVERLAY, 11).
+
         f:EnableMouse(false)
 
         if saved.x and saved.y then
             f:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", saved.x, saved.y)
+            dbg(string.format("позиция из saved: %s, %s", tostring(saved.x), tostring(saved.y)))
         else
             f:SetPoint("CENTER")
+            dbg("позиция: CENTER (по умолчанию)")
         end
 
         f:Hide()
+        dbg("frame создан и скрыт")
         return f
     end
 

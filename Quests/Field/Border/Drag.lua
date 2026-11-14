@@ -1,6 +1,10 @@
 -- ============================================================================
 -- NSQC4 / Quests / Field / Border / Drag
 -- Одна логика: драг frame + кламп по экрану + Save.
+--
+-- Drag — ОТДЕЛЬНОЕ событие (OnDragStart/OnDragStop), не пересекается
+-- с OnMouseDown/OnMouseUp. Поэтому SetScript здесь — правильный механизм,
+-- а не обход единого регистратора (Mouse.lua ловит только клики).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -52,7 +56,6 @@ NSQC4.RegisterModule("quests", function()
         self:Save()
     end
 
-    -- навесить драг на frame
     function QuestsField:SetupFrameDrag()
         local f = self.frame
         if not f then return end
@@ -66,4 +69,4 @@ NSQC4.RegisterModule("quests", function()
         end)
     end
 
-end, 370)
+end, 370)  -- вес можно вернуть 370, т.к. AddMouseHandler больше не используется

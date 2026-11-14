@@ -5,14 +5,13 @@
 -- НИЧЕГО не знает о поле (QuestsField) и об окнах (FieldWindow).
 -- Рисует кнопки на любом parent-фрейме, где скажут.
 --
+-- НЕ регистрирует мышь (это делает Settings/Init.lua для окон).
+--
 -- Публичный API (NSQC4.UIButton):
 --   CreateRecord(label, onClick, opts)       → rec
 --   Draw(parent, rec, y, availableW)         → height
---   HitTest(rec)                             → boolean
---   FindHit(items)                           → rec | nil
 --   Press(rec)
 --   Release()
---   SetupMouse(parent, getItems)
 -- ============================================================================
 NSQC4.RegisterModule("quests", function()
     local UIButton = {}
@@ -64,43 +63,6 @@ NSQC4.RegisterModule("quests", function()
     end
 
     -- ========================================================================
-    -- HitTest — попал ли курсор в кнопку.
-    -- ========================================================================
-    function UIButton:HitTest(rec)
-        if not rec or not rec.frame or not rec.frame:IsShown() then
-            return false
-        end
-
-        local left  = rec.frame:GetLeft()
-        local right = rec.frame:GetRight()
-        local top   = rec.frame:GetTop()
-        local bot   = rec.frame:GetBottom()
-
-        if not (left and right and top and bot) then return false end
-
-        local scale = UIParent:GetEffectiveScale()
-        local cx, cy = GetCursorPosition()
-        cx, cy = cx / scale, cy / scale
-
-        return cx >= left and cx <= right and cy <= top and cy >= bot
-    end
-
-    -- ========================================================================
-    -- FindHit — найти кнопку под курсором в таблице items.
-    -- ========================================================================
-    function UIButton:FindHit(items)
-        if not items then return nil end
-
-        for _, rec in pairs(items) do
-            if rec.kind == "button" and self:HitTest(rec) then
-                return rec
-            end
-        end
-
-        return nil
-    end
-
-    -- ========================================================================
     -- Press / Release — анимация нажатия.
     -- ========================================================================
     function UIButton:Press(rec)
@@ -122,31 +84,5 @@ NSQC4.RegisterModule("quests", function()
         if p.tex and p.w and p.h then
             p.tex:SetSize(p.w, p.h)
         end
-    end
-
-    -- ========================================================================
-    -- SetupMouse — подключить мышь к parent.
-    --   getItems() — функция, возвращающая таблицу кнопок для хит-теста.
-    -- ========================================================================
-    function UIButton:SetupMouse(parent, getItems)
-        if not parent or parent._uiButtonMouseSetup then return end
-        parent._uiButtonMouseSetup = true
-        parent:EnableMouse(true)
-
-        parent:SetScript("OnMouseDown", function(_, button)
-            if button ~= "LeftButton" then return end
-
-            local items = getItems()
-            local rec   = UIButton:FindHit(items)
-
-            if rec then
-                UIButton:Press(rec)
-                if rec.onClick then rec.onClick(button) end
-            end
-        end)
-
-        parent:SetScript("OnMouseUp", function()
-            UIButton:Release()
-        end)
     end
 end, 530)
