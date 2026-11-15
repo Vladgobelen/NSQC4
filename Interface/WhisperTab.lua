@@ -197,4 +197,75 @@ NSQC4.RegisterModule("ui_whisper_tab", function()
         order   = 240,
     })
 
+    -- ============================================================================
+-- ДОБАВЛЕНИЕ ПУНКТА В МЕНЮ CHATTER (DropDownList1)
+-- ============================================================================
+
+local NSQC4_CurrentTabToClose = nil
+
+local function AddButtonToDropDown()
+    -- Если меню открыто и мы знаем, какую вкладку закрывать
+    if DropDownList1 and DropDownList1:IsShown() and NSQC4_CurrentTabToClose then
+        -- Проверяем, нет ли уже нашей кнопки (чтобы не дублировать)
+        local found = false
+        for i = 1, UIDROPDOWNMENU_MAXBUTTONS or 30 do
+            local btn = _G["DropDownList1Button"..i]
+            if btn and btn:IsShown() then
+                local text = _G["DropDownList1Button"..i.."Text"] or _G["DropDownList1Button"..i.."NormalText"]
+                if text and text:GetText() == "Закрыть вкладку" then
+                    found = true
+                    break
+                end
+            end
+        end
+
+        if not found then
+            -- Добавляем свой пункт
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = "Закрыть вкладку"
+            info.notCheckable = true
+            info.func = function()
+                FCF_Close(NSQC4_CurrentTabToClose)
+                CloseDropDownMenus()
+            end
+            UIDropDownMenu_AddButton(info, 1)
+            
+            -- Пересчитываем высоту меню, чтобы оно не обрезало текст
+            UIDropDownMenu_Refresh(DropDownList1)
+        end
+    end
+end
+
+-- Перехватываем MouseUp на вкладках (как мы уже делали)
+local function HookTabsForClose()
+    for i = 1, NUM_CHAT_WINDOWS do
+        local chatFrame = _G["ChatFrame"..i]
+        local tab = _G["ChatFrame"..i.."Tab"]
+        
+        if chatFrame and tab then
+            tab:HookScript("OnMouseUp", function(self, button)
+                if button == "RightButton" then
+                    NSQC4_CurrentTabToClose = chatFrame
+                    
+                    -- Запускаем цикл, который ждет открытия меню и добавляет кнопку
+                    local f = CreateFrame("Frame")
+                    local ticks = 0
+                    f:SetScript("OnUpdate", function(self, elapsed)
+                        ticks = ticks + 1
+                        AddButtonToDropDown()
+                        if ticks > 10 then -- ждем ~0.5 сек
+                            self:SetScript("OnUpdate", nil)
+                        end
+                    end)
+                end
+            end)
+        end
+    end
+end
+
+local eventFrame = CreateFrame("Frame")
+eventFrame:RegisterEvent("PLAYER_LOGIN")
+eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+eventFrame:SetScript("OnEvent", HookTabsForClose)
+
 end)
