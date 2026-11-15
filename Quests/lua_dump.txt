@@ -1,47 +1,56 @@
 ======================================================================
  LUA DUMP: /home/diver/Games/wc/CircleL/Interface/AddOns/NSQC4/Quests
- Date: 2026-11-15 03:29:57
+ Date: 2026-11-15 08:36:32
 ======================================================================
 
 ======================================================================
- FILE: Field/Bootstrap.lua
+ FILE: Field/Bootstrap/Diagnostics.lua
 ======================================================================
 
 -- ============================================================================
--- NSQC4 / Quests / Field / Bootstrap
--- Одна логика: порядок инициализации экземпляра поля + слэш /ns_field.
--- Грузится ПОСЛЕДНИМ в блоке Field/*.
---
--- БЕЗ таймеров и OnUpdate. Всё синхронно.
--- ОТЛАДКА: [BOOT]. Отключить — BOOT_DEBUG = false.
+-- NSQC4 / Quests / Field / Bootstrap / Diagnostics
+-- Одна логика: итоговая диагностика (что создано после инициализации).
 -- ============================================================================
+
 NSQC4.RegisterModule("quests", function()
-    local BOOT_DEBUG = false
-    local function dbg(...)
-        if BOOT_DEBUG then print("|cffffaa00[BOOT]|r", ...) end
-    end
+
+    local field = NSQC4.Field
+    if not field then return end
+
+    -- Итоговое сообщение в чат
+    print("|cff00ffff[FIELD]|r Блок 4 загружен (панели). /ns_field")
+
+end, 623)
+
+
+======================================================================
+ FILE: Field/Bootstrap/Init.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / Bootstrap / Init
+-- Одна логика: порядок инициализации экземпляра поля.
+-- БЕЗ таймеров и OnUpdate. Всё синхронно.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
 
     local field = NSQC4.Field
     if not field then
-        print("|cffff0000[NSQC4]|r Field/Bootstrap: NSQC4.Field не создан.")
+        print("|cffff0000[NSQC4]|r Bootstrap/Init: NSQC4.Field не создан.")
         return
     end
 
-    dbg("Старт. field=", tostring(field))
-
-    -- ========================================================================
-    -- Безопасный вызов метода: если метода нет — пишем в чат и идём дальше.
-    -- ========================================================================
+    -- Безопасный вызов метода
     local function call(method, ...)
         if type(field[method]) == "function" then
-            dbg("call:", method)
             local ok, err = pcall(field[method], field, ...)
             if not ok then
-                print("|cffff0000[NSQC4]|r Bootstrap:", method, "УПАЛ:", tostring(err))
+                print("|cffff0000[NSQC4]|r Bootstrap/Init:", method, "УПАЛ:", tostring(err))
             end
             return ok
         else
-            print("|cffff0000[NSQC4]|r Bootstrap: метод", method, "НЕ ОПРЕДЕЛЁН (файл не загружен?)")
+            print("|cffff0000[NSQC4]|r Bootstrap/Init: метод", method, "НЕ ОПРЕДЕЛЁН")
             return false
         end
     end
@@ -55,20 +64,20 @@ NSQC4.RegisterModule("quests", function()
     call("ReflowCells")
     call("InitPanels")
 
-    -- 1) Свитчеры панелей
+    -- Свитчеры панелей
     call("CreateSwitchers")
 
-    -- 2) Отрисовка API-кнопок
+    -- Отрисовка API-кнопок
     call("RefreshAllButtons")
 
-    -- 3) Раскладка свитчеров
+    -- Раскладка свитчеров
     call("RefreshSwitchers")
 
     -- ========================================================================
-    -- Ввод
+    -- Ввод (мышь)
+    -- ПКМ регистрируется в Border/Click.lua через AddMouseHandler.
     -- ========================================================================
     call("SetupMouse")
-    call("SetupFrameClick")
 
     -- ========================================================================
     -- Оформление
@@ -78,21 +87,43 @@ NSQC4.RegisterModule("quests", function()
     call("CreateCloseButton")
     call("CreateResizeHandle")
 
-    -- ========================================================================
-    -- Слэш /ns_field
-    -- ========================================================================
+end, 620)
+
+
+======================================================================
+ FILE: Field/Bootstrap/Slash.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / Bootstrap / Slash
+-- Одна логика: регистрация слэш-команды /ns_field.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
     SLASH_NSFIELD1 = "/ns_field"
     SlashCmdList["NSFIELD"] = function()
         local f = NSQC4.Field
-        if f and f.Toggle then f:Toggle() end
+        if f and f.Toggle then
+            f:Toggle()
+        end
     end
-    dbg("Слэш /ns_field зарегистрирован")
 
-    -- ========================================================================
-    -- SlashPanel
-    -- ========================================================================
+end, 621)
+
+
+======================================================================
+ FILE: Field/Bootstrap/SlashPanel.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / Bootstrap / SlashPanel
+-- Одна логика: регистрация кнопки «Квесты» на слэш-панели.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
     if NSQC4.SlashPanel_RegisterSectionButton then
-        dbg("SlashPanel_RegisterSectionButton есть — регистрирую кнопку «Квесты»")
         NSQC4.SlashPanel_RegisterSectionButton(
             "Квесты", "П", "/ns_field",
             {
@@ -100,46 +131,17 @@ NSQC4.RegisterModule("quests", function()
             }
         )
     else
-        print("|cffff0000[NSQC4]|r Bootstrap: NSQC4.SlashPanel_RegisterSectionButton == nil — кнопка на слэш-панели НЕ зарегистрирована")
+        print("|cffff0000[NSQC4]|r Bootstrap/SlashPanel: NSQC4.SlashPanel_RegisterSectionButton == nil")
     end
 
-    -- ========================================================================
-    -- Итоговая диагностика: что в итоге создано
-    -- ========================================================================
-    dbg("=== ИТОГ ===")
-    dbg("frame:", tostring(field.frame))
-    dbg("_switchers:", field._switchers and #field._switchers or "nil")
-    dbg("_panelButtons:", field._panelButtons and "есть" or "nil")
-    dbg("_mouseHandlers:", field._mouseHandlers and #field._mouseHandlers or "nil")
-
-    if field._switchers then
-        for i, rec in ipairs(field._switchers) do
-            dbg(string.format("  switcher[%d] side=%s shown=%s",
-                i, tostring(rec.side),
-                tostring(rec.texture and rec.texture:IsShown())))
-        end
-    end
-
-    print("|cff00ffff[FIELD]|r Блок 4 загружен (панели). /ns_field")
-end, 630)
+end, 622)
 
 
 ======================================================================
  FILE: Field/Border/Backdrop.lua
 ======================================================================
 
--- ============================================================================
--- NSQC4 / Quests / Field / Border / Backdrop
--- Одна логика: подложка-рамка (только визуал, без мыши).
---
--- Подложка — ТЕКСТУРА на field.frame, sublevel -1 (ниже клеток и кнопок).
--- Заголовок — FontString на field.frame, OVERLAY.
--- Никакой дочерний frame не создаётся, поэтому кнопки (OVERLAY 10)
--- и свитчеры (OVERLAY 11) всегда выше подложки.
--- ============================================================================
-
 NSQC4.RegisterModule("quests", function()
-
     local QuestsField = NSQC4.QuestsFieldClass
     if not QuestsField then return end
 
@@ -149,19 +151,29 @@ NSQC4.RegisterModule("quests", function()
         local f = self.frame
         if not f then return nil end
 
-        -- подложка (текстура, sublevel -1 — ниже клеток 0 и кнопок 10)
-        local tex = f:CreateTexture(nil, "BACKGROUND", nil, -1)
-        tex:SetAllPoints(f)
+        -- Создаем ОТДЕЛЬНЫЙ фрейм для подложки
+        local bgFrame = CreateFrame("Frame", nil, f)
+        
+        -- ЖЕСТКО ставим его на самый низкий FrameLevel
+        bgFrame:SetFrameLevel(1) 
+        bgFrame:SetAllPoints(f)
+
+        -- Рисуем текстуру внутри этого фрейма
+        local tex = bgFrame:CreateTexture(nil, "BACKGROUND")
+        tex:SetAllPoints(bgFrame)
         tex:SetTexture("Interface\\Buttons\\WHITE8x8")
         tex:SetVertexColor(0, 0, 0, 0.85)
+        tex:Show()
 
-        -- заголовок (над полем)
+        -- Заголовок оставляем на основном фрейме, но повыше
         local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         title:SetPoint("BOTTOM", f, "TOP", 0, 4)
         title:SetText("|cffffd100Поле квестов|r |cff808080(ЛКМ — тянуть, ПКМ — рамка)|r")
 
-        self.backdrop      = tex
+        -- Сохраняем ссылку на текстуру для Visible.lua
+        self.backdrop = tex
         self.backdropTitle = title
+        self._backdropFrame = bgFrame -- сохраняем фрейм на всякий случай
 
         if self.SetBorderVisible then
             self:SetBorderVisible(self.borderVisible)
@@ -169,7 +181,6 @@ NSQC4.RegisterModule("quests", function()
 
         return tex
     end
-
 end, 350)
 
 
@@ -180,45 +191,91 @@ end, 350)
 -- ============================================================================
 -- NSQC4 / Quests / Field / Border / Click
 -- Одна логика: ПКМ по frame → ToggleBorderVisible().
+--
+-- Регистрация — через единый регистратор мыши поля
+-- (Field/Frame/Mouse.lua → AddMouseHandler).
+--
+-- ВАЖНО: вес 395 > 390 (Frame/Mouse.lua), иначе AddMouseHandler ещё не создан.
+--
+-- ОТЛАДКА: [CLICK]. Отключить — CLICK_DEBUG = false.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
 
-    local QuestsField = NSQC4.QuestsFieldClass
-    if not QuestsField then return end
-
-    function QuestsField:SetupFrameClick()
-        local f = self.frame
-        if not f then return end
-
-        f:HookScript("OnMouseDown", function(_, button)
-            if button == "RightButton" then
-                self:ToggleBorderVisible()
-            end
-        end)
+    local CLICK_DEBUG = true
+    local function dbg(...)
+        if CLICK_DEBUG then print("|cffffaa00[CLICK]|r", ...) end
     end
 
-end, 380)
+    local field = NSQC4.Field
+    if not field then
+        print("|cffff0000[CLICK]|r NSQC4.Field == nil — обработчик не зарегистрирован")
+        return
+    end
+
+    if type(field.AddMouseHandler) ~= "function" then
+        print("|cffff0000[CLICK]|r field:AddMouseHandler == nil — Frame/Mouse.lua не загружен?")
+        return
+    end
+
+    dbg("Регистрирую обработчик ПКМ через AddMouseHandler")
+
+    field:AddMouseHandler(function(x, y, button, event)
+        dbg(string.format("handler: event=%s button=%s x=%s y=%s",
+            tostring(event), tostring(button),
+            tostring(x), tostring(y)))
+
+        if event ~= "down" then return false end
+        if button ~= "RightButton" then return false end
+
+        dbg("ПКМ down — вызываю ToggleBorderVisible")
+
+        if type(field.ToggleBorderVisible) ~= "function" then
+            print("|cffff0000[CLICK]|r field:ToggleBorderVisible == nil — Border/Visible.lua не загружен?")
+            return false
+        end
+
+        local before = field:IsBorderVisible()
+        field:ToggleBorderVisible()
+        local after = field:IsBorderVisible()
+
+        dbg(string.format("borderVisible: %s → %s", tostring(before), tostring(after)))
+
+        return true
+    end)
+
+    dbg("Обработчик зарегистрирован. Всего обработчиков:",
+        field._mouseHandlers and #field._mouseHandlers or "nil")
+
+    if field._mouseHandlers then
+        for i, fn in ipairs(field._mouseHandlers) do
+            dbg(string.format("  handler[%d] = %s", i, tostring(fn)))
+        end
+    end
+
+end, 395)
 
 
 ======================================================================
- FILE: Field/Border/Drag.lua
+ FILE: Field/Border/Drag/Clamp.lua
 ======================================================================
 
 -- ============================================================================
--- NSQC4 / Quests / Field / Border / Drag
--- Одна логика: драг frame + кламп по экрану + Save.
+-- NSQC4 / Quests / Field / Border / Drag / Clamp
+-- Одна логика: удержание frame в пределах экрана.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
-
     local QuestsField = NSQC4.QuestsFieldClass
     local CONST       = NSQC4.QuestsFieldConst
     if not QuestsField or not CONST then return end
 
     local GRID_PADDING = CONST.GRID_PADDING
 
-    local function ClampToCells(frame)
+    function QuestsField:ClampFrameToScreen()
+        local frame = self.frame
+        if not frame then return end
+
         local left   = frame:GetLeft()   or 0
         local right  = frame:GetRight()  or 0
         local top    = frame:GetTop()    or 0
@@ -241,6 +298,22 @@ NSQC4.RegisterModule("quests", function()
             frame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", x + dx, y + dy)
         end
     end
+end, 371)
+
+
+======================================================================
+ FILE: Field/Border/Drag.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / Border / Drag
+-- Одна логика: драг frame (StartDrag, StopDrag, SetupFrameDrag).
+-- Кламп вынесен в Border/Drag/Clamp.lua.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+    local QuestsField = NSQC4.QuestsFieldClass
+    if not QuestsField then return end
 
     function QuestsField:StartDrag()
         local f = self.frame
@@ -255,25 +328,19 @@ NSQC4.RegisterModule("quests", function()
         if not self._dragging then return end
         self._dragging = false
         f:StopMovingOrSizing()
-        ClampToCells(f)
+        if self.ClampFrameToScreen then self:ClampFrameToScreen() end
         self:Save()
     end
 
-    -- навесить драг на frame
     function QuestsField:SetupFrameDrag()
         local f = self.frame
         if not f then return end
 
         f:RegisterForDrag("LeftButton")
-        f:SetScript("OnDragStart", function()
-            self:StartDrag()
-        end)
-        f:SetScript("OnDragStop", function()
-            self:StopDrag()
-        end)
+        f:SetScript("OnDragStart", function() self:StartDrag() end)
+        f:SetScript("OnDragStop",  function() self:StopDrag()  end)
     end
-
-end, 370)
+end, 372)
 
 
 ======================================================================
@@ -282,20 +349,7 @@ end, 370)
 
 -- ============================================================================
 -- NSQC4 / Quests / Field / Border / Visible
--- Одна логика: видимость подложки (alpha 1 ↔ 0.01).
---
---   SetBorderVisible(v)     -- v = true → alpha 1 + title Show
---                             -- v = false → alpha 0.01 + title Hide
---   ToggleBorderVisible()   -- SetBorderVisible(not IsBorderVisible())
---   IsBorderVisible()       -- true | false
---
--- Подложка — текстура (Border/Backdrop.lua), self.backdrop.
--- Заголовок — FontString, self.backdropTitle.
---
--- Сохранение — в nsDbc4.quests.field.borderVisible (boolean).
--- Загрузка — при Load() (Core/Storage.lua) в self.borderVisible.
---
--- После смены — пересчёт кнопок панелей (opts.visible 2/3) и свитчеров.
+-- Одна логика: видимость подложки (alpha 1 ↔ 0.1) и заголовка.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -317,14 +371,14 @@ NSQC4.RegisterModule("quests", function()
             b:SetAlpha(1)
             if self.backdropTitle then self.backdropTitle:Show() end
         else
-            b:SetAlpha(0.01)
+            b:SetAlpha(0.1)
             if self.backdropTitle then self.backdropTitle:Hide() end
         end
 
-        self:Save()
-
-        if self.RefreshAllButtons then self:RefreshAllButtons() end
-        if self.RefreshSwitchers   then self:RefreshSwitchers()   end
+        -- Сохраняем флаг (не всю геометрию)
+        if self.SaveFlag then
+            self:SaveFlag("borderVisible", self.borderVisible)
+        end
     end
 
     function QuestsField:ToggleBorderVisible()
@@ -335,16 +389,12 @@ end, 360)
 
 
 ======================================================================
- FILE: Field/Cells/Border.lua
+ FILE: Field/Cells/Border/Get.lua
 ======================================================================
 
 -- ============================================================================
--- NSQC4 / Quests / Field / Cells / Border
--- Одна логика: включение/выключение линий сетки.
---
---   SetBorderless(v)  -- true → линий нет (Hide), gap = -1
---                     -- false → линии есть (Show), gap = 0
---   IsBorderless()    -- true | false
+-- NSQC4 / Quests / Field / Cells / Border / Get
+-- Одна логика: чтение состояния "borderless" (есть линии или нет).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -356,29 +406,78 @@ NSQC4.RegisterModule("quests", function()
         return self.borderless and true or false
     end
 
+end, 341)
+
+
+======================================================================
+ FILE: Field/Cells/Border/Set.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / Cells / Border / Set
+-- Одна логика: установка состояния "borderless".
+--
+-- 1) Меняет флаг self.borderless
+-- 2) Скрывает/показывает линии (SetGridLinesVisible)
+-- 3) Пересчитывает геометрию (ReflowCells)
+-- 4) Сохраняет флаг в NSDB (SaveFlag)
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local QuestsField = NSQC4.QuestsFieldClass
+    if not QuestsField then return end
+
     function QuestsField:SetBorderless(v)
         self.borderless = v and true or false
 
-        local lines = self.gridLines
-        if lines then
-            local show = not self.borderless
-            for _, tex in ipairs(lines.v) do
-                if show then tex:Show() else tex:Hide() end
-            end
-            for _, tex in ipairs(lines.h) do
-                if show then tex:Show() else tex:Hide() end
-            end
+        -- 1. Видимость линий
+        if self.SetGridLinesVisible then
+            self:SetGridLinesVisible(not self.borderless)
         end
 
-        -- gap -1 при borderless — линии не видны, клетки «слипаются»
+        -- 2. Пересчёт геометрии (если frame уже создан)
         if self.frame and self.ReflowCells then
             self:ReflowCells()
         end
 
-        self:Save()
+        -- 3. Сохранение флага
+        if self.SaveFlag then
+            self:SaveFlag("borderless", self.borderless)
+        end
     end
 
-end, 340)
+end, 343)
+
+
+======================================================================
+ FILE: Field/Cells/Border/Visible.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / Cells / Border / Visible
+-- Одна логика: показ/скрытие линий сетки.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local QuestsField = NSQC4.QuestsFieldClass
+    if not QuestsField then return end
+
+    -- Скрывает или показывает все линии (v + h)
+    function QuestsField:SetGridLinesVisible(show)
+        local lines = self.gridLines
+        if not lines then return end
+
+        for _, tex in ipairs(lines.v) do
+            if show then tex:Show() else tex:Hide() end
+        end
+        for _, tex in ipairs(lines.h) do
+            if show then tex:Show() else tex:Hide() end
+        end
+    end
+
+end, 342)
 
 
 ======================================================================
@@ -395,8 +494,10 @@ end, 340)
 --   }
 --   self._pressTex  = texture          -- одна текстура «вдавливания» клетки
 --
--- Цвет линий — серый 0.25 (как было у SetBackdropBorderColor).
--- SetBorderless → Hide/Show линий (см. Cells/Border.lua).
+-- Слои:
+--   линии  ARTWORK sublevel 4   (видимый серый 0.5 — контраст и на чёрной
+--                                подложке, и на фоне мира)
+--   press  OVERLAY sublevel 5   (как было)
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -407,7 +508,7 @@ NSQC4.RegisterModule("quests", function()
 
     local COLS, ROWS = CONST.COLS, CONST.ROWS
 
-    local LINE_COLOR  = { 0.25, 0.25, 0.25, 1 }
+    local LINE_COLOR  = { 0.5, 0.5, 0.5, 1 }
     local PRESS_ALPHA = 0.35
 
     function QuestsField:CreateCells()
@@ -420,7 +521,7 @@ NSQC4.RegisterModule("quests", function()
 
         -- Вертикальные линии: COLS + 1
         for i = 1, COLS + 1 do
-            local tex = f:CreateTexture(nil, "BACKGROUND", nil, 1)
+            local tex = f:CreateTexture(nil, "ARTWORK", nil, 4)
             tex:SetTexture("Interface\\Buttons\\WHITE8x8")
             tex:SetVertexColor(LINE_COLOR[1], LINE_COLOR[2], LINE_COLOR[3], LINE_COLOR[4])
             tex:SetWidth(1)
@@ -430,7 +531,7 @@ NSQC4.RegisterModule("quests", function()
 
         -- Горизонтальные линии: ROWS + 1
         for i = 1, ROWS + 1 do
-            local tex = f:CreateTexture(nil, "BACKGROUND", nil, 1)
+            local tex = f:CreateTexture(nil, "ARTWORK", nil, 4)
             tex:SetTexture("Interface\\Buttons\\WHITE8x8")
             tex:SetVertexColor(LINE_COLOR[1], LINE_COLOR[2], LINE_COLOR[3], LINE_COLOR[4])
             tex:SetHeight(1)
@@ -444,8 +545,8 @@ NSQC4.RegisterModule("quests", function()
         press:SetVertexColor(0, 0, 0, PRESS_ALPHA)
         press:Hide()
 
-        self.gridLines  = lines
-        self._pressTex  = press
+        self.gridLines = lines
+        self._pressTex = press
 
         return lines
     end
@@ -454,18 +555,12 @@ end, 320)
 
 
 ======================================================================
- FILE: Field/Cells/Reflow.lua
+ FILE: Field/Cells/Reflow/Horizontal.lua
 ======================================================================
 
 -- ============================================================================
--- NSQC4 / Quests / Field / Cells / Reflow
--- Одна логика: раскладка 20 линий сетки.
---
---   cellW = (fw - PAD*2 - (COLS-1)*GAP) / COLS
---   cellH = (fh - PAD*2 - (ROWS-1)*GAP) / ROWS
---
---   Вертикальная линия i (1..COLS+1) — на границе i-й колонки.
---   Горизонтальная линия j (1..ROWS+1) — на границе j-й строки.
+-- NSQC4 / Quests / Field / Cells / Reflow / Horizontal
+-- Одна логика: раскладка горизонтальных линий сетки.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -474,7 +569,47 @@ NSQC4.RegisterModule("quests", function()
     local CONST       = NSQC4.QuestsFieldConst
     if not QuestsField or not CONST then return end
 
-    local COLS, ROWS   = CONST.COLS, CONST.ROWS
+    local ROWS         = CONST.ROWS
+    local CELL_GAP     = CONST.CELL_GAP
+    local GRID_PADDING = CONST.GRID_PADDING
+
+    function QuestsField:ReflowHorizontalLines(f, cellH, gridW)
+        local lines = self.gridLines
+        if not lines or not lines.h then return end
+
+        for j = 1, ROWS + 1 do
+            local tex = lines.h[j]
+            if tex then
+                local y = GRID_PADDING + (j - 1) * (cellH + CELL_GAP)
+                tex:ClearAllPoints()
+                tex:SetPoint("BOTTOMLEFT",  f, "BOTTOMLEFT", GRID_PADDING,         y)
+                tex:SetPoint("BOTTOMRIGHT", f, "BOTTOMLEFT", GRID_PADDING + gridW, y)
+                tex:SetHeight(1)
+                tex:Show()
+            end
+        end
+    end
+
+end, 332)
+
+
+======================================================================
+ FILE: Field/Cells/Reflow/Refresh.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / Cells / Reflow / Refresh
+-- Одна логика: оркестрация раскладки сетки (вертикальные + горизонтальные).
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local QuestsField = NSQC4.QuestsFieldClass
+    local CONST       = NSQC4.QuestsFieldConst
+    if not QuestsField or not CONST then return end
+
+    local COLS         = CONST.COLS
+    local ROWS         = CONST.ROWS
     local CELL_GAP     = CONST.CELL_GAP
     local GRID_PADDING = CONST.GRID_PADDING
 
@@ -493,30 +628,51 @@ NSQC4.RegisterModule("quests", function()
         local gridW = fw - GRID_PADDING * 2
         local gridH = fh - GRID_PADDING * 2
 
-        -- Вертикальные
+        -- Вызов вертикалей и горизонталей
+        self:ReflowVerticalLines(f, cellW, gridH)
+        self:ReflowHorizontalLines(f, cellH, gridW)
+    end
+
+end, 333)
+
+
+======================================================================
+ FILE: Field/Cells/Reflow/Vertical.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / Cells / Reflow / Vertical
+-- Одна логика: раскладка вертикальных линий сетки.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local QuestsField = NSQC4.QuestsFieldClass
+    local CONST       = NSQC4.QuestsFieldConst
+    if not QuestsField or not CONST then return end
+
+    local COLS         = CONST.COLS
+    local CELL_GAP     = CONST.CELL_GAP
+    local GRID_PADDING = CONST.GRID_PADDING
+
+    function QuestsField:ReflowVerticalLines(f, cellW, gridH)
+        local lines = self.gridLines
+        if not lines or not lines.v then return end
+
         for i = 1, COLS + 1 do
             local tex = lines.v[i]
-            local x = GRID_PADDING + (i - 1) * (cellW + CELL_GAP)
-            tex:ClearAllPoints()
-            tex:SetPoint("TOPLEFT",     f, "BOTTOMLEFT", x, GRID_PADDING + gridH)
-            tex:SetPoint("BOTTOMLEFT",  f, "BOTTOMLEFT", x, GRID_PADDING)
-            tex:SetWidth(1)
-            tex:Show()
-        end
-
-        -- Горизонтальные
-        for j = 1, ROWS + 1 do
-            local tex = lines.h[j]
-            local y = GRID_PADDING + (j - 1) * (cellH + CELL_GAP)
-            tex:ClearAllPoints()
-            tex:SetPoint("BOTTOMLEFT",  f, "BOTTOMLEFT", GRID_PADDING,            y)
-            tex:SetPoint("BOTTOMRIGHT", f, "BOTTOMLEFT", GRID_PADDING + gridW,    y)
-            tex:SetHeight(1)
-            tex:Show()
+            if tex then
+                local x = GRID_PADDING + (i - 1) * (cellW + CELL_GAP)
+                tex:ClearAllPoints()
+                tex:SetPoint("TOPLEFT",     f, "BOTTOMLEFT", x, GRID_PADDING + gridH)
+                tex:SetPoint("BOTTOMLEFT",  f, "BOTTOMLEFT", x, GRID_PADDING)
+                tex:SetWidth(1)
+                tex:Show()
+            end
         end
     end
 
-end, 330)
+end, 331)
 
 
 ======================================================================
@@ -630,24 +786,71 @@ end, 150)
 
 
 ======================================================================
- FILE: Field/Core/Storage.lua
+ FILE: Field/Core/Instance/Create.lua
 ======================================================================
 
 -- ============================================================================
--- NSQC4 / Quests / Field / Core / Storage
--- Одна логика: сохранение/загрузка состояния поля через NSDB.
+-- NSQC4 / Quests / Field / Core / Instance / Create
+-- Одна логика: создание экземпляра поля.
 --
---   QuestsField:Load()  -- NSDB:Get("field", ...) → self.saved + self.*
---   QuestsField:Save()  -- self.* → NSDB:Set("field", ...)
+-- Вызывается ПОСЛЕ Init.lua (вес 280 → 281), когда QuestsFieldClass
+-- уже объявлен.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local QuestsField = NSQC4.QuestsFieldClass
+    if not QuestsField then
+        print("|cffff0000[NSQC4]|r Instance/Create: QuestsFieldClass не создан.")
+        return
+    end
+
+    NSQC4.Field = QuestsField.new()
+
+end, 281)
+
+
+======================================================================
+ FILE: Field/Core/Storage/Defaults.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / Core / Storage / Defaults
+-- Одна логика: значения по умолчанию для поля.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local QuestsField = NSQC4.QuestsFieldClass
+    if not QuestsField then return end
+
+    -- Дефолтные значения (если в NSDB ничего нет)
+    QuestsField.StorageDefaults = {
+        borderVisible = true,
+        borderless    = false,
+        cellSize      = nil,   -- nil = использовать DEFAULT_CELL из Const
+        x             = nil,   -- nil = CENTER
+        y             = nil,
+    }
+
+    -- Хелпер: получить дефолт по ключу
+    function QuestsField:GetDefault(key)
+        local d = self.StorageDefaults
+        return d and d[key] or nil
+    end
+
+end, 291)
+
+
+======================================================================
+ FILE: Field/Core/Storage/Load.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / Core / Storage / Load
+-- Одна логика: NSDB → self.saved + self.*
 --
--- Таблица NSDB: "field".
--- Параметры:
---   x, y           — координаты BOTTOMLEFT (координаты поля)
---   cellSize       — размер клетки в px
---   borderless     — true | false (бордеры клеток)
---   borderVisible  — true | false (подложка: alpha 1 vs 0.01)
---
--- Никаких прямых обращений к nsDbc4 — только NSDB.
+-- Читает только. Ничего не пишет.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -657,28 +860,34 @@ NSQC4.RegisterModule("quests", function()
 
     local NSDB = NSQC4.NSDB
     if not NSDB then
-        print("|cffff0000[NSQC4]|r Core/Storage: NSDB не загружен.")
+        print("|cffff0000[NSQC4]|r Storage/Load: NSDB не загружен.")
         return
     end
 
     local SCOPE = "field"
 
-    -- ========================================================================
-    -- Load — NSDB → self.saved + self.*
-    -- ========================================================================
     function QuestsField:Load()
+        -- borderVisible: default = true
         local borderVisible = NSDB:Get(SCOPE, "borderVisible")
         if borderVisible == nil then
-            borderVisible = true          -- подложка видима по умолчанию
+            borderVisible = self:GetDefault("borderVisible")
         else
             borderVisible = borderVisible and true or false
+        end
+
+        -- borderless: default = false
+        local borderless = NSDB:Get(SCOPE, "borderless")
+        if borderless == nil then
+            borderless = self:GetDefault("borderless")
+        else
+            borderless = borderless and true or false
         end
 
         self.saved = {
             x             = NSDB:Get(SCOPE, "x"),
             y             = NSDB:Get(SCOPE, "y"),
             cellSize      = NSDB:Get(SCOPE, "cellSize"),
-            borderless    = NSDB:Get(SCOPE, "borderless") and true or false,
+            borderless    = borderless,
             borderVisible = borderVisible,
         }
 
@@ -688,24 +897,68 @@ NSQC4.RegisterModule("quests", function()
         return self.saved
     end
 
-    -- ========================================================================
-    -- Save — self.* → NSDB
-    -- ========================================================================
+end, 292)
+
+
+======================================================================
+ FILE: Field/Core/Storage/Save.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / Core / Storage / Save
+-- Одна логика: self.* → NSDB
+--
+-- Пишет только. Ничего не читает.
+--
+-- Сохраняет:
+--   x, y           — позиция BOTTOMLEFT (если frame есть)
+--   cellSize       — размер клетки (если есть)
+--
+-- НЕ сохраняет флаги borderVisible/borderless — их пишут
+-- SetBorderVisible / SetBorderless в момент изменения.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local QuestsField = NSQC4.QuestsFieldClass
+    if not QuestsField then return end
+
+    local NSDB = NSQC4.NSDB
+    if not NSDB then
+        print("|cffff0000[NSQC4]|r Storage/Save: NSDB не загружен.")
+        return
+    end
+
+    local SCOPE = "field"
+
     function QuestsField:Save()
+        -- Геометрия
         if self.frame then
-            NSDB:Set(SCOPE, "x", self.frame:GetLeft())
-            NSDB:Set(SCOPE, "y", self.frame:GetBottom())
+            local x = self.frame:GetLeft()
+            local y = self.frame:GetBottom()
+            NSDB:Set(SCOPE, "x", x)
+            NSDB:Set(SCOPE, "y", y)
         end
 
+        -- Размер клетки
         if self.cellSize then
             NSDB:Set(SCOPE, "cellSize", self.cellSize)
         end
 
-        NSDB:Set(SCOPE, "borderless",    self.borderless and true or false)
-        NSDB:Set(SCOPE, "borderVisible", self.borderVisible and true or false)
+        -- НЕ сохраняем borderless/borderVisible здесь.
+        -- См. Border/Visible.lua и Cells/Border.lua.
     end
 
-end, 290)
+    -- ========================================================================
+    -- Отдельные сеттеры для флагов, которые сами себя сохраняют.
+    -- (На случай, если кто-то захочет менять флаг в обход SetBorderVisible.)
+    -- ========================================================================
+    function QuestsField:SaveFlag(key, value)
+        if not key then return end
+        NSDB:Set(SCOPE, key, value and true or false)
+    end
+
+end, 293)
 
 
 ======================================================================
@@ -718,6 +971,11 @@ end, 290)
 --
 -- Читает: QuestsFieldConst, self.saved.
 -- Пишет:  self.frame, self.cellSize.
+--
+-- ФОН НЕ создаётся здесь — его рисует Border/Backdrop.lua
+-- (текстура BACKGROUND sublevel -1, ниже сетки/кнопок/свитчеров).
+--
+-- ОТЛАДКА: [FRAME]. Отключить — FRAME_DEBUG = false.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -725,6 +983,11 @@ NSQC4.RegisterModule("quests", function()
     local QuestsField = NSQC4.QuestsFieldClass
     local CONST       = NSQC4.QuestsFieldConst
     if not QuestsField or not CONST then return end
+
+    local FRAME_DEBUG = true
+    local function dbg(...)
+        if FRAME_DEBUG then print("|cffffaa00[FRAME]|r", ...) end
+    end
 
     local COLS, ROWS     = CONST.COLS, CONST.ROWS
     local CELL_GAP       = CONST.CELL_GAP
@@ -765,7 +1028,10 @@ NSQC4.RegisterModule("quests", function()
     -- CreateFrame
     -- ========================================================================
     function QuestsField:CreateFrame()
-        if self.frame then return self.frame end
+        if self.frame then
+            dbg("frame уже существует, возвращаю")
+            return self.frame
+        end
 
         if not self.saved then self:Load() end
         local saved = self.saved or {}
@@ -780,6 +1046,8 @@ NSQC4.RegisterModule("quests", function()
 
         local w0, h0 = FrameSizeForCell(cs)
 
+        dbg(string.format("создаю frame: cs=%d w=%d h=%d", cs, w0, h0))
+
         local f = CreateFrame("Frame", "NSQC4FieldFrame", UIParent)
         self.frame = f
         f:SetFrameStrata("MEDIUM")
@@ -787,17 +1055,26 @@ NSQC4.RegisterModule("quests", function()
         f:SetClampedToScreen(false)
         f:SetSize(w0, h0)
 
-        f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-        f:SetBackdropColor(0, 0, 0, 0.35)
+        -- ВАЖНО: фон НЕ создаётся здесь.
+        -- Фон рисует Border/Backdrop.lua:
+        --   local tex = f:CreateTexture(nil, "BACKGROUND", nil, -1)
+        --   tex:SetAllPoints(f)
+        --   tex:SetVertexColor(0, 0, 0, 0.85)
+        -- sublevel -1 — ниже сетки (BACKGROUND, sublevel 1),
+        -- кнопок (OVERLAY, 10) и свитчеров (OVERLAY, 11).
+
         f:EnableMouse(false)
 
         if saved.x and saved.y then
             f:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", saved.x, saved.y)
+            dbg(string.format("позиция из saved: %s, %s", tostring(saved.x), tostring(saved.y)))
         else
             f:SetPoint("CENTER")
+            dbg("позиция: CENTER (по умолчанию)")
         end
 
         f:Hide()
+        dbg("frame создан и скрыт")
         return f
     end
 
@@ -805,15 +1082,16 @@ end, 300)
 
 
 ======================================================================
- FILE: Field/Frame/Mouse.lua
+ FILE: Field/Frame/Mouse/Cursor.lua
 ======================================================================
 
 -- ============================================================================
--- NSQC4 / Quests / Field / Frame / Mouse
--- Одна логика: мышь. Только события OnMouseDown / OnMouseUp / OnMouseWheel
--- и координаты курсора в системе frame. Куда попал и что делать —
--- решают обработчики, зарегистрированные через API:
---   self:AddMouseHandler(fn)   -- fn(x, y, button, event) → true, если поглотил
+-- NSQC4 / Quests / Field / Frame / Mouse / Cursor
+-- Одна логика: координаты курсора в системе frame.
+--
+--   CursorInFrame() → x, y | nil
+--     x, y — пиксели от BOTTOMLEFT frame (0,0)
+--     nil  — если frame не создан или не имеет геометрии
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -821,23 +1099,6 @@ NSQC4.RegisterModule("quests", function()
     local QuestsField = NSQC4.QuestsFieldClass
     if not QuestsField then return end
 
-    -- ========================================================================
-    -- API: регистрация обработчика мыши.
-    --   fn(x, y, button, event)
-    --     x, y   — координаты курсора в системе frame (BOTTOMLEFT = 0,0)
-    --     button — "LeftButton" | "RightButton" | "MiddleButton"
-    --     event  — "down" | "up" | "wheel"
-    --   Возврат true — событие поглощено, следующие обработчики не зовутся.
-    -- ========================================================================
-    function QuestsField:AddMouseHandler(fn)
-        if type(fn) ~= "function" then return end
-        self._mouseHandlers = self._mouseHandlers or {}
-        self._mouseHandlers[#self._mouseHandlers + 1] = fn
-    end
-
-    -- ========================================================================
-    -- Координаты курсора в системе frame.
-    -- ========================================================================
     function QuestsField:CursorInFrame()
         local f = self.frame
         if not f then return nil end
@@ -849,7 +1110,29 @@ NSQC4.RegisterModule("quests", function()
         return cx - left, cy - bottom
     end
 
-    local function Dispatch(self, button, event)
+end, 391)
+
+
+======================================================================
+ FILE: Field/Frame/Mouse/Dispatch.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / Frame / Mouse / Dispatch
+-- Одна логика: передача события всем зарегистрированным обработчикам
+-- по цепочке, пока кто-то не вернёт true (поглотил).
+--
+--   Dispatch(self, button, event)
+--     button — "LeftButton" | "RightButton" | "MiddleButton" | "WheelUp" | "WheelDown"
+--     event  — "down" | "up" | "wheel"
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local QuestsField = NSQC4.QuestsFieldClass
+    if not QuestsField then return end
+
+    function QuestsField:DispatchMouse(button, event)
         local x, y = self:CursorInFrame()
         if not x then return end
         local handlers = self._mouseHandlers
@@ -859,29 +1142,79 @@ NSQC4.RegisterModule("quests", function()
         end
     end
 
-    -- ========================================================================
-    -- SetupMouse — повесить скрипты на frame.
-    -- ========================================================================
+end, 392)
+
+
+======================================================================
+ FILE: Field/Frame/Mouse/Register.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / Frame / Mouse / Register
+-- Одна логика: API регистрации обработчиков мыши.
+--
+--   self:AddMouseHandler(fn)   -- fn(x, y, button, event) → true, если поглотил
+--
+--   x, y   — координаты курсора в системе frame (BOTTOMLEFT = 0,0)
+--   button — "LeftButton" | "RightButton" | "MiddleButton"
+--   event  — "down" | "up" | "wheel"
+--
+-- Возврат true — событие поглощено, следующие обработчики не зовутся.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local QuestsField = NSQC4.QuestsFieldClass
+    if not QuestsField then return end
+
+    function QuestsField:AddMouseHandler(fn)
+        if type(fn) ~= "function" then return end
+        self._mouseHandlers = self._mouseHandlers or {}
+        self._mouseHandlers[#self._mouseHandlers + 1] = fn
+    end
+
+end, 390)
+
+
+======================================================================
+ FILE: Field/Frame/Mouse/Setup.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / Frame / Mouse / Setup
+-- Одна логика: навесить скрипты OnMouseDown / OnMouseUp / OnMouseWheel
+-- на frame. Все они сводятся к DispatchMouse.
+--
+-- Зависит от: Register.lua (уже создан API), Cursor.lua, Dispatch.lua.
+-- Не создаёт frame — его создаёт Frame/Create.lua.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local QuestsField = NSQC4.QuestsFieldClass
+    if not QuestsField then return end
+
     function QuestsField:SetupMouse()
         local f = self.frame
         if not f then return end
+
         f:EnableMouse(true)
         f:EnableMouseWheel(true)
 
         f:SetScript("OnMouseDown", function(_, button)
-            Dispatch(self, button, "down")
+            self:DispatchMouse(button, "down")
         end)
 
         f:SetScript("OnMouseUp", function(_, button)
-            Dispatch(self, button, "up")
+            self:DispatchMouse(button, "up")
         end)
 
         f:SetScript("OnMouseWheel", function(_, delta)
-            Dispatch(self, delta > 0 and "WheelUp" or "WheelDown", "wheel")
+            self:DispatchMouse(delta > 0 and "WheelUp" or "WheelDown", "wheel")
         end)
     end
 
-end, 390)
+end, 393)
 
 
 ======================================================================
@@ -929,8 +1262,8 @@ end, 310)
 
 -- ============================================================================
 -- NSQC4 / Quests / Field / Init
--- Одна логика: создание класса QuestsFieldClass + экземпляра NSQC4.Field.
--- Никаких вызовов методов и никаких слэшей — это делает Bootstrap.lua.
+-- Одна логика: создание класса QuestsFieldClass.
+-- НЕ создаёт экземпляр — это делает Core/Instance/Create.lua.
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -953,8 +1286,6 @@ NSQC4.RegisterModule("quests", function()
         self.onFloorUp     = nil
         self.onFloorDown   = nil
     end
-
-    NSQC4.Field = QuestsField.new()
 
 end, 280)
 
@@ -1080,12 +1411,74 @@ end, 420)
 
 
 ======================================================================
- FILE: Field/Resize/Resize.lua
+ FILE: Field/Resize/Resize/Apply.lua
 ======================================================================
 
 -- ============================================================================
--- NSQC4 / Quests / Field / Resize / Resize
--- Одна логика: применить новый cellSize к полю.
+-- NSQC4 / Quests / Field / Resize / Resize / Apply
+-- Одна логика: перерисовка всех элементов под новый размер.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local QuestsField = NSQC4.QuestsFieldClass
+    if not QuestsField then return end
+
+    function QuestsField:ApplyNewSize()
+        -- 1. Сетка
+        if self.ReflowCells then self:ReflowCells() end
+
+        -- 2. Кнопки панелей
+        if self.RefreshAllButtons then self:RefreshAllButtons() end
+
+        -- 3. Свитчеры
+        if self.RefreshSwitchers then self:RefreshSwitchers() end
+
+        -- 4. Якоря подложки (если есть)
+        if self.ApplyBorderAnchors then self:ApplyBorderAnchors() end
+    end
+
+end, 402)
+
+
+======================================================================
+ FILE: Field/Resize/Resize/Refresh.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / Resize / Resize / Refresh
+-- Одна логика: оркестрация изменения размера.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local QuestsField = NSQC4.QuestsFieldClass
+    if not QuestsField then return end
+
+    function QuestsField:Resize(cs)
+        local changed = self:SetCellSize(cs)
+        if not changed then
+            -- Размер не изменился — но всё равно вернём true (успех)
+            -- или false? Для совместимости вернём true, если cellSize валиден.
+            -- Но если cellSize невалиден, SetCellSize вернёт false.
+            return self.cellSize ~= nil
+        end
+
+        self:ApplyNewSize()
+        self:Save()
+        return true
+    end
+
+end, 403)
+
+
+======================================================================
+ FILE: Field/Resize/Resize/Size.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / Resize / Resize / Size
+-- Одна логика: применение нового cellSize к frame (только геометрия).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -1096,7 +1489,9 @@ NSQC4.RegisterModule("quests", function()
 
     local MIN_CELL = CONST.MIN_CELL
 
-    function QuestsField:Resize(cs)
+    -- Устанавливает cellSize и меняет размер frame.
+    -- Возвращает true, если размер реально изменился.
+    function QuestsField:SetCellSize(cs)
         cs = tonumber(cs)
         if not cs then return false end
 
@@ -1105,7 +1500,7 @@ NSQC4.RegisterModule("quests", function()
         if cs > effMax then cs = effMax end
         cs = math.floor(cs + 0.5)
 
-        if cs == self.cellSize then return true end
+        if cs == self.cellSize then return false end
 
         self.cellSize = cs
 
@@ -1114,22 +1509,10 @@ NSQC4.RegisterModule("quests", function()
             self.frame:SetSize(w, h)
         end
 
-        -- клетки
-        if self.ReflowCells then self:ReflowCells() end
-
-        -- кнопки панелей — пересчитать позиции под новый размер frame
-        if self.RefreshAllButtons then self:RefreshAllButtons() end
-
-        -- свитчеры — пересчитать позиции
-        if self.RefreshSwitchers then self:RefreshSwitchers() end
-
-        if self.ApplyBorderAnchors then self:ApplyBorderAnchors() end
-
-        self:Save()
         return true
     end
 
-end, 400)
+end, 401)
 
 
 ======================================================================
@@ -1140,42 +1523,23 @@ end, 400)
 -- NSQC4 / Quests / Field / Settings / Content
 -- Один раздел окна настроек: заголовок + кнопки сброса.
 --
--- Мышь окна — та же схема, что у поля:
---   win:SetScript("OnMouseDown", Dispatch)   (W.SetupWindowMouse)
---   Dispatch перебирает win._mouseHandlers
---   Content.lua добавляет СВОЙ обработчик, который делает хит-тест кнопок.
+-- НЕ реализует мышь окна (UI/Window/API/Mouse/*).
+-- НЕ реализует хит-тест кнопок (UI/Window/API/Buttons/Hit.lua).
+-- НЕ перехватывает W:Register.
+--
+-- Кнопки добавляются через W:AddButton (583).
+-- Мышь и хит-тест навешиваются в UI/Window/API/Create.lua (491)
+-- автоматически после создания окна.
 -- ============================================================================
 NSQC4.RegisterModule("quests", function()
-    local W        = NSQC4.FieldWindow
-    local UIButton = NSQC4.UIButton
-    if not W or not UIButton then return end
-
-    -- --------------------------------------------------------------------
-    -- Добавить кнопку и, если окно уже существует, перестроить.
-    -- --------------------------------------------------------------------
-    local function AddButton(windowId, index, label, onClick)
-        local rec = UIButton:CreateRecord(label, onClick)
-
-        W._items = W._items or {}
-        local items = W._items[windowId]
-        if not items then
-            items = {}
-            W._items[windowId] = items
-        end
-        items[index] = rec
-
-        if W[windowId] and W.LayoutWindow then
-            W:LayoutWindow(windowId)
-        end
-
-        return rec
-    end
+    local W = NSQC4.FieldWindow
+    if not W then return end
 
     -- 1) Заголовок раздела
     W:RegisterLabel("settings", 1, "Настройки", nil, { align = "CENTER" })
 
     -- 2) Сброс положения
-    AddButton("settings", 2, "Сбросить положение", function()
+    W:AddButton("settings", 2, "Сбросить положение", function()
         local field = NSQC4.Field
         local NSDB  = NSQC4.NSDB
         if not field or not NSDB then return end
@@ -1191,7 +1555,7 @@ NSQC4.RegisterModule("quests", function()
     end)
 
     -- 3) Сброс размера
-    AddButton("settings", 3, "Сбросить размер", function()
+    W:AddButton("settings", 3, "Сбросить размер", function()
         local field = NSQC4.Field
         local NSDB  = NSQC4.NSDB
         if not field or not NSDB then return end
@@ -1202,69 +1566,6 @@ NSQC4.RegisterModule("quests", function()
             field:Resize(32)
         end
     end)
-
-    -- ========================================================================
-    -- Обработчик мыши окна: хит-тест кнопок по геометрии.
-    -- ========================================================================
-    local function AttachButtonMouse(win)
-        if not win or win._buttonsMouseAttached then return end
-        win._buttonsMouseAttached = true
-
-        W.AddWindowMouseHandler(win, function(x, y, button, event)
-            if event ~= "down" then
-                if event == "up" then
-                    UIButton:Release()
-                end
-                return false
-            end
-
-            if button ~= "LeftButton" then return false end
-
-            local items = W._items and W._items["settings"]
-            if not items then return false end
-
-            local winLeft, winBottom = win:GetLeft(), win:GetBottom()
-            if not winLeft or not winBottom then return false end
-            local screenX = winLeft + x
-            local screenY = winBottom + y
-
-            for _, rec in pairs(items) do
-                if rec.kind == "button" and rec.frame and rec.frame:IsShown() then
-                    local l = rec.frame:GetLeft()
-                    local r = rec.frame:GetRight()
-                    local t = rec.frame:GetTop()
-                    local b = rec.frame:GetBottom()
-                    if l and r and t and b
-                       and screenX >= l and screenX <= r
-                       and screenY >= b and screenY <= t then
-                        UIButton:Press(rec)
-                        if rec.onClick then rec.onClick(button) end
-                        return true
-                    end
-                end
-            end
-
-            return false
-        end)
-    end
-
-    -- Если окно уже создано — навесить всё нужное сразу.
-    local win = W["settings"]
-    if win then
-        W.SetupWindowMouse(win)
-        AttachButtonMouse(win)
-    end
-
-    -- Перехватить W:Register, чтобы при создании окна навесить всё нужное.
-    local oldRegister = W.Register
-    W.Register = function(self, desc)
-        local w = oldRegister(self, desc)
-        if w and desc and desc.id == "settings" then
-            W.SetupWindowMouse(w)     -- ← через W, а не голое имя
-            AttachButtonMouse(w)
-        end
-        return w
-    end
 end, 580)
 
 
@@ -1276,12 +1577,10 @@ end, 580)
 -- NSQC4 / Quests / Field / Settings / Init
 -- Одна логика: регистрация кнопки «Настройки» на панели LEFT.
 --
--- НЕ создаёт окно, НЕ регистрирует контент окна.
--- Окно создаётся лениво при первом клике (W:Register + W:Toggle).
---
--- Мышь окна настраивается здесь же — по той же схеме, что поле:
---   win:SetScript("OnMouseDown"/"OnMouseUp", Dispatch)
---   Dispatch перебирает обработчики из win._mouseHandlers
+-- НЕ создаёт окно, НЕ регистрирует контент, НЕ реализует мышь окна.
+-- Мышь окна — в UI/Window/API/Mouse/*:
+--   W:SetupWindowMouse(win)          (497)
+--   W:AddWindowMouseHandler(win, fn) (494)
 -- ============================================================================
 NSQC4.RegisterModule("quests", function()
     local QuestsField = NSQC4.QuestsFieldClass
@@ -1291,59 +1590,6 @@ NSQC4.RegisterModule("quests", function()
     local field = NSQC4.Field
     if not field then return end
 
-    -- ========================================================================
-    -- SetupWindowMouse — навесить Dispatch на окно.
-    -- Та же логика, что Field/Frame/Mouse.lua для поля.
-    -- ========================================================================
-    local function SetupWindowMouse(win)
-        if not win or win._mouseSetup then return end
-        win._mouseSetup = true
-        win._mouseHandlers = win._mouseHandlers or {}
-
-        win:EnableMouse(true)
-
-        local function CursorInWindow()
-            local scale = UIParent:GetEffectiveScale()
-            local cx, cy = GetCursorPosition()
-            cx, cy = cx / scale, cy / scale
-            local left, bottom = win:GetLeft(), win:GetBottom()
-            if not left or not bottom then return nil end
-            return cx - left, cy - bottom
-        end
-
-        local function Dispatch(_, button, event)
-            local x, y = CursorInWindow()
-            if not x then return end
-            for _, fn in ipairs(win._mouseHandlers) do
-                if fn(x, y, button, event) then return end
-            end
-        end
-
-        win:SetScript("OnMouseDown", function(_, button)
-            Dispatch(win, button, "down")
-        end)
-        win:SetScript("OnMouseUp", function(_, button)
-            Dispatch(win, button, "up")
-        end)
-    end
-
-    -- ========================================================================
-    -- AddWindowMouseHandler — API окна: добавить обработчик.
-    -- ========================================================================
-    local function AddWindowMouseHandler(win, fn)
-        if not win or type(fn) ~= "function" then return end
-        win._mouseHandlers = win._mouseHandlers or {}
-        win._mouseHandlers[#win._mouseHandlers + 1] = fn
-    end
-
-    -- Экспортируем API окна наружу через W, чтобы Content.lua мог добавить
-    -- свой обработчик (хит-тест кнопок).
-    W.SetupWindowMouse      = SetupWindowMouse
-    W.AddWindowMouseHandler = AddWindowMouseHandler
-
-    -- ========================================================================
-    -- Кнопка «Настройки» на панели LEFT
-    -- ========================================================================
     field:RegisterButton(
         "LEFT", 1, 1,
         "Interface\\Icons\\INV_Misc_Gear_01",
@@ -1358,11 +1604,8 @@ NSQC4.RegisterModule("quests", function()
             })
 
             local win = W["settings"]
-            if win then
-                SetupWindowMouse(win)
-                -- Обработчик кнопок окна регистрируется в Content.lua
-                -- через W.AddWindowMouseHandler(win, fn).
-                -- Если Content.lua уже выполнился — обработчик уже в списке.
+            if win and W.SetupWindowMouse then
+                W:SetupWindowMouse(win)
             end
 
             W:Toggle("settings")
@@ -1384,7 +1627,7 @@ end, 570)
 -- NSQC4 / Quests / Field / Settings / Radio
 -- Один раздел окна настроек: радиогруппа видимости кнопки настроек.
 --
--- Порядок в окне задаётся ТОЛЬКО индексом (LayoutWindow сортирует по нему):
+-- Порядок в окне — ТОЛЬКО по индексу (LayoutWindow сортирует по нему):
 --   4) Лейбл «Настройки кнопок» (CENTER)
 --   5) Лейбл-подпись «Кнопка "Настройки":» (CENTER)
 --   6) RadioGroup «settingsVisibility» (CENTER, HORIZONTAL):
@@ -1392,9 +1635,11 @@ end, 570)
 --        2 — При прозрачной панели (borderVisible = false)
 --        3 — При непрозрачной панели (borderVisible = true)
 --
--- Текст радиокнопок — в tooltip (наведение), не на самой кнопке.
 -- Значение синхронизируется с NSDB:buttons → "LEFT:1:1" → opts.visible.
 -- При смене — RefreshAllButtons().
+--
+-- Синхронизация при открытии окна — через W:RegisterOnShow (491),
+-- БЕЗ перехвата W.Show / W.Toggle.
 -- ============================================================================
 NSQC4.RegisterModule("quests", function()
     local W    = NSQC4.FieldWindow
@@ -1406,7 +1651,6 @@ NSQC4.RegisterModule("quests", function()
 
     local KEY = "LEFT:1:1"
 
-    -- Чтение текущего режима из NSDB
     local function GetMode()
         local data = NSDB:Get("buttons", KEY)
         if data and data.opts and data.opts.visible then
@@ -1415,7 +1659,6 @@ NSQC4.RegisterModule("quests", function()
         return 1
     end
 
-    -- Запись режима + перерисовка кнопок
     local function SetMode(value)
         local data = NSDB:Get("buttons", KEY)
         if not data then return end
@@ -1423,6 +1666,19 @@ NSQC4.RegisterModule("quests", function()
         data.opts.visible = value
         NSDB:Set("buttons", KEY, data)
         if field.RefreshAllButtons then field:RefreshAllButtons() end
+    end
+
+    local function Sync()
+        if not W["settings"] then return end
+
+        if W.EnsureRadioGroup then
+            W:EnsureRadioGroup("settings", "settingsVisibility")
+        end
+        if W.LayoutWindow then
+            W:LayoutWindow("settings")
+        end
+
+        W:SetRadioValue("settings", "settingsVisibility", GetMode())
     end
 
     -- 4) Заголовок раздела
@@ -1444,57 +1700,57 @@ NSQC4.RegisterModule("quests", function()
         { align = "CENTER", direction = "HORIZONTAL" }
     )
 
-    -- Синхронизация радиогруппы с NSDB при открытии окна
-    local function Sync()
-        if not W["settings"] then return end
-
-        if W.EnsureRadioGroup then
-            W:EnsureRadioGroup("settings", "settingsVisibility")
-        end
-        if W.LayoutWindow then
-            W:LayoutWindow("settings")
-        end
-
-        W:SetRadioValue("settings", "settingsVisibility", GetMode())
-    end
-
-    -- Если окно уже открыто — синхронизировать сразу
+    -- Если окно уже создано — синхронизировать сразу.
     if W["settings"] then Sync() end
 
-    -- Перехватить Show/Toggle для синхронизации при открытии
-    local oldShow   = W.Show
-    local oldToggle = W.Toggle
-
-    W.Show = function(self, key)
-        oldShow(self, key)
-        if key == "settings" then Sync() end
-    end
-
-    W.Toggle = function(self, key)
-        oldToggle(self, key)
-        if key == "settings" then Sync() end
+    -- Иначе — отложить до создания окна.
+    if W.RegisterOnShow then
+        W:RegisterOnShow("settings", Sync)
     end
 end, 590)
 
 
 ======================================================================
- FILE: Field/Switcher/Click.lua
+ FILE: Field/Switcher/Click/Action.lua
 ======================================================================
 
 -- ============================================================================
--- NSQC4 / Quests / Field / Switcher / Click
--- Одна логика: клик по свитчерам панелей + тултип по СКМ.
---
---   HitSwitcher(x, y)           -- хит-тест видимого свитчера
---   OnSwitcherClick(sw, button) -- ЛКМ: следующая панель, ПКМ: предыдущая
---   ToggleTooltipSwitcher(sw)   -- СКМ: показать/скрыть тултип
---
--- НЕ рисует (это делает Draw.lua).
--- НЕ создаёт текстуры (это делает Init.lua).
--- НЕ ловит мышь (это делает Mouse.lua).
--- Анимация нажатия — в Mouse.lua через Press.lua.
+-- NSQC4 / Quests / Field / Switcher / Click / Action
+-- Одна логика: переключение панели по клику (ЛКМ вперёд, ПКМ назад).
 -- ============================================================================
+
 NSQC4.RegisterModule("quests", function()
+
+    local QuestsField = NSQC4.QuestsFieldClass
+    if not QuestsField then return end
+
+    function QuestsField:OnSwitcherClick(sw, button)
+        if not sw then return end
+
+        if button == "LeftButton" then
+            self:SwitchPanel(sw.side, 1)
+        elseif button == "RightButton" then
+            self:SwitchPanel(sw.side, -1)
+        end
+
+        if self.RefreshSwitchers  then self:RefreshSwitchers()  end
+        if self.RefreshAllButtons then self:RefreshAllButtons() end
+    end
+
+end, 612)
+
+
+======================================================================
+ FILE: Field/Switcher/Click/Hit.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / Switcher / Click / Hit
+-- Одна логика: хит-тест свитчеров (попадание курсора).
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
     local QuestsField = NSQC4.QuestsFieldClass
     if not QuestsField then return end
 
@@ -1505,10 +1761,6 @@ NSQC4.RegisterModule("quests", function()
         BOTTOM = 1,
     }
 
-    -- ========================================================================
-    -- HitSwitcher — попадание в видимый свитчер.
-    -- x, y — координаты курсора в системе frame (BOTTOMLEFT = 0,0).
-    -- ========================================================================
     function QuestsField:HitSwitcher(x, y)
         local list = self._switchers
         if not list then return nil end
@@ -1528,27 +1780,23 @@ NSQC4.RegisterModule("quests", function()
         return nil
     end
 
-    -- ========================================================================
-    -- OnSwitcherClick — переключение панели.
-    --   ЛКМ — следующая панель (dir = +1)
-    --   ПКМ — предыдущая панель (dir = -1)
-    -- ========================================================================
-    function QuestsField:OnSwitcherClick(sw, button)
-        if not sw then return end
+end, 611)
 
-        if button == "LeftButton" then
-            self:SwitchPanel(sw.side, 1)
-        elseif button == "RightButton" then
-            self:SwitchPanel(sw.side, -1)
-        end
 
-        if self.RefreshSwitchers  then self:RefreshSwitchers()  end
-        if self.RefreshAllButtons then self:RefreshAllButtons() end
-    end
+======================================================================
+ FILE: Field/Switcher/Click/Tooltip.lua
+======================================================================
 
-    -- ========================================================================
-    -- ToggleTooltipSwitcher — СКМ: показать/скрыть тултип свитчера.
-    -- ========================================================================
+-- ============================================================================
+-- NSQC4 / Quests / Field / Switcher / Click / Tooltip
+-- Одна логика: показ/скрытие тултипа свитчера по СКМ.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local QuestsField = NSQC4.QuestsFieldClass
+    if not QuestsField then return end
+
     function QuestsField:ToggleTooltipSwitcher(sw)
         if not sw then return end
 
@@ -1568,29 +1816,21 @@ NSQC4.RegisterModule("quests", function()
             GameTooltip:Show()
         end
     end
-end, 615)
+
+end, 613)
 
 
 ======================================================================
- FILE: Field/Switcher/Draw.lua
+ FILE: Field/Switcher/Draw/Position.lua
 ======================================================================
 
 -- ============================================================================
--- NSQC4 / Quests / Field / Switcher / Draw
--- Одна логика: отрисовка свитчеров панелей (RefreshSwitchers).
---
--- Видимость свитчера:
---   1 — всегда видима
---   2 — видима при видимой подложке (borderVisible = true)
---   3 — видима при невидимой подложке (borderVisible = false)
---
--- Дополнительно — скрывается, если на текущей панели стороны нет ни одной
--- кнопки (HasPanelButtons(side) == false).
---
--- НЕ создаёт текстуры (это делает Init.lua).
--- НЕ кликает, НЕ ловит мышь (это Click.lua и Mouse.lua).
+-- NSQC4 / Quests / Field / Switcher / Draw / Position
+-- Одна логика: установка позиции и размера свитчера.
 -- ============================================================================
+
 NSQC4.RegisterModule("quests", function()
+
     local QuestsField = NSQC4.QuestsFieldClass
     if not QuestsField then return end
 
@@ -1601,9 +1841,41 @@ NSQC4.RegisterModule("quests", function()
         BOTTOM = 1,
     }
 
-    -- ========================================================================
-    -- RefreshSwitchers — пересчитать позиции и видимость всех 4 свитчеров.
-    -- ========================================================================
+    function QuestsField:PositionSwitcher(rec)
+        local f = self.frame
+        if not f then return false end
+
+        local cx, cy = self:PanelButtonXY(rec.side, FIRST_CELL[rec.side])
+        if not cx then return false end
+
+        rec.texture:ClearAllPoints()
+        rec.texture:SetPoint("CENTER", f, "BOTTOMLEFT", cx, cy)
+
+        if not self:IsPressed(rec.texture) then
+            local bs = self:GetButtonSize()
+            rec.texture:SetSize(bs, bs)
+        end
+
+        return true
+    end
+
+end, 612)
+
+
+======================================================================
+ FILE: Field/Switcher/Draw/Refresh.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / Switcher / Draw / Refresh
+-- Одна логика: оркестрация отрисовки свитчеров.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local QuestsField = NSQC4.QuestsFieldClass
+    if not QuestsField then return end
+
     function QuestsField:RefreshSwitchers()
         local list = self._switchers
         if not list then return end
@@ -1611,33 +1883,9 @@ NSQC4.RegisterModule("quests", function()
         local f = self.frame
         if not f then return end
 
-        local bs = self:GetButtonSize()
-
         for _, rec in ipairs(list) do
-            local side = rec.side
-            local v    = (rec.settings and rec.settings.visible) or 1
-
-            local visibleNow = true
-            if v == 2 then
-                visibleNow = (self.borderVisible == true)
-            elseif v == 3 then
-                visibleNow = (self.borderVisible == false)
-            end
-
-            -- Скрываем, если на текущей панели стороны нет кнопок
-            if visibleNow and not self:HasPanelButtons(side) then
-                visibleNow = false
-            end
-
-            if visibleNow then
-                local cx, cy = self:PanelButtonXY(side, FIRST_CELL[side])
-                if cx then
-                    rec.texture:ClearAllPoints()
-                    rec.texture:SetPoint("CENTER", f, "BOTTOMLEFT", cx, cy)
-
-                    if not self:IsPressed(rec.texture) then
-                        rec.texture:SetSize(bs, bs)
-                    end
+            if self:ShouldShowSwitcher(rec) then
+                if self:PositionSwitcher(rec) then
                     rec.texture:Show()
                 else
                     rec.texture:Hide()
@@ -1647,7 +1895,44 @@ NSQC4.RegisterModule("quests", function()
             end
         end
     end
-end, 610)
+
+end, 613)
+
+
+======================================================================
+ FILE: Field/Switcher/Draw/Visible.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / Switcher / Draw / Visible
+-- Одна логика: вычисление видимости свитчера.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local QuestsField = NSQC4.QuestsFieldClass
+    if not QuestsField then return end
+
+    function QuestsField:ShouldShowSwitcher(rec)
+        local side = rec.side
+        local v    = (rec.settings and rec.settings.visible) or 1
+
+        local visibleNow = true
+        if v == 2 then
+            visibleNow = (self.borderVisible == true)
+        elseif v == 3 then
+            visibleNow = (self.borderVisible == false)
+        end
+
+        -- Скрываем, если на текущей панели стороны нет кнопок
+        if visibleNow and not self:HasPanelButtons(side) then
+            visibleNow = false
+        end
+
+        return visibleNow
+    end
+
+end, 611)
 
 
 ======================================================================
@@ -1767,6 +2052,10 @@ end, 605)
 -- НЕ создаёт текстуры (это делает Init.lua).
 -- НЕ хит-тестит (это делает Click.lua).
 -- Анимация нажатия — через Press.lua (PressTexture / ReleaseTexture).
+--
+-- ВАЖНО: вес 615 < 620 (Bootstrap/Init.lua) — обработчик регистрируется
+-- ДО того, как Bootstrap вызовет SetupMouse. Иначе коллизия весов 620
+-- с Bootstrap/Init.lua делает порядок недетерминированным.
 -- ============================================================================
 NSQC4.RegisterModule("quests", function()
     local field = NSQC4.Field
@@ -1796,7 +2085,7 @@ NSQC4.RegisterModule("quests", function()
 
         return false
     end)
-end, 620)
+end, 615)
 
 
 ======================================================================
@@ -1860,32 +2149,19 @@ end, 440)
 
 
 ======================================================================
- FILE: Field/UI/Buttons/Click.lua
+ FILE: Field/UI/Buttons/Click/Click.lua
 ======================================================================
 
 -- ============================================================================
--- NSQC4 / Quests / Field / UI / Buttons / Click
--- Одна логика: клик по кнопкам панелей.
---
---   OnPanelButtonClick(rec, button)  -- ЛКМ: PressTexture + callback
---   OnMouseUp()                      -- ReleaseTexture
---   ToggleTooltipButton(rec)         -- СКМ: тултип-триггер
---
--- НЕ рисует, НЕ создаёт, НЕ регистрирует обработчики мыши.
--- Анимация — через Press.lua (PressTexture / ReleaseTexture).
--- Callbacks — в self._callbacks (Register.lua).
+-- NSQC4 / Quests / Field / UI / Buttons / Click / Click
+-- Одна логика: ЛКМ по кнопке панели (PressTexture + callback).
 -- ============================================================================
+
 NSQC4.RegisterModule("quests", function()
+
     local QuestsField = NSQC4.QuestsFieldClass
     if not QuestsField then return end
 
-    -- ========================================================================
-    -- OnPanelButtonClick — ЛКМ по кнопке панели.
-    --   1) PressTexture (визуал "вдавливания")
-    --   2) Вызов callback из self._callbacks[key]
-    --
-    -- key = "side:panelIndex:slot"
-    -- ========================================================================
     function QuestsField:OnPanelButtonClick(rec, button)
         if not rec or not rec.texture then return end
 
@@ -1899,19 +2175,44 @@ NSQC4.RegisterModule("quests", function()
         end
     end
 
-    -- ========================================================================
-    -- OnMouseUp — отпускание мыши (снять анимацию).
-    -- ========================================================================
+end, 467)
+
+
+======================================================================
+ FILE: Field/UI/Buttons/Click/Release.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / UI / Buttons / Click / Release
+-- Одна логика: отпускание мыши (снять анимацию нажатия).
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local QuestsField = NSQC4.QuestsFieldClass
+    if not QuestsField then return end
+
     function QuestsField:OnMouseUp()
         self:ReleaseTexture()
     end
 
-    -- ========================================================================
-    -- ToggleTooltipButton — СКМ по кнопке: показать/скрыть тултип.
-    --
-    -- Повторный СКМ по той же кнопке — скрыть.
-    -- СКМ по другой кнопке — переключить тултип на новую.
-    -- ========================================================================
+end, 468)
+
+
+======================================================================
+ FILE: Field/UI/Buttons/Click/Tooltip.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / UI / Buttons / Click / Tooltip
+-- Одна логика: показ/скрытие тултипа кнопки панели (СКМ).
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local QuestsField = NSQC4.QuestsFieldClass
+    if not QuestsField then return end
+
     function QuestsField:ToggleTooltipButton(rec)
         if not rec then return end
 
@@ -1933,26 +2234,89 @@ NSQC4.RegisterModule("quests", function()
             GameTooltip:Show()
         end
     end
-end, 467)
+
+end, 469)
 
 
 ======================================================================
- FILE: Field/UI/Buttons/Draw.lua
+ FILE: Field/UI/Buttons/Draw/Appearance.lua
 ======================================================================
 
 -- ============================================================================
--- NSQC4 / Quests / Field / UI / Buttons / Draw
--- Одна логика: отрисовка кнопок панелей.
---
--- Только RefreshAllButtons и GetButtonSize.
--- Хит-тест — в Hit.lua, клик — в Click.lua, мышь — в Mouse.lua.
+-- NSQC4 / Quests / Field / UI / Buttons / Draw / Appearance
+-- Одна логика: текстура и цвет кнопки.
 -- ============================================================================
+
 NSQC4.RegisterModule("quests", function()
+
+    local QuestsField = NSQC4.QuestsFieldClass
+    if not QuestsField then return end
+
+    function QuestsField:ApplyButtonAppearance(rec, data)
+        local tex = rec.texture
+        tex:SetTexture(data.icon)
+
+        local c = data.opts and data.opts.color
+        if c then
+            tex:SetVertexColor(c[1], c[2], c[3], c[4] or 1)
+        else
+            tex:SetVertexColor(1, 1, 1, 1)
+        end
+    end
+
+end, 463)
+
+
+======================================================================
+ FILE: Field/UI/Buttons/Draw/Position.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / UI / Buttons / Draw / Position
+-- Одна логика: установка позиции кнопки на поле.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local QuestsField = NSQC4.QuestsFieldClass
+    if not QuestsField then return end
+
+    -- Ставит кнопку в нужную точку (side + cellIndex)
+    function QuestsField:SetButtonPosition(rec, cellIndex)
+        local f = self.frame
+        if not f then return false end
+
+        local cx, cy = self:PanelButtonXY(rec.side, cellIndex)
+        if not cx then return false end
+
+        rec.texture:ClearAllPoints()
+        rec.texture:SetPoint("CENTER", f, "BOTTOMLEFT", cx, cy)
+        return true
+    end
+
+end, 462)
+
+
+======================================================================
+ FILE: Field/UI/Buttons/Draw/Refresh.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / UI / Buttons / Draw / Refresh
+-- Одна логика: оркестрация отрисовки всех кнопок панелей.
+--
+-- Вызывает:
+--   ShouldShowButton       (Visible.lua)
+--   SetButtonPosition      (Position.lua)
+--   ApplyButtonAppearance  (Appearance.lua)
+--   ApplyButtonSize        (Size.lua)
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
     local QuestsField = NSQC4.QuestsFieldClass
     local NSDB        = NSQC4.NSDB
     if not QuestsField or not NSDB then return end
-
-    local SIZE = 32
 
     local STEP = {
         TOP    =  1,
@@ -1975,38 +2339,27 @@ NSQC4.RegisterModule("quests", function()
         return first + step * slot
     end
 
-    -- ========================================================================
-    -- Размер кнопки (минимум из cellSize и 32)
-    -- ========================================================================
-    function QuestsField:GetButtonSize()
-        local cs = self.cellSize or SIZE
-        if cs < SIZE then return cs end
-        return SIZE
-    end
-
-    -- ========================================================================
-    -- Отрисовка всех зарегистрированных кнопок панелей
-    -- ========================================================================
     function QuestsField:RefreshAllButtons()
         local f = self.frame
         if not f then return end
 
         self._panelButtons = self._panelButtons or {}
-
         local buttons = NSDB:Table("buttons")
         if not buttons then return end
-
-        local bs = self:GetButtonSize()
 
         for key, data in pairs(buttons) do
             local side = data.side
             local cellIndex = data.slot and CellForSlot(side, data.slot)
 
             if cellIndex then
+                -- Создаем текстуру, если ее еще нет
                 local rec = self._panelButtons[key]
                 if not rec then
-                    rec = { texture = f:CreateTexture(nil, "OVERLAY", nil, 10),
-                            side = side, slot = data.slot }
+                    rec = { 
+                        texture = f:CreateTexture(nil, "OVERLAY", nil, 10),
+                        side = side, 
+                        slot = data.slot 
+                    }
                     self._panelButtons[key] = rec
                 end
 
@@ -2014,26 +2367,17 @@ NSQC4.RegisterModule("quests", function()
                 rec.panelIndex = data.panelIndex
                 rec.slot       = data.slot
 
-                local show = (data.panelIndex == self:GetPanelIndex(side))
-
-                local v = (data.opts and data.opts.visible) or 1
-                if v == 2 then show = show and self.borderVisible == true
-                elseif v == 3 then show = show and self.borderVisible == false end
-
+                -- 1. Видимость
+                local show = self:ShouldShowButton(data)
                 if show then
-                    local cx, cy = self:PanelButtonXY(side, cellIndex)
-                    if cx then
-                        rec.texture:SetTexture(data.icon)
-                        local c = data.opts and data.opts.color
-                        if c then rec.texture:SetVertexColor(c[1], c[2], c[3], c[4] or 1)
-                        else rec.texture:SetVertexColor(1, 1, 1, 1) end
-
-                        rec.texture:ClearAllPoints()
-                        rec.texture:SetPoint("CENTER", f, "BOTTOMLEFT", cx, cy)
-
-                        if not self:IsPressed(rec.texture) then
-                            rec.texture:SetSize(bs, bs)
-                        end
+                    -- 2. Позиция
+                    local posOk = self:SetButtonPosition(rec, cellIndex)
+                    if posOk then
+                        -- 3. Внешний вид
+                        self:ApplyButtonAppearance(rec, data)
+                        -- 4. Размер
+                        self:ApplyButtonSize(rec)
+                        
                         rec.texture:Show()
                     else
                         rec.texture:Hide()
@@ -2044,7 +2388,75 @@ NSQC4.RegisterModule("quests", function()
             end
         end
     end
+
 end, 465)
+
+
+======================================================================
+ FILE: Field/UI/Buttons/Draw/Size.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / UI / Buttons / Draw / Size
+-- Одна логика: установка размера кнопки.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local QuestsField = NSQC4.QuestsFieldClass
+    if not QuestsField then return end
+
+    local SIZE = 32
+
+    -- Размер кнопки (минимум из cellSize и 32)
+    function QuestsField:GetButtonSize()
+        local cs = self.cellSize or SIZE
+        if cs < SIZE then return cs end
+        return SIZE
+    end
+
+    -- Применяет размер, если кнопка не нажата
+    function QuestsField:ApplyButtonSize(rec)
+        if self:IsPressed(rec.texture) then return end
+        local bs = self:GetButtonSize()
+        rec.texture:SetSize(bs, bs)
+    end
+
+end, 464)
+
+
+======================================================================
+ FILE: Field/UI/Buttons/Draw/Visible.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / UI / Buttons / Draw / Visible
+-- Одна логика: вычисление видимости кнопки панели.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+
+    local QuestsField = NSQC4.QuestsFieldClass
+    if not QuestsField then return end
+
+    -- Возвращает true, если кнопку нужно показать
+    function QuestsField:ShouldShowButton(data)
+        -- 1. Проверка панели
+        local show = (data.panelIndex == self:GetPanelIndex(data.side))
+        if not show then return false end
+
+        -- 2. Проверка opts.visible (1/2/3)
+        local v = (data.opts and data.opts.visible) or 1
+        if v == 2 then
+            return self.borderVisible == true
+        elseif v == 3 then
+            return self.borderVisible == false
+        end
+
+        return true
+    end
+
+end, 461)
 
 
 ======================================================================
@@ -2117,155 +2529,20 @@ end, 466)
 
 -- ============================================================================
 -- NSQC4 / Quests / Field / UI / Buttons / Init
--- Универсальный рендерер кнопок.
+-- Одна логика: namespace универсального рендерера кнопок.
 --
 -- НИЧЕГО не знает о поле (QuestsField) и об окнах (FieldWindow).
 -- Рисует кнопки на любом parent-фрейме, где скажут.
 --
 -- Публичный API (NSQC4.UIButton):
---   CreateRecord(label, onClick, opts)       → rec
---   Draw(parent, rec, y, availableW)         → height
---   HitTest(rec)                             → boolean
---   FindHit(items)                           → rec | nil
---   Press(rec)
---   Release()
---   SetupMouse(parent, getItems)
+--   CreateRecord(label, onClick, opts)       → rec    (Widget/Create.lua)
+--   Draw(parent, rec, y, availableW)         → height (Widget/Draw.lua)
+--   Press(rec)                                       (Widget/Press.lua)
+--   Release()                                        (Widget/Press.lua)
 -- ============================================================================
+
 NSQC4.RegisterModule("quests", function()
-    local UIButton = {}
-    NSQC4.UIButton = UIButton
-
-    local BUTTON_H = 24
-    local PIXELS   = 2
-
-    -- ========================================================================
-    -- CreateRecord — создать запись кнопки (без отрисовки).
-    -- ========================================================================
-    function UIButton:CreateRecord(label, onClick, opts)
-        return {
-            kind    = "button",
-            label   = label,
-            onClick = onClick,
-            opts    = opts or {},
-        }
-    end
-
-    -- ========================================================================
-    -- Draw — отрисовать кнопку на parent в позиции y.
-    -- Возвращает высоту блока (для раскладки).
-    -- ========================================================================
-    function UIButton:Draw(parent, rec, y, availableW)
-        if not parent then return 0 end
-
-        if not rec.frame then
-            local tex = parent:CreateTexture(nil, "OVERLAY")
-            tex:SetTexture("Interface\\Buttons\\WHITE8x8")
-            tex:SetVertexColor(0.4, 0, 0, 1)
-
-            local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            fs:SetText(rec.label)
-            fs:SetPoint("CENTER", tex, "CENTER", 0, 0)
-
-            rec.frame = tex
-            rec.text  = fs
-        end
-
-        rec.frame:ClearAllPoints()
-        rec.frame:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, y)
-        rec.frame:SetSize(availableW, BUTTON_H)
-        rec.frame:Show()
-
-        if rec.text then rec.text:Show() end
-
-        return BUTTON_H + 4
-    end
-
-    -- ========================================================================
-    -- HitTest — попал ли курсор в кнопку.
-    -- ========================================================================
-    function UIButton:HitTest(rec)
-        if not rec or not rec.frame or not rec.frame:IsShown() then
-            return false
-        end
-
-        local left  = rec.frame:GetLeft()
-        local right = rec.frame:GetRight()
-        local top   = rec.frame:GetTop()
-        local bot   = rec.frame:GetBottom()
-
-        if not (left and right and top and bot) then return false end
-
-        local scale = UIParent:GetEffectiveScale()
-        local cx, cy = GetCursorPosition()
-        cx, cy = cx / scale, cy / scale
-
-        return cx >= left and cx <= right and cy <= top and cy >= bot
-    end
-
-    -- ========================================================================
-    -- FindHit — найти кнопку под курсором в таблице items.
-    -- ========================================================================
-    function UIButton:FindHit(items)
-        if not items then return nil end
-
-        for _, rec in pairs(items) do
-            if rec.kind == "button" and self:HitTest(rec) then
-                return rec
-            end
-        end
-
-        return nil
-    end
-
-    -- ========================================================================
-    -- Press / Release — анимация нажатия.
-    -- ========================================================================
-    function UIButton:Press(rec)
-        if not rec or not rec.frame then return end
-
-        local tex = rec.frame
-        local w, h = tex:GetWidth(), tex:GetHeight()
-        if not w or not h then return end
-
-        tex:SetSize(w - PIXELS * 2, h - PIXELS * 2)
-        self._pressed = { tex = tex, w = w, h = h }
-    end
-
-    function UIButton:Release()
-        local p = self._pressed
-        if not p then return end
-
-        self._pressed = nil
-        if p.tex and p.w and p.h then
-            p.tex:SetSize(p.w, p.h)
-        end
-    end
-
-    -- ========================================================================
-    -- SetupMouse — подключить мышь к parent.
-    --   getItems() — функция, возвращающая таблицу кнопок для хит-теста.
-    -- ========================================================================
-    function UIButton:SetupMouse(parent, getItems)
-        if not parent or parent._uiButtonMouseSetup then return end
-        parent._uiButtonMouseSetup = true
-        parent:EnableMouse(true)
-
-        parent:SetScript("OnMouseDown", function(_, button)
-            if button ~= "LeftButton" then return end
-
-            local items = getItems()
-            local rec   = UIButton:FindHit(items)
-
-            if rec then
-                UIButton:Press(rec)
-                if rec.onClick then rec.onClick(button) end
-            end
-        end)
-
-        parent:SetScript("OnMouseUp", function()
-            UIButton:Release()
-        end)
-    end
+    NSQC4.UIButton = NSQC4.UIButton or {}
 end, 530)
 
 
@@ -2485,6 +2762,129 @@ end, 460)
 
 
 ======================================================================
+ FILE: Field/UI/Buttons/Widget/Create.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / UI / Buttons / Widget / Create
+-- Одна логика: создание записи кнопки (без отрисовки).
+--
+--   UIButton:CreateRecord(label, onClick, opts) → rec
+--
+-- rec — «сырые» данные. Фрейм/текстура появятся при первом Draw.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+    local UIButton = NSQC4.UIButton
+    if not UIButton then return end
+
+    function UIButton:CreateRecord(label, onClick, opts)
+        return {
+            kind    = "button",
+            label   = label,
+            onClick = onClick,
+            opts    = opts or {},
+        }
+    end
+
+end, 531)
+
+
+======================================================================
+ FILE: Field/UI/Buttons/Widget/Draw.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / UI / Buttons / Widget / Draw
+-- Одна логика: отрисовать кнопку на parent в позиции y.
+--
+--   UIButton:Draw(parent, rec, y, availableW) → height
+--
+-- Высота блока возвращается для раскладки (LayoutWindow).
+-- Фрейм/текстура создаются лениво при первом Draw.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+    local UIButton = NSQC4.UIButton
+    if not UIButton then return end
+
+    local BUTTON_H = 24
+
+    function UIButton:Draw(parent, rec, y, availableW)
+        if not parent then return 0 end
+
+        if not rec.frame then
+            local tex = parent:CreateTexture(nil, "OVERLAY")
+            tex:SetTexture("Interface\\Buttons\\WHITE8x8")
+            tex:SetVertexColor(0.4, 0, 0, 1)
+
+            local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            fs:SetText(rec.label)
+            fs:SetPoint("CENTER", tex, "CENTER", 0, 0)
+
+            rec.frame = tex
+            rec.text  = fs
+        end
+
+        rec.frame:ClearAllPoints()
+        rec.frame:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, y)
+        rec.frame:SetSize(availableW, BUTTON_H)
+        rec.frame:Show()
+
+        if rec.text then rec.text:Show() end
+
+        return BUTTON_H + 4
+    end
+
+end, 532)
+
+
+======================================================================
+ FILE: Field/UI/Buttons/Widget/Press.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / UI / Buttons / Widget / Press
+-- Одна логика: анимация нажатия кнопки (уменьшение/восстановление размера).
+--
+--   UIButton:Press(rec)     — уменьшить на PIXELS*2, запомнить исходный размер
+--   UIButton:Release()      — вернуть исходный размер
+--
+-- _pressed хранит только одну активную кнопку — этого достаточно,
+-- т.к. мышь нажата максимум на одной кнопке за раз.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+    local UIButton = NSQC4.UIButton
+    if not UIButton then return end
+
+    local PIXELS = 2
+
+    function UIButton:Press(rec)
+        if not rec or not rec.frame then return end
+
+        local tex = rec.frame
+        local w, h = tex:GetWidth(), tex:GetHeight()
+        if not w or not h then return end
+
+        tex:SetSize(w - PIXELS * 2, h - PIXELS * 2)
+        self._pressed = { tex = tex, w = w, h = h }
+    end
+
+    function UIButton:Release()
+        local p = self._pressed
+        if not p then return end
+
+        self._pressed = nil
+        if p.tex and p.w and p.h then
+            p.tex:SetSize(p.w, p.h)
+        end
+    end
+
+end, 533)
+
+
+======================================================================
  FILE: Field/UI/Label/Init.lua
 ======================================================================
 
@@ -2597,75 +2997,17 @@ end, 520)
 
 
 ======================================================================
- FILE: Field/UI/Radio/Init.lua
+ FILE: Field/UI/Radio/Create.lua
 ======================================================================
 
 -- ============================================================================
--- NSQC4 / Quests / Field / UI / Radio / Init
--- Регистрация радио-групп. opts.align = "LEFT" | "CENTER" | "RIGHT".
--- opts.direction = "HORIZONTAL" (по умолчанию) | "VERTICAL".
+-- NSQC4 / Quests / Field / UI / Radio / Create
+-- Одна логика: создание CheckButton для радио-группы.
 -- ============================================================================
-
-NSQC4.RegisterModule("quests", function()
-
-    local W = NSQC4.FieldWindow
-    if not W then return end
-
-    function W:RegisterRadioGroup(windowId, index, groupId, options, onSelect, opts)
-        index = tonumber(index)
-        if not windowId or not index or not groupId then return nil end
-
-        opts = opts or {}
-
-        self._radioGroups = self._radioGroups or {}
-        self._radioGroups[windowId] = self._radioGroups[windowId] or {}
-        if self._radioGroups[windowId][groupId] then
-            return self._radioGroups[windowId][groupId]
-        end
-
-        self._radioGroups[windowId][groupId] = {
-            groupId   = groupId,
-            options   = options,
-            onSelect  = onSelect,
-            align     = opts.align or "LEFT",
-            direction = opts.direction or "HORIZONTAL",
-        }
-
-        self._items = self._items or {}
-        local items = self._items[windowId]
-        if not items then items = {}; self._items[windowId] = items end
-
-        if not items[index] then
-            items[index] = { kind = "radio", groupId = groupId }
-        end
-
-        if self[windowId] and self.LayoutWindow then
-            self:LayoutWindow(windowId)
-        end
-        return self._radioGroups[windowId][groupId]
-    end
-
-    function W:SetRadioValue(windowId, groupId, value)
-        local grp = self._radioGroups and self._radioGroups[windowId] and self._radioGroups[windowId][groupId]
-        if not grp then return end
-        if grp._buttons then
-            for v, btn in pairs(grp._buttons) do btn:SetChecked(v == value) end
-        end
-        if grp.onSelect then grp.onSelect(value) end
-    end
-
-end, 550)
-
-
-======================================================================
- FILE: Field/UI/Radio/Refresh.lua
-======================================================================
 
 NSQC4.RegisterModule("quests", function()
     local W = NSQC4.FieldWindow
     if not W then return end
-
-    local RADIO_H, RADIO_GAP, MARGIN, ICON_W, ICON_GAP = 24, 6, 8, 24, 12
 
     local function SafeName(windowId, groupId, value)
         local raw = string.format("NSQC4FieldRadio_%s_%s_%s",
@@ -2715,6 +3057,23 @@ NSQC4.RegisterModule("quests", function()
         end
         return grp._buttons
     end
+end, 553)
+
+
+======================================================================
+ FILE: Field/UI/Radio/Draw.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / UI / Radio / Draw
+-- Одна логика: раскладка кнопок радио-группы.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+    local W = NSQC4.FieldWindow
+    if not W then return end
+
+    local RADIO_H, RADIO_GAP, MARGIN, ICON_W, ICON_GAP = 24, 6, 8, 24, 12
 
     function W:DrawRadio(windowId, rec, y, availableW)
         local win = self[windowId]
@@ -2747,20 +3106,201 @@ NSQC4.RegisterModule("quests", function()
         end
         return RADIO_H + RADIO_GAP
     end
+end, 554)
+
+
+======================================================================
+ FILE: Field/UI/Radio/Register.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / UI / Radio / Register
+-- Одна логика: регистрация радио-группы.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+    local W = NSQC4.FieldWindow
+    if not W then return end
+
+    function W:RegisterRadioGroup(windowId, index, groupId, options, onSelect, opts)
+        index = tonumber(index)
+        if not windowId or not index or not groupId then return nil end
+        opts = opts or {}
+
+        self._radioGroups = self._radioGroups or {}
+        self._radioGroups[windowId] = self._radioGroups[windowId] or {}
+        if self._radioGroups[windowId][groupId] then
+            return self._radioGroups[windowId][groupId]
+        end
+
+        self._radioGroups[windowId][groupId] = {
+            groupId   = groupId,
+            options   = options,
+            onSelect  = onSelect,
+            align     = opts.align or "LEFT",
+            direction = opts.direction or "HORIZONTAL",
+        }
+
+        self._items = self._items or {}
+        local items = self._items[windowId]
+        if not items then items = {}; self._items[windowId] = items end
+
+        if not items[index] then
+            items[index] = { kind = "radio", groupId = groupId }
+        end
+
+        if self[windowId] and self.LayoutWindow then
+            self:LayoutWindow(windowId)
+        end
+        return self._radioGroups[windowId][groupId]
+    end
+end, 551)
+
+
+======================================================================
+ FILE: Field/UI/Radio/SetValue.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / UI / Radio / SetValue
+-- Одна логика: установка значения радио-группы.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+    local W = NSQC4.FieldWindow
+    if not W then return end
+
+    function W:SetRadioValue(windowId, groupId, value)
+        local grp = self._radioGroups and self._radioGroups[windowId] and self._radioGroups[windowId][groupId]
+        if not grp then return end
+        if grp._buttons then
+            for v, btn in pairs(grp._buttons) do btn:SetChecked(v == value) end
+        end
+        if grp.onSelect then grp.onSelect(value) end
+    end
+end, 552)
+
+
+======================================================================
+ FILE: Field/UI/Window/API/Buttons/Add.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / UI / Window / API / Buttons / Add
+-- Одна логика: добавить кнопку в окно (запись + перестроить, если окно есть).
+--
+--   W:AddButton(windowId, index, label, onClick) → rec
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+    local W        = NSQC4.FieldWindow
+    local UIButton = NSQC4.UIButton
+    if not W or not UIButton then return end
+
+    function W:AddButton(windowId, index, label, onClick)
+        local rec = UIButton:CreateRecord(label, onClick)
+
+        self._items = self._items or {}
+        local items = self._items[windowId]
+        if not items then
+            items = {}
+            self._items[windowId] = items
+        end
+        items[index] = rec
+
+        if self[windowId] and self.LayoutWindow then
+            self:LayoutWindow(windowId)
+        end
+
+        return rec
+    end
+
 end, 560)
 
 
 ======================================================================
- FILE: Field/UI/Window/API.lua
+ FILE: Field/UI/Window/API/Buttons/Hit.lua
 ======================================================================
 
 -- ============================================================================
--- NSQC4 / Quests / Field / UI / Window / API
--- Одна логика: создание и управление пустыми окнами.
+-- NSQC4 / Quests / Field / UI / Window / API / Buttons / Hit
+-- Одна логика: хит-тест кнопок окна по геометрии + регистрация обработчика.
 --
--- НЕ подключает мышь автоматически — для этого есть AttachMouseHandlers(key),
--- который должен быть вызван явно после регистрации контента окна.
+--   W:AttachButtonMouse(win, windowId)
+--
+-- event "up"   → UIButton:Release()
+-- event "down" → хит-тест по кнопкам windowId → Press + onClick
+--
+-- Использует W:AddWindowMouseHandler (API/Mouse/Register.lua, 494).
 -- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+    local W        = NSQC4.FieldWindow
+    local UIButton = NSQC4.UIButton
+    if not W or not UIButton then return end
+
+    function W:AttachButtonMouse(win, windowId)
+        if not win or win._buttonsMouseAttached then return end
+        win._buttonsMouseAttached = true
+
+        self:AddWindowMouseHandler(win, function(x, y, button, event)
+            if event ~= "down" then
+                if event == "up" then
+                    UIButton:Release()
+                end
+                return false
+            end
+
+            if button ~= "LeftButton" then return false end
+
+            local items = self._items and self._items[windowId]
+            if not items then return false end
+
+            local winLeft, winBottom = win:GetLeft(), win:GetBottom()
+            if not winLeft or not winBottom then return false end
+            local screenX = winLeft + x
+            local screenY = winBottom + y
+
+            for _, rec in pairs(items) do
+                if rec.kind == "button" and rec.frame and rec.frame:IsShown() then
+                    local l = rec.frame:GetLeft()
+                    local r = rec.frame:GetRight()
+                    local t = rec.frame:GetTop()
+                    local b = rec.frame:GetBottom()
+                    if l and r and t and b
+                       and screenX >= l and screenX <= r
+                       and screenY >= b and screenY <= t then
+                        UIButton:Press(rec)
+                        if rec.onClick then rec.onClick(button) end
+                        return true
+                    end
+                end
+            end
+
+            return false
+        end)
+    end
+
+end, 561)
+
+
+======================================================================
+ FILE: Field/UI/Window/API/Create.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / UI / Window / API / Create
+-- Одна логика: создание окна (Register) + отложенные onShow-хуки.
+--
+-- После создания окна:
+--   - навешивает мышь (W:SetupWindowMouse, 497)
+--   - навешивает хит-тест кнопок (W:AttachButtonMouse, 584), если есть items
+--   - вызывает отложенные onShow-хуки (W:RegisterOnShow)
+--
+-- Это заменяет манки-патчинг W:Register из Content.lua и W:Show/W:Toggle
+-- из Radio.lua.
+-- ============================================================================
+
 NSQC4.RegisterModule("quests", function()
     local W = NSQC4.FieldWindow
     local C = NSQC4.FieldWindowConst
@@ -2796,7 +3336,6 @@ NSQC4.RegisterModule("quests", function()
 
         if desc.side == "LEFT" or desc.side == "RIGHT" then
             win:SetWidth(w)
-
             if desc.side == "LEFT" then
                 win:SetPoint("TOPRIGHT",    f, "TOPLEFT",    -C.GAP, 0)
                 win:SetPoint("BOTTOMRIGHT", f, "BOTTOMLEFT", -C.GAP, 0)
@@ -2806,7 +3345,6 @@ NSQC4.RegisterModule("quests", function()
             end
         else
             win:SetHeight(h)
-
             if desc.side == "TOP" then
                 win:SetPoint("BOTTOMLEFT",  f, "TOPLEFT",  0,  C.GAP)
                 win:SetPoint("BOTTOMRIGHT", f, "TOPRIGHT", 0,  C.GAP)
@@ -2820,38 +3358,205 @@ NSQC4.RegisterModule("quests", function()
         if desc.onHide then win:SetScript("OnHide", desc.onHide) end
 
         W[key] = win
-
         W._list = W._list or {}
         W._list[#W._list + 1] = win
 
         W._items = W._items or {}
         W._items[key] = W._items[key] or {}
 
-        -- Раскладка элементов (если контент уже зарегистрирован).
+        -- 1) Мышь окна
+        if W.SetupWindowMouse then
+            W:SetupWindowMouse(win)
+        end
+
+        -- 2) Хит-тест кнопок (если для окна уже зарегистрированы кнопки)
+        if W.AttachButtonMouse and next(W._items[key]) then
+            W:AttachButtonMouse(win, key)
+        end
+
+        -- 3) Раскладка
         if next(W._items[key]) and W.LayoutWindow then
             W:LayoutWindow(key)
+        end
+
+        -- 4) Отложенные onShow-хуки
+        local hooks = W._onShowHooks and W._onShowHooks[key]
+        if hooks then
+            for _, fn in ipairs(hooks) do
+                local ok, err = pcall(fn, win)
+                if not ok then
+                    print("|cffff0000[NSQC4]|r onShow hook:", tostring(err))
+                end
+            end
+            W._onShowHooks[key] = nil
         end
 
         return win
     end
 
     -- ========================================================================
-    -- AttachMouseHandlers — подключить мышь окна через UIButton.
-    -- Должен быть вызван явно после регистрации контента окна.
+    -- RegisterOnShow — зарегистрировать колбэк, который вызовется после
+    -- создания окна. Если окно уже создано — вызовется сразу.
     -- ========================================================================
-    function W:AttachMouseHandlers(key)
+    function W:RegisterOnShow(key, fn)
+        if not key or type(fn) ~= "function" then return end
+        self._onShowHooks = self._onShowHooks or {}
+        self._onShowHooks[key] = self._onShowHooks[key] or {}
+        local list = self._onShowHooks[key]
+
         local win = self[key]
-        if not win then return end
-
-        local UIButton = NSQC4.UIButton
-        if not UIButton or not UIButton.SetupMouse then return end
-
-        local getItems = function()
-            return self._items and self._items[key]
+        if win then
+            local ok, err = pcall(fn, win)
+            if not ok then
+                print("|cffff0000[NSQC4]|r onShow hook:", tostring(err))
+            end
+        else
+            list[#list + 1] = fn
         end
-
-        UIButton:SetupMouse(win, getItems)
     end
+end, 491)
+
+
+======================================================================
+ FILE: Field/UI/Window/API/Mouse/Cursor.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / UI / Window / API / Mouse / Cursor
+-- Одна логика: координаты курсора в системе окна.
+--
+--   W:CursorInWindow(win) → x, y | nil
+--     x, y — пиксели от BOTTOMLEFT окна (0,0)
+--     nil  — если окно не имеет геометрии
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+    local W = NSQC4.FieldWindow
+    if not W then return end
+
+    function W:CursorInWindow(win)
+        if not win then return nil end
+        local scale = UIParent:GetEffectiveScale()
+        local cx, cy = GetCursorPosition()
+        cx, cy = cx / scale, cy / scale
+        local left, bottom = win:GetLeft(), win:GetBottom()
+        if not left or not bottom then return nil end
+        return cx - left, cy - bottom
+    end
+
+end, 495)
+
+
+======================================================================
+ FILE: Field/UI/Window/API/Mouse/Dispatch.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / UI / Window / API / Mouse / Dispatch
+-- Одна логика: передача события всем зарегистрированным обработчикам окна
+-- по цепочке, пока кто-то не вернёт true (поглотил).
+--
+--   W:DispatchWindowMouse(win, button, event)
+--     button — "LeftButton" | "RightButton" | "MiddleButton"
+--     event  — "down" | "up"
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+    local W = NSQC4.FieldWindow
+    if not W then return end
+
+    function W:DispatchWindowMouse(win, button, event)
+        if not win then return end
+        local x, y = self:CursorInWindow(win)
+        if not x then return end
+        local handlers = win._mouseHandlers
+        if not handlers then return end
+        for _, fn in ipairs(handlers) do
+            if fn(x, y, button, event) then return end
+        end
+    end
+
+end, 496)
+
+
+======================================================================
+ FILE: Field/UI/Window/API/Mouse/Register.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / UI / Window / API / Mouse / Register
+-- Одна логика: API регистрации обработчиков мыши окна.
+--
+--   W:AddWindowMouseHandler(win, fn)
+--     fn(x, y, button, event) → true, если поглотил
+--
+--   x, y   — координаты курсора в системе win (BOTTOMLEFT = 0,0)
+--   button — "LeftButton" | "RightButton" | "MiddleButton"
+--   event  — "down" | "up"
+--
+-- Возврат true — событие поглощено, следующие обработчики не зовутся.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+    local W = NSQC4.FieldWindow
+    if not W then return end
+
+    function W:AddWindowMouseHandler(win, fn)
+        if not win or type(fn) ~= "function" then return end
+        win._mouseHandlers = win._mouseHandlers or {}
+        win._mouseHandlers[#win._mouseHandlers + 1] = fn
+    end
+
+end, 494)
+
+
+======================================================================
+ FILE: Field/UI/Window/API/Mouse/Setup.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / UI / Window / API / Mouse / Setup
+-- Одна логика: навесить скрипты OnMouseDown / OnMouseUp на окно.
+-- Все они сводятся к DispatchWindowMouse.
+--
+--   W:SetupWindowMouse(win)   -- идемпотентно (win._mouseSetup)
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+    local W = NSQC4.FieldWindow
+    if not W then return end
+
+    function W:SetupWindowMouse(win)
+        if not win or win._mouseSetup then return end
+        win._mouseSetup = true
+        win._mouseHandlers = win._mouseHandlers or {}
+
+        win:EnableMouse(true)
+
+        win:SetScript("OnMouseDown", function(_, button)
+            W:DispatchWindowMouse(win, button, "down")
+        end)
+
+        win:SetScript("OnMouseUp", function(_, button)
+            W:DispatchWindowMouse(win, button, "up")
+        end)
+    end
+
+end, 497)
+
+
+======================================================================
+ FILE: Field/UI/Window/API/Visible.lua
+======================================================================
+
+-- ============================================================================
+-- NSQC4 / Quests / Field / UI / Window / API / Visible
+-- Одна логика: управление видимостью окна.
+-- ============================================================================
+
+NSQC4.RegisterModule("quests", function()
+    local W = NSQC4.FieldWindow
+    if not W then return end
 
     function W:Show(key)
         local win = self[key]
@@ -2866,7 +3571,6 @@ NSQC4.RegisterModule("quests", function()
     function W:Toggle(key)
         local win = self[key]
         if not win then return end
-
         if win:IsShown() then win:Hide() else win:Show() end
     end
 
@@ -2874,7 +3578,7 @@ NSQC4.RegisterModule("quests", function()
         local win = self[key]
         return win and win:IsShown() or false
     end
-end, 490)
+end, 492)
 
 
 ======================================================================
@@ -3227,42 +3931,17 @@ end, 220)
  FILE: NSDB/Init.lua
 ======================================================================
 
--- ============================================================================
--- NSQC4 / Quests / NSDB / Init
--- Namespace базы данных + общие утилиты (ValidName).
--- Никаких методов хранения — они в отдельных файлах.
--- ============================================================================
-
 NSQC4.RegisterModule("quests", function()
-
     local NSDB = {}
     NSQC4.NSDB = NSDB
-
-    function NSDB:ValidName(name)
-        return type(name) == "string" and name ~= ""
-    end
-
 end, 170)
 
 
 ======================================================================
- FILE: NSDB/Root.lua
+ FILE: NSDB/Root/Root.lua
 ======================================================================
 
--- ============================================================================
--- NSQC4 / Quests / NSDB / Root
--- Одна логика: корень базы (nsDbc4.quests) + навигация по пути scope.
---
---   Root()              -- nsDbc4.quests (гарантирует)
---   Walk(scope)         -- таблица по пути, БЕЗ создания промежуточных
---   WalkCreate(scope)   -- таблица по пути, С созданием промежуточных
---
--- scope = "field.pos" → nsDbc4.quests.field.pos
--- scope = "field"     → nsDbc4.quests.field
--- ============================================================================
-
 NSQC4.RegisterModule("quests", function()
-
     local NSDB = NSQC4.NSDB
     if not NSDB then return end
 
@@ -3271,8 +3950,17 @@ NSQC4.RegisterModule("quests", function()
         nsDbc4.quests = nsDbc4.quests or {}
         return nsDbc4.quests
     end
+end, 181)
 
-    -- Walk(scope) → таблица | nil (не создаёт).
+
+======================================================================
+ FILE: NSDB/Root/Walk.lua
+======================================================================
+
+NSQC4.RegisterModule("quests", function()
+    local NSDB = NSQC4.NSDB
+    if not NSDB then return end
+
     function NSDB:Walk(scope)
         if type(scope) ~= "string" or scope == "" then return nil end
         local cur = self:Root()
@@ -3283,8 +3971,17 @@ NSQC4.RegisterModule("quests", function()
         end
         return cur
     end
+end, 182)
 
-    -- WalkCreate(scope) → таблица (создаёт промежуточные).
+
+======================================================================
+ FILE: NSDB/Root/WalkCreate.lua
+======================================================================
+
+NSQC4.RegisterModule("quests", function()
+    local NSDB = NSQC4.NSDB
+    if not NSDB then return end
+
     function NSDB:WalkCreate(scope)
         if type(scope) ~= "string" or scope == "" then return nil end
         local cur = self:Root()
@@ -3296,8 +3993,7 @@ NSQC4.RegisterModule("quests", function()
         end
         return cur
     end
-
-end, 180)
+end, 183)
 
 
 ======================================================================
@@ -3361,5 +4057,19 @@ NSQC4.RegisterModule("quests", function()
     end
 
 end, 230)
+
+
+======================================================================
+ FILE: NSDB/ValidName.lua
+======================================================================
+
+NSQC4.RegisterModule("quests", function()
+    local NSDB = NSQC4.NSDB
+    if not NSDB then return end
+
+    function NSDB:ValidName(name)
+        return type(name) == "string" and name ~= ""
+    end
+end, 171)
 
 

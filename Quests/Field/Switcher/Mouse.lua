@@ -12,6 +12,10 @@
 -- НЕ создаёт текстуры (это делает Init.lua).
 -- НЕ хит-тестит (это делает Click.lua).
 -- Анимация нажатия — через Press.lua (PressTexture / ReleaseTexture).
+--
+-- ВАЖНО: вес 615 < 620 (Bootstrap/Init.lua) — обработчик регистрируется
+-- ДО того, как Bootstrap вызовет SetupMouse. Иначе коллизия весов 620
+-- с Bootstrap/Init.lua делает порядок недетерминированным.
 -- ============================================================================
 NSQC4.RegisterModule("quests", function()
     local field = NSQC4.Field
@@ -41,4 +45,4 @@ NSQC4.RegisterModule("quests", function()
 
         return false
     end)
-end, 620)
+end, 615)

@@ -1,10 +1,16 @@
 -- ============================================================================
--- NSQC4 / Quests / Field / UI / Window / API
--- Одна логика: создание и управление пустыми окнами.
+-- NSQC4 / Quests / Field / UI / Window / API / Create
+-- Одна логика: создание окна (Register) + отложенные onShow-хуки.
 --
--- НЕ подключает мышь автоматически — для этого есть AttachMouseHandlers(key),
--- который должен быть вызван явно после регистрации контента окна.
+-- После создания окна:
+--   - навешивает мышь (W:SetupWindowMouse, 497)
+--   - навешивает хит-тест кнопок (W:AttachButtonMouse, 584), если есть items
+--   - вызывает отложенные onShow-хуки (W:RegisterOnShow)
+--
+-- Это заменяет манки-патчинг W:Register из Content.lua и W:Show/W:Toggle
+-- из Radio.lua.
 -- ============================================================================
+
 NSQC4.RegisterModule("quests", function()
     local W = NSQC4.FieldWindow
     local C = NSQC4.FieldWindowConst
@@ -40,7 +46,6 @@ NSQC4.RegisterModule("quests", function()
 
         if desc.side == "LEFT" or desc.side == "RIGHT" then
             win:SetWidth(w)
-
             if desc.side == "LEFT" then
                 win:SetPoint("TOPRIGHT",    f, "TOPLEFT",    -C.GAP, 0)
                 win:SetPoint("BOTTOMRIGHT", f, "BOTTOMLEFT", -C.GAP, 0)
@@ -50,7 +55,6 @@ NSQC4.RegisterModule("quests", function()
             end
         else
             win:SetHeight(h)
-
             if desc.side == "TOP" then
                 win:SetPoint("BOTTOMLEFT",  f, "TOPLEFT",  0,  C.GAP)
                 win:SetPoint("BOTTOMRIGHT", f, "TOPRIGHT", 0,  C.GAP)
@@ -64,58 +68,60 @@ NSQC4.RegisterModule("quests", function()
         if desc.onHide then win:SetScript("OnHide", desc.onHide) end
 
         W[key] = win
-
         W._list = W._list or {}
         W._list[#W._list + 1] = win
 
         W._items = W._items or {}
         W._items[key] = W._items[key] or {}
 
-        -- Раскладка элементов (если контент уже зарегистрирован).
+        -- 1) Мышь окна
+        if W.SetupWindowMouse then
+            W:SetupWindowMouse(win)
+        end
+
+        -- 2) Хит-тест кнопок (если для окна уже зарегистрированы кнопки)
+        if W.AttachButtonMouse and next(W._items[key]) then
+            W:AttachButtonMouse(win, key)
+        end
+
+        -- 3) Раскладка
         if next(W._items[key]) and W.LayoutWindow then
             W:LayoutWindow(key)
+        end
+
+        -- 4) Отложенные onShow-хуки
+        local hooks = W._onShowHooks and W._onShowHooks[key]
+        if hooks then
+            for _, fn in ipairs(hooks) do
+                local ok, err = pcall(fn, win)
+                if not ok then
+                    print("|cffff0000[NSQC4]|r onShow hook:", tostring(err))
+                end
+            end
+            W._onShowHooks[key] = nil
         end
 
         return win
     end
 
     -- ========================================================================
-    -- AttachMouseHandlers — подключить мышь окна через UIButton.
-    -- Должен быть вызван явно после регистрации контента окна.
+    -- RegisterOnShow — зарегистрировать колбэк, который вызовется после
+    -- создания окна. Если окно уже создано — вызовется сразу.
     -- ========================================================================
-    function W:AttachMouseHandlers(key)
+    function W:RegisterOnShow(key, fn)
+        if not key or type(fn) ~= "function" then return end
+        self._onShowHooks = self._onShowHooks or {}
+        self._onShowHooks[key] = self._onShowHooks[key] or {}
+        local list = self._onShowHooks[key]
+
         local win = self[key]
-        if not win then return end
-
-        local UIButton = NSQC4.UIButton
-        if not UIButton or not UIButton.SetupMouse then return end
-
-        local getItems = function()
-            return self._items and self._items[key]
+        if win then
+            local ok, err = pcall(fn, win)
+            if not ok then
+                print("|cffff0000[NSQC4]|r onShow hook:", tostring(err))
+            end
+        else
+            list[#list + 1] = fn
         end
-
-        UIButton:SetupMouse(win, getItems)
     end
-
-    function W:Show(key)
-        local win = self[key]
-        if win then win:Show() end
-    end
-
-    function W:Hide(key)
-        local win = self[key]
-        if win then win:Hide() end
-    end
-
-    function W:Toggle(key)
-        local win = self[key]
-        if not win then return end
-
-        if win:IsShown() then win:Hide() else win:Show() end
-    end
-
-    function W:IsShown(key)
-        local win = self[key]
-        return win and win:IsShown() or false
-    end
-end, 490)
+end, 491)

@@ -1,6 +1,6 @@
 -- ============================================================================
--- NSQC4 / Quests / Field / Resize / Resize
--- Одна логика: применить новый cellSize к полю.
+-- NSQC4 / Quests / Field / Resize / Resize / Size
+-- Одна логика: применение нового cellSize к frame (только геометрия).
 -- ============================================================================
 
 NSQC4.RegisterModule("quests", function()
@@ -11,7 +11,9 @@ NSQC4.RegisterModule("quests", function()
 
     local MIN_CELL = CONST.MIN_CELL
 
-    function QuestsField:Resize(cs)
+    -- Устанавливает cellSize и меняет размер frame.
+    -- Возвращает true, если размер реально изменился.
+    function QuestsField:SetCellSize(cs)
         cs = tonumber(cs)
         if not cs then return false end
 
@@ -20,7 +22,7 @@ NSQC4.RegisterModule("quests", function()
         if cs > effMax then cs = effMax end
         cs = math.floor(cs + 0.5)
 
-        if cs == self.cellSize then return true end
+        if cs == self.cellSize then return false end
 
         self.cellSize = cs
 
@@ -29,19 +31,7 @@ NSQC4.RegisterModule("quests", function()
             self.frame:SetSize(w, h)
         end
 
-        -- клетки
-        if self.ReflowCells then self:ReflowCells() end
-
-        -- кнопки панелей — пересчитать позиции под новый размер frame
-        if self.RefreshAllButtons then self:RefreshAllButtons() end
-
-        -- свитчеры — пересчитать позиции
-        if self.RefreshSwitchers then self:RefreshSwitchers() end
-
-        if self.ApplyBorderAnchors then self:ApplyBorderAnchors() end
-
-        self:Save()
         return true
     end
 
-end, 400)
+end, 401)

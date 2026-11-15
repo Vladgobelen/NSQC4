@@ -276,77 +276,11 @@ NSQC4.RegisterModule("ui_list", function()
     end
 
     -- ========================================================================
-    -- Создание отдельной вкладки для шепота
-    -- ========================================================================
-    local function MoveToSeparateTab(playerName)
-        if not playerName or playerName == "" then return end
-
-        local tabName = "Шепот: " .. playerName
-
-        -- Проверяем, не открыта ли уже вкладка с таким именем
-        for i = 1, NUM_CHAT_WINDOWS do
-            local f = _G["ChatFrame"..i]
-            if f and f.name == tabName then
-                -- Если уже есть, делаем активной
-                FCF_DockFrame(f)
-                FCF_SelectDockFrame(f)
-                -- Открываем ввод шепота
-                ChatFrame_OpenChat("/w " .. playerName .. " ", f)
-                return
-            end
-        end
-
-        -- Создаем новую
-        local chatFrame = FCF_OpenNewWindow(tabName)
-        
-        if chatFrame then
-            -- Докируем и активируем
-            FCF_DockFrame(chatFrame)
-            FCF_SelectDockFrame(chatFrame)
-
-            -- Фильтруем входящие шепоты
-            ChatFrame_AddMessageEventFilter("CHAT_MSG_WHISPER", function(self, event, msg, author, ...)
-                if self == chatFrame and author == playerName then
-                    return false -- Показать
-                elseif self == chatFrame then
-                    return true -- Скрыть
-                end
-                return false
-            end)
-            
-            -- Фильтруем исходящие шепоты
-            ChatFrame_AddMessageEventFilter("CHAT_MSG_WHISPER_INFORM", function(self, event, msg, author, ...)
-                if self == chatFrame and author == playerName then
-                    return false 
-                elseif self == chatFrame then
-                    return true
-                end
-                return false
-            end)
-
-            -- СРАЗУ ОТКРЫВАЕМ ВВОД ШЕПОТА В ЭТОЙ ВКЛАДКЕ
-            ChatFrame_OpenChat("/w " .. playerName .. " ", chatFrame)
-
-            print("|cff00ff00[NSQC4]|r Создана вкладка " .. tabName)
-        end
-    end
-
-    -- ========================================================================
-    -- Хук на контекстное меню: добавление пунктов
+    -- Хук на контекстное меню: добавление пункта
     -- ========================================================================
     local function AddSoundMenuEntry(name)
         if not name or name == UNKNOWNOBJECT then return end
 
-        -- Пункт «В отдельную вкладку»
-        UIDropDownMenu_AddButton({
-            text = "В отдельную вкладку",
-            notCheckable = 1,
-            func = function()
-                MoveToSeparateTab(name)
-            end,
-        }, 1)
-
-        -- Пункт «Настроить звук для...»
         UIDropDownMenu_AddButton({
             text = "Настроить звук для " .. name,
             notCheckable = 1,

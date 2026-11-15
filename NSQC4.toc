@@ -58,6 +58,7 @@ Interface\Calendar.lua
 Interface\Timer.lua
 Interface\ListUI.lua
 Interface\PlayerInfo.lua
+Interface\WhisperTab.lua
 Interface\InfoFrame.lua
 Interface\Bugs\Bugs.lua
 
@@ -107,7 +108,10 @@ VERSION.lua
 # NSQC4 / Quests / NSDB
 # ============================================================================
 Quests\NSDB\Init.lua
-Quests\NSDB\Root.lua
+Quests\NSDB\ValidName.lua
+Quests\NSDB\Root\Root.lua
+Quests\NSDB\Root\Walk.lua
+Quests\NSDB\Root\WalkCreate.lua
 Quests\NSDB\Get.lua
 Quests\NSDB\Set.lua
 Quests\NSDB\Has.lua
@@ -136,22 +140,37 @@ Quests\Field\Core\Storage\Save.lua
 Quests\Field\Frame\Create.lua
 Quests\Field\Frame\Show.lua
 
-# --- клетки ---
+# --- frame / мышь (разбито на Register / Cursor / Dispatch / Setup) ---
+Quests\Field\Frame\Mouse\Register.lua
+Quests\Field\Frame\Mouse\Cursor.lua
+Quests\Field\Frame\Mouse\Dispatch.lua
+Quests\Field\Frame\Mouse\Setup.lua
+
+# --- клетки (сетка) ---
 Quests\Field\Cells\Create.lua
-Quests\Field\Cells\Reflow.lua
-Quests\Field\Cells\Border.lua
+Quests\Field\Cells\Reflow\Vertical.lua
+Quests\Field\Cells\Reflow\Horizontal.lua
+Quests\Field\Cells\Reflow\Refresh.lua
+
+# --- клетки (границы) ---
+Quests\Field\Cells\Border\Get.lua
+Quests\Field\Cells\Border\Visible.lua
+Quests\Field\Cells\Border\Set.lua
 
 # --- подложка/рамка ---
 Quests\Field\Border\Backdrop.lua
 Quests\Field\Border\Visible.lua
+Quests\Field\Border\Drag\Clamp.lua
 Quests\Field\Border\Drag.lua
 Quests\Field\Border\Click.lua
 
 # --- крестик ---
 Quests\Field\Close\Button.lua
 
-# --- ресайз ---
-Quests\Field\Resize\Resize.lua
+# --- ресайз (разбито на Size / Apply / Refresh) ---
+Quests\Field\Resize\Resize\Size.lua
+Quests\Field\Resize\Resize\Apply.lua
+Quests\Field\Resize\Resize\Refresh.lua
 Quests\Field\Resize\Apply.lua
 Quests\Field\Resize\Handle.lua
 
@@ -179,33 +198,54 @@ Quests\Field\UI\Buttons\Click\Tooltip.lua
 
 # --- свитчеры панелей ---
 Quests\Field\Switcher\Init.lua
-Quests\Field\Switcher\Draw.lua
+Quests\Field\Switcher\Draw\Visible.lua
+Quests\Field\Switcher\Draw\Position.lua
+Quests\Field\Switcher\Draw\Refresh.lua
 Quests\Field\Switcher\Click\Hit.lua
 Quests\Field\Switcher\Click\Action.lua
 Quests\Field\Switcher\Click\Tooltip.lua
 Quests\Field\Switcher\Mouse.lua
 
-# --- UI: Окна, Лейблы, Радио ---
-Quests\Field\UI\Window\Init.lua
-Quests\Field\UI\Window\API.lua
-Quests\Field\UI\Window\Layout.lua
-Quests\Field\UI\Label\Init.lua
-Quests\Field\UI\Label\Refresh.lua
-
 # --- универсальный рендерер кнопок (NSQC4.UIButton) ---
 Quests\Field\UI\Buttons\Init.lua
 
+# --- универсальный рендерер: виджет (разбито на Create / Draw / Press) ---
+Quests\Field\UI\Buttons\Widget\Create.lua
+Quests\Field\UI\Buttons\Widget\Draw.lua
+Quests\Field\UI\Buttons\Widget\Press.lua
+
+# --- UI: Окна ---
+Quests\Field\UI\Window\Init.lua
+Quests\Field\UI\Window\API\Create.lua
+Quests\Field\UI\Window\API\Visible.lua
+Quests\Field\UI\Window\Layout.lua
+
+# --- UI: Окна / мышь (разбито на Register / Cursor / Dispatch / Setup) ---
+Quests\Field\UI\Window\API\Mouse\Register.lua
+Quests\Field\UI\Window\API\Mouse\Cursor.lua
+Quests\Field\UI\Window\API\Mouse\Dispatch.lua
+Quests\Field\UI\Window\API\Mouse\Setup.lua
+
+# --- UI: Окна / кнопки (разбито на Add / Hit) ---
+Quests\Field\UI\Window\API\Buttons\Add.lua
+Quests\Field\UI\Window\API\Buttons\Hit.lua
+
+# --- UI: Лейблы ---
+Quests\Field\UI\Label\Init.lua
+Quests\Field\UI\Label\Refresh.lua
+
 # --- радио-группы ---
-Quests\Field\UI\Radio\Init.lua
-Quests\Field\UI\Radio\Refresh.lua
+Quests\Field\UI\Radio\Register.lua
+Quests\Field\UI\Radio\SetValue.lua
+Quests\Field\UI\Radio\Create.lua
+Quests\Field\UI\Radio\Draw.lua
 
 # --- настройки поля ---
 Quests\Field\Settings\Init.lua
 Quests\Field\Settings\Content.lua
 Quests\Field\Settings\Radio.lua
 
-# --- мышь поля и точка входа ---
-Quests\Field\Frame\Mouse.lua
+# --- bootstrap ---
 Quests\Field\Bootstrap\Init.lua
 Quests\Field\Bootstrap\Slash.lua
 Quests\Field\Bootstrap\SlashPanel.lua

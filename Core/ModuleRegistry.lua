@@ -12,32 +12,33 @@
 --         order   = 60,
 --         hidden  = true,
 --     })
---     NSQC4.RegisterModule("quests", function() ... end, 160)  -- индекс в группе
+--     NSQC4.RegisterModule("quests", function() ... end, 160)  -- глобальный индекс
 --
 -- Третий аргумент RegisterModule:
 --     * table  → meta { label, tooltip, order, hidden }
---     * number → index внутри группы "quests" (или другой группы),
---                задаёт порядок запуска функций с одинаковым key.
+--     * number → ГЛОБАЛЬНЫЙ индекс запуска (не внутри группы!),
+--                задаёт порядок ВСЕХ функций всех групп.
 --
--- Панель настроек модуля (опционально):
---     NSQC4.RegisterModuleSettings("ui_mail", function() ... end)
+-- Порядок запуска (единый для всех групп):
+--     1) по index (если задан), иначе math.huge (в конец)
+--     2) при равных index — по meta.order группы
+--     3) при равных order — по .toc-порядку (_seq)
 --
--- Порядок запуска:
---     1) внутри одной группы (key) — по index (если задан), иначе порядок .toc
---     2) между группами — по meta.order, затем по имени key
+-- Диагностика:
+--     NSQC4.MODULE_DEBUG = true  → печатает план запуска в чат
 -- ============================================================================
 
 NSQC4 = NSQC4 or {}
 
 -- Хранилища
-NSQC4.Modules         = NSQC4.Modules         or {}  -- { [key] = { {fn=..., index=...}, ... } }
-NSQC4.ModuleMeta      = NSQC4.ModuleMeta      or {}  -- { [key] = { key, label, tooltip, order, hidden } }
-NSQC4.ModuleSettings  = NSQC4.ModuleSettings  or {}  -- { [key] = opener }
+NSQC4.Modules        = NSQC4.Modules        or {}  -- { [key] = { {fn=..., index=...}, ... } }
+NSQC4.ModuleMeta     = NSQC4.ModuleMeta     or {}  -- { [key] = { key, label, tooltip, order, hidden } }
+NSQC4.ModuleSettings = NSQC4.ModuleSettings or {}  -- { [key] = opener }
 
 -- ============================================================================
 -- Регистрация модуля
---   third = meta (table)  → метаданные
---   third = index (number) → индекс внутри группы
+--   third = meta (table)  → метаданные группы
+--   third = index (number) → глобальный индекс запуска этой функции
 -- ============================================================================
 function NSQC4.RegisterModule(key, initFn, third)
     if not key or type(initFn) ~= "function" then
@@ -52,11 +53,10 @@ function NSQC4.RegisterModule(key, initFn, third)
     end
 
     NSQC4.Modules[key] = NSQC4.Modules[key] or {}
-    table.insert(NSQC4.Modules[key], { fn = initFn, index = index })
+    local rec = { fn = initFn, index = index, key = key }
+    table.insert(NSQC4.Modules[key], rec)
 
     -- Метаданные: первый вызов с meta побеждает, повторные игнорируются.
-    -- Если meta не передана — создаём дефолтную запись (label = key),
-    -- чтобы модуль всё равно попал в UI настроек.
     if not NSQC4.ModuleMeta[key] then
         meta = meta or {}
         NSQC4.ModuleMeta[key] = {
@@ -106,33 +106,83 @@ function NSQC4.OpenModuleSettings(key)
 end
 
 -- ============================================================================
--- Внутренняя сортировка функций одной группы по index.
--- Валидный компаратор + стабильность: при равных index сохраняется
--- порядок .toc (через _seq).
+-- Сбор ВСЕХ функций всех групп в единый список и сортировка.
+--
+-- Ключевое отличие от старой версии:
+--   - раньше SortFns работал внутри одной группы;
+--   - теперь все функции всех групп сортируются единым списком.
+--
+-- Порядок:
+--   1) index (число; nil → math.huge, т.е. в конец)
+--   2) meta.order группы (при равных index)
+--   3) _seq (.toc-порядок регистрации, при равных index и order)
 -- ============================================================================
-local function SortFns(fns)
+local function CollectAllFns()
+    local all = {}
+    local seq = 0
+
+    -- Стабильный обход: сначала по ключам (сортировка), потом по записям.
+    -- Это даёт детерминированный _seq, если порядок .toc менялся.
+    local keys = {}
+    for key in pairs(NSQC4.Modules) do
+        keys[#keys + 1] = key
+    end
+    table.sort(keys)
+
+    for _, key in ipairs(keys) do
+        local fns = NSQC4.Modules[key]
+        for _, rec in ipairs(fns) do
+            seq = seq + 1
+            rec._seq = seq
+            rec._groupOrder = (NSQC4.ModuleMeta[key] and NSQC4.ModuleMeta[key].order) or 1000
+            all[#all + 1] = rec
+        end
+    end
+
+    return all
+end
+
+local function SortAll(all)
+    table.sort(all, function(a, b)
+        local ia = a.index or math.huge
+        local ib = b.index or math.huge
+        if ia ~= ib then return ia < ib end
+
+        local oa = a._groupOrder or 1000
+        local ob = b._groupOrder or 1000
+        if oa ~= ob then return oa < ob end
+
+        return (a._seq or 0) < (b._seq or 0)
+    end)
+end
+
+-- ============================================================================
+-- Запуск одного модуля (по ключу) — сохраняется для совместимости.
+-- Сортировка теперь глобальная, поэтому RunModule("quests") вызовет
+-- только функции группы quests в их относительном порядке (по index).
+-- ============================================================================
+local function RunModule(key)
+    local fns = NSQC4.Modules[key]
+    if not fns then return end
+
+    -- Локальная сортировка группы (для случаев, когда RunModule зовут вручную).
     for i, rec in ipairs(fns) do
-        rec._seq = i
+        rec._localSeq = i
     end
     table.sort(fns, function(a, b)
         local ia = a.index or math.huge
         local ib = b.index or math.huge
         if ia ~= ib then return ia < ib end
-        return a._seq < b._seq
+        return (a._localSeq or 0) < (b._localSeq or 0)
     end)
-end
 
--- ============================================================================
--- Запуск одного модуля
--- ============================================================================
-local function RunModule(key)
-    local fns = NSQC4.Modules[key]
-    if not fns then return end
-    SortFns(fns)
     for _, rec in ipairs(fns) do
         local ok, err = pcall(rec.fn)
         if not ok then
-            print("|cffff0000[NSQC4]|r Ошибка модуля '"..key.."': "..tostring(err))
+            print(string.format(
+                "|cffff0000[NSQC4]|r Ошибка модуля '%s' (index=%s): %s",
+                tostring(key), tostring(rec.index), tostring(err)
+            ))
         end
     end
 end
@@ -140,34 +190,45 @@ end
 NSQC4.RunModule = RunModule
 
 -- ============================================================================
--- Порядок запуска между группами: по meta.order, затем по имени ключа
--- ============================================================================
-local function GetSortedKeys()
-    local keys = {}
-    for key in pairs(NSQC4.Modules) do
-        keys[#keys + 1] = key
-    end
-    table.sort(keys, function(a, b)
-        local ma = NSQC4.ModuleMeta[a]
-        local mb = NSQC4.ModuleMeta[b]
-        local oa = ma and ma.order or 1000
-        local ob = mb and mb.order or 1000
-        if oa ~= ob then return oa < ob end
-        return a < b
-    end)
-    return keys
-end
-
--- ============================================================================
--- Публичный запуск всех модулей
+-- Публичный запуск ВСЕХ модулей в едином порядке (глобальная сортировка).
 -- ============================================================================
 local booted = false
 function NSQC4.RunModules()
     if booted then return end
     booted = true
-    for _, key in ipairs(GetSortedKeys()) do
-        if NSQC4.Settings.IsModuleEnabled(key) then
-            RunModule(key)
+
+    -- 1. Собрать всё, отсортировать глобально.
+    local all = CollectAllFns()
+    SortAll(all)
+
+    -- 2. Диагностика: план запуска.
+    if NSQC4.MODULE_DEBUG then
+        print("|cff00ffff[NSQC4]|r План запуска модулей (index | order | key):")
+        for i, rec in ipairs(all) do
+            print(string.format("  %3d) %6s | %4s | %s",
+                i,
+                tostring(rec.index or "nil"),
+                tostring(rec._groupOrder),
+                tostring(rec.key)
+            ))
+        end
+    end
+
+    -- 3. Запустить в глобальном порядке, с учётом включённости модуля.
+    for _, rec in ipairs(all) do
+        local key = rec.key
+        if NSQC4.Settings and NSQC4.Settings.IsModuleEnabled
+           and not NSQC4.Settings.IsModuleEnabled(key) then
+            -- Модуль выключен — пропустить все его функции.
+            -- (Проверяем один раз на функцию, чтобы не зависеть от порядка.)
+        else
+            local ok, err = pcall(rec.fn)
+            if not ok then
+                print(string.format(
+                    "|cffff0000[NSQC4]|r Ошибка модуля '%s' (index=%s): %s",
+                    tostring(key), tostring(rec.index), tostring(err)
+                ))
+            end
         end
     end
 end
