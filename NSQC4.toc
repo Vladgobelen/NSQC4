@@ -52,7 +52,13 @@ RaidName.lua
 Interface\Mail.lua
 Interface\ChatButtons.lua
 Interface\AOReputation.lua
-Interface\AOClick.lua
+Interface\AOClick\AOClick_Core.lua
+Interface\AOClick\AOClick_Roster.lua
+Interface\AOClick\AOClick_Relay.lua
+Interface\AOClick\AOClick_Hooks.lua
+Interface\AOClick\AOClick_Settings.lua
+Interface\AOClick\AOClick_Meta.lua
+Interface\AOClick\AOClick_Ignore.lua
 Interface\WorldMap.lua
 Interface\Calendar.lua
 Interface\Timer.lua
