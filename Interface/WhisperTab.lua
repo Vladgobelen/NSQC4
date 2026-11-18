@@ -31,15 +31,15 @@ NSQC4.RegisterModule("ui_whisper_tab", function()
 
         local key = GetBaseName(author)
         if not historyStore[key] then historyStore[key] = {} end
-        
+
         table.insert(historyStore[key], {
             author = author,
             msg = msg,
             isIncoming = (event == "CHAT_MSG_WHISPER")
         })
-        
-        while #historyStore[key] > MAX_HISTORY do 
-            table.remove(historyStore[key], 1) 
+
+        while #historyStore[key] > MAX_HISTORY do
+            table.remove(historyStore[key], 1)
         end
 
         return false
@@ -79,12 +79,12 @@ NSQC4.RegisterModule("ui_whisper_tab", function()
                 break
             end
         end
-        
+
         chatFrame:Clear()
-        
-        if not history or #history == 0 then 
+
+        if not history or #history == 0 then
             chatFrame:AddMessage("--- История пуста ---", 0.5, 0.5, 0.5)
-            return 
+            return
         end
 
         chatFrame:AddMessage("--- История переписки ---", 0.5, 0.5, 0.5)
@@ -198,74 +198,154 @@ NSQC4.RegisterModule("ui_whisper_tab", function()
     })
 
     -- ============================================================================
--- ДОБАВЛЕНИЕ ПУНКТА В МЕНЮ CHATTER (DropDownList1)
--- ============================================================================
+    -- ДОБАВЛЕНИЕ ПУНКТА В МЕНЮ CHATTER (DropDownList1)
+    -- ============================================================================
 
-local NSQC4_CurrentTabToClose = nil
+    local NSQC4_CurrentTabToClose = nil
 
-local function AddButtonToDropDown()
-    -- Если меню открыто и мы знаем, какую вкладку закрывать
-    if DropDownList1 and DropDownList1:IsShown() and NSQC4_CurrentTabToClose then
-        -- Проверяем, нет ли уже нашей кнопки (чтобы не дублировать)
-        local found = false
-        for i = 1, UIDROPDOWNMENU_MAXBUTTONS or 30 do
-            local btn = _G["DropDownList1Button"..i]
-            if btn and btn:IsShown() then
-                local text = _G["DropDownList1Button"..i.."Text"] or _G["DropDownList1Button"..i.."NormalText"]
-                if text and text:GetText() == "Закрыть вкладку" then
-                    found = true
-                    break
+    -- ------------------------------------------------------------------------
+    -- Окно подтверждения (Да / Нет)
+    -- ------------------------------------------------------------------------
+    local confirmFrame
+
+    local function CreateConfirmDialog()
+        if confirmFrame then return confirmFrame end
+
+        local f = CreateFrame("Frame", "NSQC4TabCloseConfirm", UIParent)
+        f:SetSize(320, 140)
+        f:SetPoint("CENTER")
+        f:SetFrameStrata("FULLSCREEN_DIALOG")
+        f:SetToplevel(true)
+        f:EnableMouse(true)
+        f:SetBackdrop({
+            bgFile   = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true, tileSize = 8, edgeSize = 12,
+            insets = { left = 3, right = 3, top = 3, bottom = 3 },
+        })
+        f:SetBackdropColor(0, 0, 0, 1)
+        f:SetBackdropBorderColor(0.5, 0.5, 0.5, 1)
+
+        local title = f:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+        title:SetPoint("TOPLEFT", 12, -10)
+        title:SetText("Подтверждение")
+
+        local text = f:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+        text:SetPoint("TOPLEFT", 12, -40)
+        text:SetPoint("TOPRIGHT", -12, -40)
+        text:SetJustifyH("LEFT")
+        text:SetText("Закрыть вкладку?")
+        f.text = text
+
+        local yes = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+        yes:SetSize(100, 24)
+        yes:SetPoint("BOTTOMRIGHT", f, "BOTTOM", -55, 12)
+        yes:SetText("Да")
+        yes:SetScript("OnClick", function()
+            f:Hide()
+            if f.onYes then f.onYes() end
+        end)
+
+        local no = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+        no:SetSize(100, 24)
+        no:SetPoint("BOTTOMLEFT", f, "BOTTOM", 55, 12)
+        no:SetText("Нет")
+        no:SetScript("OnClick", function()
+            f:Hide()
+            if f.onNo then f.onNo() end
+        end)
+
+        f:SetScript("OnHide", function()
+            f.onYes, f.onNo = nil, nil
+        end)
+
+        confirmFrame = f
+        return f
+    end
+
+    local function ShowConfirm(message, onYes, onNo)
+        local f = CreateConfirmDialog()
+        f.text:SetText(message or "Закрыть вкладку?")
+        f.onYes = onYes
+        f.onNo  = onNo
+        f:Show()
+        f:Raise()
+    end
+
+    -- ------------------------------------------------------------------------
+    -- Добавление пункта "Закрыть вкладку" в меню вкладки
+    -- ------------------------------------------------------------------------
+    local function AddButtonToDropDown()
+        -- Если меню открыто и мы знаем, какую вкладку закрывать
+        if DropDownList1 and DropDownList1:IsShown() and NSQC4_CurrentTabToClose then
+            -- Проверяем, нет ли уже нашей кнопки (чтобы не дублировать)
+            local found = false
+            for i = 1, UIDROPDOWNMENU_MAXBUTTONS or 30 do
+                local btn = _G["DropDownList1Button"..i]
+                if btn and btn:IsShown() then
+                    local text = _G["DropDownList1Button"..i.."Text"] or _G["DropDownList1Button"..i.."NormalText"]
+                    if text and text:GetText() == "Закрыть вкладку" then
+                        found = true
+                        break
+                    end
                 end
             end
-        end
 
-        if not found then
-            -- Добавляем свой пункт
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = "Закрыть вкладку"
-            info.notCheckable = true
-            info.func = function()
-                FCF_Close(NSQC4_CurrentTabToClose)
-                CloseDropDownMenus()
-            end
-            UIDropDownMenu_AddButton(info, 1)
-            
-            -- Пересчитываем высоту меню, чтобы оно не обрезало текст
-            UIDropDownMenu_Refresh(DropDownList1)
-        end
-    end
-end
-
--- Перехватываем MouseUp на вкладках (как мы уже делали)
-local function HookTabsForClose()
-    for i = 1, NUM_CHAT_WINDOWS do
-        local chatFrame = _G["ChatFrame"..i]
-        local tab = _G["ChatFrame"..i.."Tab"]
-        
-        if chatFrame and tab then
-            tab:HookScript("OnMouseUp", function(self, button)
-                if button == "RightButton" then
-                    NSQC4_CurrentTabToClose = chatFrame
-                    
-                    -- Запускаем цикл, который ждет открытия меню и добавляет кнопку
-                    local f = CreateFrame("Frame")
-                    local ticks = 0
-                    f:SetScript("OnUpdate", function(self, elapsed)
-                        ticks = ticks + 1
-                        AddButtonToDropDown()
-                        if ticks > 10 then -- ждем ~0.5 сек
-                            self:SetScript("OnUpdate", nil)
+            if not found then
+                -- Добавляем свой пункт с подтверждением
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = "Закрыть вкладку"
+                info.notCheckable = true
+                info.func = function()
+                    local tab = NSQC4_CurrentTabToClose
+                    CloseDropDownMenus()
+                    ShowConfirm("Закрыть вкладку «" .. (tab.name or "?") .. "»?",
+                        function()
+                            FCF_Close(tab)
+                        end,
+                        function()
+                            -- Нет: ничего
                         end
-                    end)
+                    )
                 end
-            end)
+                UIDropDownMenu_AddButton(info, 1)
+
+                -- Пересчитываем высоту меню, чтобы оно не обрезало текст
+                UIDropDownMenu_Refresh(DropDownList1)
+            end
         end
     end
-end
 
-local eventFrame = CreateFrame("Frame")
-eventFrame:RegisterEvent("PLAYER_LOGIN")
-eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-eventFrame:SetScript("OnEvent", HookTabsForClose)
+    -- Перехватываем MouseUp на вкладках (как мы уже делали)
+    local function HookTabsForClose()
+        for i = 1, NUM_CHAT_WINDOWS do
+            local chatFrame = _G["ChatFrame"..i]
+            local tab = _G["ChatFrame"..i.."Tab"]
+
+            if chatFrame and tab then
+                tab:HookScript("OnMouseUp", function(self, button)
+                    if button == "RightButton" then
+                        NSQC4_CurrentTabToClose = chatFrame
+
+                        -- Запускаем цикл, который ждет открытия меню и добавляет кнопку
+                        local f = CreateFrame("Frame")
+                        local ticks = 0
+                        f:SetScript("OnUpdate", function(self, elapsed)
+                            ticks = ticks + 1
+                            AddButtonToDropDown()
+                            if ticks > 10 then -- ждем ~0.5 сек
+                                self:SetScript("OnUpdate", nil)
+                            end
+                        end)
+                    end
+                end)
+            end
+        end
+    end
+
+    local eventFrame = CreateFrame("Frame")
+    eventFrame:RegisterEvent("PLAYER_LOGIN")
+    eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    eventFrame:SetScript("OnEvent", HookTabsForClose)
 
 end)
