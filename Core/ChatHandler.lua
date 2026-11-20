@@ -23,6 +23,9 @@ local CHAT_EVENTS = {
     ADDON         = "CHAT_MSG_ADDON",
 }
 
+-- ============================================================================
+-- Отладка: включается NSQC4.ChatHandler.debug = true
+-- ============================================================================
 local function dbg(...)
     if NSQC4.ChatHandler and NSQC4.ChatHandler.debug then
         print("|cff00ffff[CH-DBG]|r", ...)
@@ -36,11 +39,12 @@ function NSQC4.ChatHandler:new(chatTypes, opts)
     opts = opts or {}
     local obj = setmetatable({}, self)
 
-    obj.triggers   = {}
-    obj.textPrefix = opts.textPrefix or "-"
-    obj.addonPrefix = opts.addonPrefix or ""
-    obj.debug      = opts.debug or false
-    obj.funcCache  = {}
+    obj.triggers         = {}
+    obj.triggersAnywhere = {}
+    obj.textPrefix       = opts.textPrefix or "-"
+    obj.addonPrefix      = opts.addonPrefix or ""
+    obj.debug            = opts.debug or false
+    obj.funcCache        = {}
 
     obj.frame = CreateFrame("Frame")
 
@@ -75,6 +79,7 @@ function NSQC4.ChatHandler:Destroy()
         self.frame = nil
     end
     self.triggers = {}
+    self.triggersAnywhere = {}
     self.funcCache = {}
 end
 
@@ -82,9 +87,19 @@ end
 -- РЕГИСТРАЦИЯ ТРИГГЕРОВ
 -- ============================================================================
 function NSQC4.ChatHandler:Register(key, trigger)
-    if not key or not trigger then return end
-    self.triggers[key] = self.triggers[key] or {}
-    table.insert(self.triggers[key], trigger)
+    if not key or not trigger then
+        dbg("Register: пустой key или trigger")
+        return
+    end
+    if trigger.anywhere then
+        self.triggersAnywhere[key] = self.triggersAnywhere[key] or {}
+        table.insert(self.triggersAnywhere[key], trigger)
+        dbg("Register ANYWHERE key=["..key.."]")
+    else
+        self.triggers[key] = self.triggers[key] or {}
+        table.insert(self.triggers[key], trigger)
+        dbg("Register NORMAL key=["..key.."]")
+    end
 end
 
 -- ============================================================================
@@ -100,11 +115,9 @@ function NSQC4.ChatHandler:OnChatMessage(event, ...)
             dbg("ADDON prefix=["..prefix.."] не начинается с ["..self.addonPrefix.."] → skip")
             return
         end
-        dbg("ADDON prefix=["..prefix.."] text=["..tostring(text).."] chan="..tostring(channel).." sender="..tostring(sender))
     else
         text, sender = ...
         if not text or text == "" then return end
-        
     end
 
     if not text then return end
@@ -118,29 +131,47 @@ function NSQC4.ChatHandler:OnChatMessage(event, ...)
 
     local key = shortType .. ":" .. firstWord
 
-    -- 1. O(1) — прямой lookup
+    dbg("MSG event="..tostring(event).." shortType="..tostring(shortType)
+        .." text=["..text.."] sender="..tostring(sender)
+        .." firstWord=["..firstWord.."] key=["..key.."]")
+
+    -- 1. O(1) — прямой lookup по первому слову.
     local list = self.triggers[key]
     if list then
-        dbg("lookup key=["..key.."] найден")
+        dbg("lookup NORMAL key=["..key.."] найден, триггеров="..#list)
         if self:RunTriggers(list, event, text, sender, prefix, channel, shortType) then
             return
         end
     else
-        dbg("lookup key=["..key.."] НЕ найден")
+        dbg("lookup NORMAL key=["..key.."] НЕ найден")
     end
 
-    -- 2. ADDON по префиксу (без канала)
+    -- 1b. Триггеры с anywhere=true: проверяем каждое слово фразы.
+    if next(self.triggersAnywhere) then
+        dbg("anywhere-таблица не пуста, слов в тексте:")
+        for word in text:gmatch("%S+") do
+            local wkey = shortType .. ":" .. word:lower()
+            local wlist = self.triggersAnywhere[wkey]
+            dbg("  слово=["..word.."] wkey=["..wkey.."] список="..(wlist and #wlist or "nil"))
+            if wlist then
+                if self:RunTriggers(wlist, event, text, sender, prefix, channel, shortType) then
+                    return
+                end
+            end
+        end
+    else
+        dbg("anywhere-таблица ПУСТА")
+    end
+
+    -- 2. ADDON по префиксу
     if event == "CHAT_MSG_ADDON" and prefix then
         local basePrefix = prefix:match("^(%S+)") or prefix
         local pkey = "ADDON:" .. basePrefix:lower()
         local plist = self.triggers[pkey]
         if plist then
-            dbg("lookup pkey=["..pkey.."] найден")
             if self:RunTriggers(plist, event, text, sender, prefix, channel, shortType) then
                 return
             end
-        else
-            dbg("lookup pkey=["..pkey.."] НЕ найден")
         end
     end
 
@@ -155,8 +186,10 @@ end
 -- ЗАПУСК СПИСКА ТРИГГЕРОВ
 -- ============================================================================
 function NSQC4.ChatHandler:RunTriggers(list, event, text, sender, prefix, channel, shortType)
-    for _, t in ipairs(list) do
+    for i, t in ipairs(list) do
+        dbg("  RunTriggers["..i.."] проверка")
         if self:CheckTrigger(t, event, text, sender, prefix, channel, shortType) then
+            dbg("  RunTriggers["..i.."] сработал, stopOnMatch="..tostring(t.stopOnMatch))
             if t.stopOnMatch then return true end
         end
     end
@@ -167,16 +200,17 @@ end
 -- ПРОВЕРКА ОДНОГО ТРИГГЕРА
 -- ============================================================================
 function NSQC4.ChatHandler:CheckTrigger(t, event, text, sender, prefix, channel, shortType)
-    -- 1. Тип чата
     if t.chatType then
         local found = false
         for _, ct in ipairs(t.chatType) do
             if ct == shortType then found = true; break end
         end
-        if not found then return false end
+        if not found then
+            dbg("    CheckTrigger: chatType не совпал")
+            return false
+        end
     end
 
-    -- 2. Дополнительные условия (предикаты)
     if t.conditions then
         for _, cond in ipairs(t.conditions) do
             local fn = cond
@@ -188,12 +222,12 @@ function NSQC4.ChatHandler:CheckTrigger(t, event, text, sender, prefix, channel,
                 end
             end
             if not fn or not fn(text, sender, channel, prefix) then
+                dbg("    CheckTrigger: условие не прошло")
                 return false
             end
         end
     end
 
-    -- 3. Вызов обработчика
     local func = t.func
     if type(func) == "string" then
         func = self.funcCache[func]
@@ -206,6 +240,7 @@ function NSQC4.ChatHandler:CheckTrigger(t, event, text, sender, prefix, channel,
     if type(func) == "function" then
         local words = {}
         for w in text:gmatch("%S+") do table.insert(words, w) end
+        dbg("    CheckTrigger: вызов func")
         func(words, sender, text, channel, prefix)
     elseif self.debug then
         print("|cffff0000[ChatHandler]|r функция не найдена:", tostring(t.func))
@@ -218,7 +253,7 @@ end
 -- ИНСТАНС
 -- ============================================================================
 local instance = NSQC4.ChatHandler:new(
-    {"GUILD", "ADDON", "RAID", "RAID_LEADER", "RAID_WARNING"},
+    {"GUILD", "WHISPER", "ADDON", "RAID", "RAID_LEADER", "RAID_WARNING"},
     { addonPrefix = "", debug = false }
 )
 NSQC4.chat = instance

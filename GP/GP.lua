@@ -1062,7 +1062,7 @@ NSQC4.RegisterModule("gp", function()
         return selected
     end
 
-    function GpDb:AddLogEntry(timeStr, gpValue, rl, raid, targets, isDecoded)
+    function GpDb:AddLogEntry(timeStr, gpValue, rl, raid, targets, gpTotal, isDecoded)
         if not self.logWindow then self:_CreateLogWindow() end
 
         local function GetClassColor(name)
@@ -1088,11 +1088,20 @@ NSQC4.RegisterModule("gp", function()
             return "|cFFFFFFFF"
         end
 
-        local gpNumValue = tonumber(gpValue) or 0
+        -- ФОРМИРУЕМ СТРОКУ: дельта/итог (если итог есть)
+        local gpStr = tostring(gpValue or "0")
+        if gpTotal then
+            gpStr = gpStr .. "/" .. tostring(gpTotal)
+        end
+
+        local numericGp = tonumber(tostring(gpValue):match("^([%-%+%d]+)")) or 0
+        
         local formattedTime = "|cFFA0A0A0" .. (timeStr or "??:??") .. "|r"
         local formattedRl = GetClassColor(rl) .. (rl or "Неизвестно") .. "|r"
-        local gpColor = gpNumValue >= 0 and "|cFF00FF00" or "|cFFFF0000"
-        local formattedGp = gpColor .. tostring(gpNumValue) .. "|r"
+        
+        local gpColor = numericGp >= 0 and "|cFF00FF00" or "|cFFFF0000"
+        local formattedGp = gpColor .. gpStr .. "|r" 
+        
         local formattedRaid = "|cFFFFFF00" .. (raid or "Неизвестно") .. "|r"
 
         local formattedTargets = {}
@@ -1117,7 +1126,8 @@ NSQC4.RegisterModule("gp", function()
             raw = {
                 time = timeStr,
                 rl = rl,
-                gp = gpNumValue,
+                gp = gpValue,
+                gpTotal = gpTotal,
                 raid = raid,
                 targets = targets,
             },
