@@ -2,7 +2,7 @@
 -- NSQC4 / Interface / ui_frames / Move
 -- Перемещение фреймов. Модуль "ui_frames_move".
 -- Клиент: WoW 3.3.5a (12340). Без C_Timer и retail-API.
--- ПРИНУДИТЕЛЬНО держим фреймы на наших координатах.
+-- ОТЛАДКА: выводим точку привязки и родителя при сохранении/восстановлении.
 -- ============================================================================
 SLASH_NS_FCMOVE1 = "/ns_fcmove"
 SLASH_NS_FCMOVE2 = "/nsfcm"
@@ -16,7 +16,7 @@ end
 
 NSQC4.RegisterModule("ui_frames_move", function()
     -- ========================================================================
-    -- Хранилище
+    -- Хранилище (персональное для персонажа)
     -- ========================================================================
     if type(nsDbc4) ~= "table" then nsDbc4 = {} end
     nsDbc4.settings = nsDbc4.settings or {}
@@ -30,7 +30,10 @@ NSQC4.RegisterModule("ui_frames_move", function()
     db.captureDelay = tonumber(db.captureDelay) or 5
     if db.reapplyOnShow == nil then db.reapplyOnShow = true end
 
-    local debugEnabled = false
+    -- ========================================================================
+    -- Лог
+    -- ========================================================================
+    local debugEnabled = true  -- Включаем отладку по умолчанию
     local LOG_PREFIX = "|cFF66CCFF[FCMOVE]|r "
 
     local function L(fmt, ...)
@@ -42,11 +45,16 @@ NSQC4.RegisterModule("ui_frames_move", function()
         end
     end
 
-    local function Msg(text) print("|cFF00FF00NSQC4:|r " .. text) end
-    local function Warn(text) print("|cFFFFFF00NSQC4:|r " .. text) end
+    local function Msg(text)
+        print("|cFF00FF00NSQC4:|r " .. text)
+    end
+
+    local function Warn(text)
+        print("|cFFFFFF00NSQC4:|r " .. text)
+    end
 
     -- ========================================================================
-    -- Планировщик
+    -- Планировщик на фрейме (замена C_Timer.After)
     -- ========================================================================
     local scheduler = CreateFrame("Frame")
     local queue = {}
@@ -80,7 +88,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- Утилиты
+    -- Утилиты поиска
     -- ========================================================================
     local own = {}
     local mainFrame, settingsFrame
@@ -144,7 +152,8 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- Геометрия
+    -- Геометрия: X/Y в единицах UIParent от его левого верхнего угла
+    -- + информация о точке привязки
     -- ========================================================================
     local function OffsetRatio(frame)
         local fs = frame:GetEffectiveScale()
@@ -158,12 +167,28 @@ NSQC4.RegisterModule("ui_frames_move", function()
         local left, top = frame:GetLeft(), frame:GetTop()
         local uiLeft, uiTop = UIParent:GetLeft(), UIParent:GetTop()
         if not left or not top or not uiLeft or not uiTop then return nil end
+        
+        -- Получаем информацию о точке привязки
+        local numPoints = frame:GetNumPoints()
+        local anchorInfo = nil
+        if numPoints > 0 then
+            local point, relativeTo, relativePoint, xOfs, yOfs = frame:GetPoint(1)
+            anchorInfo = {
+                point = point,
+                relativeTo = relativeTo and NameOf(relativeTo) or "nil",
+                relativePoint = relativePoint,
+                xOfs = xOfs,
+                yOfs = yOfs,
+            }
+        end
+        
         return {
             x = left - uiLeft,
             y = top - uiTop,
             width = frame:GetWidth(),
             height = frame:GetHeight(),
             scale = frame:GetScale(),
+            anchor = anchorInfo,
         }
     end
 
@@ -173,6 +198,15 @@ NSQC4.RegisterModule("ui_frames_move", function()
             g.x or 0, g.y or 0, g.width or 0, g.height or 0, g.scale or 1)
     end
 
+    local function FormatAnchor(g)
+        if not g or not g.anchor then return "нет привязки" end
+        local a = g.anchor
+        return string.format("%s->%s.%s ofs(%.1f, %.1f)",
+            a.point or "?", a.relativeTo or "?", a.relativePoint or "?",
+            a.xOfs or 0, a.yOfs or 0)
+    end
+
+    -- Размер намеренно не применяется: SetSize ломает чужую авто-раскладку.
     local function ApplyGeometry(frame, g)
         if not frame or not g or not g.x then return false end
         if InCombatLockdown() and frame.IsProtected and frame:IsProtected() then
@@ -186,35 +220,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
         frame:ClearAllPoints()
         frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", g.x * k, (g.y or 0) * k)
         return true
-    end
-
-    -- ========================================================================
-    -- ПРИНУДИТЕЛЬНАЯ КОРРЕКЦИЯ: если фрейм ушёл — возвращаем обратно
-    -- ========================================================================
-    local FORCE_CHECK_INTERVAL = 0.1  -- каждые 0.1 секунды проверяем
-    local DRIFT_THRESHOLD = 2.0       -- допустимое отклонение в пикселях
-
-    local function ForceCorrectPositions()
-        for key in pairs(db.frames) do
-            local data = db.frames[key]
-            if data and data.geometry then
-                local frame = GetFrameByKey(key)
-                if frame then
-                    local cur = CaptureGeometry(frame)
-                    local saved = data.geometry
-                    if cur and saved then
-                        local dx = math.abs((cur.x or 0) - (saved.x or 0))
-                        local dy = math.abs((cur.y or 0) - (saved.y or 0))
-                        local drift = math.sqrt(dx*dx + dy*dy)
-                        
-                        -- Если ушёл больше чем на DRIFT_THRESHOLD — возвращаем
-                        if drift > DRIFT_THRESHOLD then
-                            ApplyGeometry(frame, saved)
-                        end
-                    end
-                end
-            end
-        end
     end
 
     -- ========================================================================
@@ -241,7 +246,21 @@ NSQC4.RegisterModule("ui_frames_move", function()
         if moveKey and key == moveKey then return true end
         local frame = GetFrameByKey(key)
         if not frame then return false end
+        
+        -- Отладка перед применением
+        local before = CaptureGeometry(frame)
+        L("ВОССТАНОВЛЕНИЕ %s:", key)
+        L("  до:      %s", FormatGeometry(before))
+        L("  привязка: %s", FormatAnchor(before))
+        
         local ok = ApplyGeometry(frame, data.geometry)
+        
+        -- Отладка после применения
+        local after = CaptureGeometry(frame)
+        L("  после:   %s", FormatGeometry(after))
+        L("  привязка: %s", FormatAnchor(after))
+        L("  сохранено: %s", FormatGeometry(data.geometry))
+        
         if ok then HookOnShow(frame, key) end
         return ok
     end
@@ -295,8 +314,13 @@ NSQC4.RegisterModule("ui_frames_move", function()
             db.frames[key] = data
         end
         data.geometry = g
+        
+        -- Отладка при сохранении
+        L("СОХРАНЕНИЕ %s:", key)
+        L("  координаты: %s", FormatGeometry(g))
+        L("  привязка:   %s", FormatAnchor(g))
+        
         HookOnShow(frame, key)
-        L("сохранено %s: %s", key, FormatGeometry(g))
         if RefreshList then RefreshList() end
         return true
     end
@@ -328,7 +352,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- ОТЛАДКА
+    -- ОТЛАДКА: /nsfcm debug
     -- ========================================================================
     local function ReportAll()
         local keys = SortedKeys()
@@ -342,11 +366,15 @@ NSQC4.RegisterModule("ui_frames_move", function()
             local data = db.frames[key]
             print(LOG_PREFIX .. "|cFFFFFFFF" .. key .. "|r" .. (frame and "" or " |cFFFF6060(нет в игре)|r"))
             if frame then
-                print(LOG_PREFIX .. "  сейчас:    " .. FormatGeometry(CaptureGeometry(frame))
-                    .. string.format(" eff=%.2f", frame:GetEffectiveScale() or 0))
+                local cur = CaptureGeometry(frame)
+                print(LOG_PREFIX .. "  сейчас:    " .. FormatGeometry(cur))
+                print(LOG_PREFIX .. "  привязка:  " .. FormatAnchor(cur))
+                print(LOG_PREFIX .. string.format("  eff=%.2f", frame:GetEffectiveScale() or 0))
             end
             print(LOG_PREFIX .. "  сохранено: " .. FormatGeometry(data and data.geometry))
+            print(LOG_PREFIX .. "  привязка:  " .. FormatAnchor(data and data.geometry))
             print(LOG_PREFIX .. "  исходное:  " .. FormatGeometry(data and data.defaultGeometry))
+            print(LOG_PREFIX .. "  привязка:  " .. FormatAnchor(data and data.defaultGeometry))
         end
         local left = 0
         for _ in pairs(pending) do left = left + 1 end
@@ -355,7 +383,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- Режим перемещения
+    -- Режим перемещения (один переиспользуемый оверлей)
     -- ========================================================================
     StopMoveMode = function(quiet)
         if moveOverlay then
@@ -476,7 +504,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- Счётчик захвата
+    -- Счётчик захвата (один фрейм, без C_Timer)
     -- ========================================================================
     local countdownFrame, countdownLeft, countdownAcc, countdownCallback, countdownActive
 
@@ -825,7 +853,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- Диспетчер команд
+    -- Диспетчер команд и кнопка на панели
     -- ========================================================================
     NSQC4._FramesMoveDispatch = function(msg)
         local raw = (msg or ""):match("^%s*(.-)%s*$")
@@ -886,15 +914,11 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- ПРИНУДИТЕЛЬНЫЙ КОНТРОЛЬ ПОЗИЦИЙ + восстановление при входе
+    -- Восстановление при входе + смена масштаба/разрешения
     -- ========================================================================
     local restoreFrame = CreateFrame("Frame")
     restoreFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     restoreFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-
-    local forceCheckAcc = 0
-    local watchAcc = 0
-
     restoreFrame:SetScript("OnEvent", function(_, event)
         if event == "PLAYER_ENTERING_WORLD" then
             ScheduleRestore()
@@ -902,32 +926,19 @@ NSQC4.RegisterModule("ui_frames_move", function()
             RetryPending()
         end
     end)
-
+    local watchAcc, lastScale, lastW, lastH = 0, nil, nil, nil
     restoreFrame:SetScript("OnUpdate", function(_, elapsed)
-        -- ПРИНУДИТЕЛЬНАЯ КОРРЕКЦИЯ каждые 0.1 секунды
-        forceCheckAcc = forceCheckAcc + elapsed
-        if forceCheckAcc >= FORCE_CHECK_INTERVAL then
-            forceCheckAcc = forceCheckAcc - FORCE_CHECK_INTERVAL
-            ForceCorrectPositions()
-        end
-
-        -- Мониторинг смены масштаба/разрешения
         watchAcc = watchAcc + elapsed
-        if watchAcc >= 0.5 then
-            watchAcc = 0
-            local scale = UIParent:GetEffectiveScale()
-            local w, h = GetScreenWidth(), GetScreenHeight()
-            local lastScale = restoreFrame._lastScale
-            local lastW = restoreFrame._lastW
-            local lastH = restoreFrame._lastH
-            if lastScale and (math.abs(scale - lastScale) > 0.0001 or w ~= lastW or h ~= lastH) then
-                L("смена масштаба/разрешения, применяю позиции")
-                After(0.2, ApplyAllSaved)
-            end
-            restoreFrame._lastScale, restoreFrame._lastW, restoreFrame._lastH = scale, w, h
+        if watchAcc < 0.5 then return end
+        watchAcc = 0
+        local scale = UIParent:GetEffectiveScale()
+        local w, h = GetScreenWidth(), GetScreenHeight()
+        if lastScale and (math.abs(scale - lastScale) > 0.0001 or w ~= lastW or h ~= lastH) then
+            L("смена масштаба/разрешения, применяю позиции")
+            After(0.2, ApplyAllSaved)
         end
+        lastScale, lastW, lastH = scale, w, h
     end)
-
     ScheduleRestore()
 
     NSQC4.SetModuleMeta("ui_frames_move", {
