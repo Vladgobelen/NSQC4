@@ -4,6 +4,7 @@
 ## Author: Vladgobelen
 ## Version: 1.3
 ## SavedVariables: nsDbc4
+## SavedVariablesPerCharacter: nsDbc4MovePerChar
 
 # ============================================================================
 # Core

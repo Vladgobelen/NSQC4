@@ -2,6 +2,7 @@
 -- NSQC4 / Interface / ui_frames / Move
 -- Перемещение фреймов. Модуль "ui_frames_move".
 -- Сохраняет и восстанавливает полную геометрию фрейма.
+-- Персональные настройки для каждого персонажа.
 -- ============================================================================
 
 SLASH_NS_FCMOVE1 = "/ns_fcmove"
@@ -18,13 +19,16 @@ end
 NSQC4.RegisterModule("ui_frames_move", function()
 
     -- ========================================================================
-    -- Хранилище
+    -- Хранилище (Персональное для персонажа)
     -- ========================================================================
-    nsDbc4.settings.framesMove = nsDbc4.settings.framesMove or {
-        frames = {},
-        captureDelay = 5,
-    }
-    local db = nsDbc4.settings.framesMove
+    local charKey = UnitName("player") .. " - " .. (GetRealmName() or "Unknown")
+    
+    nsDbc4.settings.framesMove = nsDbc4.settings.framesMove or { chars = {} }
+    local globalMove = nsDbc4.settings.framesMove
+    
+    globalMove.chars[charKey] = globalMove.chars[charKey] or { frames = {}, captureDelay = 5 }
+    local db = globalMove.chars[charKey]
+    
     db.frames = db.frames or {}
     db.captureDelay = db.captureDelay or 5
 
@@ -113,8 +117,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
         return nil
     end
 
-    -- Резолв по пути типов: проходим по детям, ищем первый с нужным типом,
-    -- которого ещё нет в visited (чтобы не зациклиться и корректно различать siblings).
     local function GetFrameByKey(key)
         if not key or type(key) ~= "string" then return nil end
 
@@ -143,8 +145,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
                 end
             end
             if not found then
-                -- Иногда путь короче, чем фактический (например, фрейм вложен глубже).
-                -- Тогда ищем рекурсивно среди всех потомков.
                 local function deepFind(node)
                     local kids = { node:GetChildren() }
                     for _, k in ipairs(kids) do
@@ -196,7 +196,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- Утилиты геометрии
+    -- Утилиты геометрии (АБСОЛЮТНЫЕ КООРДИНАТЫ)
     -- ========================================================================
     local function CaptureGeometry(frame)
         if not frame then return nil end
@@ -220,8 +220,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
             absY = top - uiTop
         end
         
-        -- Если фрейм не отображается на экране, берем сохраненные данные
-        -- Но для этого метода мы сохраняем только абсолютные координаты от UIParent
         table.insert(g.points, {
             point = "TOPLEFT",
             relToKey = "UIParent",
@@ -283,26 +281,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
     -- ========================================================================
     -- Применение / восстановление геометрии
     -- ========================================================================
-    -- Возвращает frame или nil. Больше НЕ падает в UIParent молча.
-    local function ResolveRelTo(pt)
-        if pt.relToKey then
-            local byKey = GetFrameByKey(pt.relToKey)
-            if byKey then return byKey end
-            L("  !! relToKey NOT resolved: %s", tostring(pt.relToKey))
-        end
-        if pt.relToName then
-            local byName = _G[pt.relToName]
-            if byName then
-                local f = NormalizeToFrame(byName)
-                if f then return f end
-            end
-        end
-        if IsProtectedFrame(pt) then
-            return UIParent
-        end
-        return nil
-    end
-
     local function ApplyGeometry(frame, g, ctx)
         if not frame or not g then return false end
         
@@ -322,7 +300,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
         if g.points and #g.points > 0 and frame.ClearAllPoints and frame.SetPoint then
             frame:ClearAllPoints()
             for i, pt in ipairs(g.points) do
-                local relTo = _G[pt.relToName] or UIParent -- fallback
+                local relTo = _G[pt.relToName] or UIParent
                 if pt.relToKey == "UIParent" then relTo = UIParent end
                 
                 if relTo then
@@ -652,7 +630,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
 
         local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
         title:SetPoint("TOP", 0, -15)
-        title:SetText("Перемещение фреймов")
+        title:SetText("Перемещение фреймов (" .. UnitName("player") .. ")")
 
         local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
         closeBtn:SetPoint("TOPRIGHT", -5, -5)
