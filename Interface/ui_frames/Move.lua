@@ -46,6 +46,39 @@ NSQC4.RegisterModule("ui_frames_move", function()
     local function Warn(text) print("|cFFFFFF00NSQC4:|r " .. text) end
 
     -- ========================================================================
+    -- Фиксация дефолтной привязки (до любых наших SetPoint)
+    -- ========================================================================
+    local function EnsureDefault(frameName)
+        local frame = _G[frameName]
+        if not frame then return end
+        local data = db.frames[frameName]
+        if not data then
+            data = {}
+            db.frames[frameName] = data
+        end
+        if data.defaultPoint then return end
+        local point, relativeTo, relativePoint, x, y = frame:GetPoint(1)
+        if not point then return end
+        relativeTo = relativeTo or UIParent
+        local relName = (relativeTo.GetName and relativeTo:GetName()) or nil
+        data.defaultPoint         = point
+        data.defaultRelativeTo    = relName
+        data.defaultRelativePoint = relativePoint
+        data.defaultX             = x
+        data.defaultY             = y
+        L("дефолт зафиксирован для %s: %s -> %s.%s ofs(%.1f, %.1f)",
+            frameName, tostring(point), tostring(relName or "UIParent"),
+            tostring(relativePoint), x or 0, y or 0)
+    end
+
+    -- Фиксируем дефолт у всех известных фреймов, которые сейчас в игре
+    local function EnsureAllDefaults()
+        for key in pairs(db.frames) do
+            EnsureDefault(key)
+        end
+    end
+
+    -- ========================================================================
     -- Сохранение / применение (без вычислений)
     -- ========================================================================
     function NSQC4.MoveSave(frameName)
@@ -59,6 +92,9 @@ NSQC4.RegisterModule("ui_frames_move", function()
             return false
         end
 
+        -- Дефолт фиксируем ДО того, как что-либо меняем.
+        EnsureDefault(frameName)
+
         local point, relativeTo, relativePoint, x, y = frame:GetPoint(1)
         if not point then
             print("|cFFFF0000[FCMOVE]|r у фрейма нет точки привязки")
@@ -68,20 +104,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
         local relName = (relativeTo.GetName and relativeTo:GetName()) or nil
 
         local data = db.frames[frameName]
-        if not data then
-            data = {}
-            db.frames[frameName] = data
-        end
-
-        -- Исходную привязку запоминаем один раз — при первом сохранении.
-        if not data.defaultPoint then
-            data.defaultPoint         = point
-            data.defaultRelativeTo    = relName
-            data.defaultRelativePoint = relativePoint
-            data.defaultX             = x
-            data.defaultY             = y
-        end
-
         data.point         = point
         data.relativeTo    = relName
         data.relativePoint = relativePoint
@@ -106,6 +128,9 @@ NSQC4.RegisterModule("ui_frames_move", function()
             return false
         end
 
+        -- До применения сохранёнки фиксируем дефолт, если его ещё нет.
+        EnsureDefault(frameName)
+
         local saved = db.frames and db.frames[frameName]
         if not saved or not saved.point then
             print("|cFFFF0000[FCMOVE]|r нет данных для '" .. frameName .. "'")
@@ -124,7 +149,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
         return true
     end
 
-    -- Сброс одного фрейма к исходной привязке (как было при первом сохранении).
+    -- Применить дефолтную привязку к фрейму (той же SetPoint-операцией).
     local function ApplyDefaultByKey(frameName)
         local frame = _G[frameName]
         local data = db.frames and db.frames[frameName]
@@ -234,7 +259,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- Геометрия: только для отладочного вывода (в сохранении не участвует)
+    -- Геометрия: только для отладочного вывода
     -- ========================================================================
     local function CaptureGeometry(frame)
         if not frame then return nil end
@@ -330,9 +355,13 @@ NSQC4.RegisterModule("ui_frames_move", function()
 
     local restoreWaves = { 0.5, 2, 5, 10, 20, 30 }
     local function ScheduleRestore()
+        EnsureAllDefaults()
         ApplyAllSaved()
         for _, delay in ipairs(restoreWaves) do
-            After(delay, RetryPending)
+            After(delay, function()
+                EnsureAllDefaults()
+                RetryPending()
+            end)
         end
     end
 
@@ -350,37 +379,30 @@ NSQC4.RegisterModule("ui_frames_move", function()
         return true
     end
 
+    -- Сброс одного фрейма: применить дефолт и удалить запись целиком.
     local function ResetFrameByKey(key)
-        -- Вернуть фрейм в исходную привязку (той же SetPoint-операцией).
-        local ok = ApplyDefaultByKey(key)
-        -- Текущую сохранённую позицию убираем, но defaultPoint оставляем,
-        -- чтобы повторный сброс работал и после перезахода.
-        local data = db.frames[key]
-        if data then
-            data.point, data.relativeTo, data.relativePoint, data.x, data.y = nil, nil, nil, nil, nil
-        end
+        local restored = ApplyDefaultByKey(key)
+        db.frames[key] = nil
         pending[key] = nil
         if RefreshList then RefreshList() end
-        if ok then
+        if restored then
             Msg("сброшено: " .. key)
         else
-            Msg("сброшено (без сохранённой позиции): " .. key)
+            Msg("удалено из списка: " .. key)
         end
     end
 
+    -- Сброс всего: применить дефолты ко всем и очистить список.
     local function ResetAll()
         local keys = SortedKeys()
         local restored = 0
         for _, key in ipairs(keys) do
             if ApplyDefaultByKey(key) then restored = restored + 1 end
-            local data = db.frames[key]
-            if data then
-                data.point, data.relativeTo, data.relativePoint, data.x, data.y = nil, nil, nil, nil, nil
-            end
-            pending[key] = nil
         end
+        for k in pairs(db.frames) do db.frames[k] = nil end
+        for k in pairs(pending) do pending[k] = nil end
         if RefreshList then RefreshList() end
-        Msg("сброшено фреймов: " .. restored .. " из " .. #keys)
+        Msg("сброшено фреймов: " .. restored .. " из " .. #keys .. ", список очищен")
     end
 
     -- ========================================================================
@@ -505,6 +527,10 @@ NSQC4.RegisterModule("ui_frames_move", function()
             return
         end
         StopMoveMode(true)
+
+        -- До включения режима фиксируем дефолт, если его ещё нет.
+        EnsureDefault(key)
+
         if not db.frames[key] then db.frames[key] = {} end
         moveTarget, moveKey = frame, key
         moveWasMovable = frame:IsMovable() and true or false
@@ -646,7 +672,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
         xBtn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:SetText("Сбросить фрейм")
-            GameTooltip:AddLine("Возвращает фрейм в исходную привязку (как было при первом сохранении) и убирает текущую сохранённую позицию.", 1, 1, 1, true)
+            GameTooltip:AddLine("Возвращает фрейм в дефолтную привязку и удаляет строку из списка.", 1, 1, 1, true)
             GameTooltip:Show()
         end)
         xBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -796,7 +822,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
         resetBtn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:SetText("Сбросить всё")
-            GameTooltip:AddLine("Мгновенно возвращает все фреймы в исходные привязки (как было при первом сохранении).", 1, 1, 1, true)
+            GameTooltip:AddLine("Возвращает все фреймы в дефолтные привязки и полностью очищает список.", 1, 1, 1, true)
             GameTooltip:Show()
         end)
         resetBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -982,6 +1008,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
         if event == "PLAYER_ENTERING_WORLD" then
             ScheduleRestore()
         else
+            EnsureAllDefaults()
             RetryPending()
         end
     end)
