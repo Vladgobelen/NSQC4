@@ -1,7 +1,6 @@
 -- ============================================================================
 -- NSQC4 / Interface / ui_frames / Move
 -- Перемещение фреймов. Модуль "ui_frames_move".
--- Сохраняет и восстанавливает полную геометрию фрейма.
 -- ============================================================================
 
 SLASH_NS_FCMOVE1 = "/ns_fcmove"
@@ -21,12 +20,16 @@ NSQC4.RegisterModule("ui_frames_move", function()
     -- Хранилище (Персональное для персонажа)
     -- ========================================================================
     local charKey = UnitName("player") .. " - " .. (GetRealmName() or "Unknown")
-    nsDbc4.settings.framesMove = nsDbc4.settings.framesMove or { chars = {} }
+    
+    -- Жесткая проверка структуры (защита от старой базы)
+    nsDbc4.settings = nsDbc4.settings or {}
+    nsDbc4.settings.framesMove = nsDbc4.settings.framesMove or {}
+    nsDbc4.settings.framesMove.chars = nsDbc4.settings.framesMove.chars or {}
+    
     local globalMove = nsDbc4.settings.framesMove
-    
     globalMove.chars[charKey] = globalMove.chars[charKey] or { frames = {}, captureDelay = 5 }
-    local db = globalMove.chars[charKey]
     
+    local db = globalMove.chars[charKey]
     db.frames = db.frames or {}
     db.captureDelay = db.captureDelay or 5
 
