@@ -180,6 +180,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
             g.x or 0, g.y or 0, g.width or 0, g.height or 0, g.scale or 1)
     end
 
+    -- Размер намеренно не применяется: SetSize ломает чужую авто-раскладку.
     local function ApplyGeometry(frame, g)
         if not frame or not g or not g.x then return false end
         if InCombatLockdown() and frame.IsProtected and frame:IsProtected() then
@@ -193,6 +194,58 @@ NSQC4.RegisterModule("ui_frames_move", function()
         frame:ClearAllPoints()
         frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", g.x * k, (g.y or 0) * k)
         return true
+    end
+
+    -- ========================================================================
+    -- ПРОВЕРКА: применились ли координаты
+    -- ========================================================================
+    local function CheckPositions(context)
+        local keys = SortedKeys()
+        if #keys == 0 then
+            if context then
+                print("|cFF66CCFF[FCMOVE]|r |cFFFFFFFF[" .. context .. "]|r Нет сохранённых фреймов")
+            end
+            return
+        end
+
+        print("|cFF66CCFF[FCMOVE]|r |cFFFFFFFF[" .. (context or "проверка") .. "]|r Проверяю " .. #keys .. " фреймов:")
+
+        local ok_count = 0
+        local fail_count = 0
+
+        for _, key in ipairs(keys) do
+            local frame = GetFrameByKey(key)
+            local data = db.frames[key]
+
+            if not frame then
+                print("|cFF66CCFF  " .. key .. "|r |cFFFF6060✗ нет в игре|r")
+                fail_count = fail_count + 1
+            elseif not data or not data.geometry then
+                print("|cFF66CCFF  " .. key .. "|r |cFFFF6060✗ нет сохранённых данных|r")
+                fail_count = fail_count + 1
+            else
+                local cur = CaptureGeometry(frame)
+                local saved = data.geometry
+                if cur and saved then
+                    local dx = math.abs((cur.x or 0) - (saved.x or 0))
+                    local dy = math.abs((cur.y or 0) - (saved.y or 0))
+                    local drift = math.sqrt(dx*dx + dy*dy)
+
+                    if drift < 2 then
+                        print("|cFF66CCFF  " .. key .. "|r |cFF00FF00✓ OK|r pos=(" .. string.format("%.0f,%.0f", cur.x, cur.y) .. ") drift=" .. string.format("%.1f", drift))
+                        ok_count = ok_count + 1
+                    else
+                        print("|cFF66CCFF  " .. key .. "|r |cFFFFFF00⚠ смещён|r saved=(" .. string.format("%.0f,%.0f", saved.x, saved.y) .. ") now=(" .. string.format("%.0f,%.0f", cur.x, cur.y) .. ") drift=" .. string.format("%.1f", drift))
+                        fail_count = fail_count + 1
+                    end
+                else
+                    print("|cFF66CCFF  " .. key .. "|r |cFFFF6060✗ не удалось прочитать координаты|r")
+                    fail_count = fail_count + 1
+                end
+            end
+        end
+
+        print("|cFF66CCFF[FCMOVE]|r |cFFFFFFFFИтого:|r |cFF00FF00OK=" .. ok_count .. "|r |cFFFF6060FAIL=" .. fail_count .. "|r")
     end
 
     -- ========================================================================
@@ -255,84 +308,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
         for _, delay in ipairs(restoreWaves) do
             After(delay, RetryPending)
         end
-    end
-
-    -- ========================================================================
-    -- ДЕТАЛЬНАЯ ПРОВЕРКА И ПРИМЕНЕНИЕ (для кнопки "Применить")
-    -- ========================================================================
-    local function VerifyAndApplyAll()
-        print("|cFF00FF00===== ПРОВЕРКА И ПРИМЕНЕНИЕ =====|r")
-        
-        local keys = SortedKeys()
-        if #keys == 0 then
-            print("|cFFFFFF00Нет сохранённых фреймов|r")
-            return
-        end
-        
-        print(string.format("|cFFFFFFFFНайдено фреймов: %d|r", #keys))
-        print(string.format("Экран: %.0fx%.0f, UIParent scale: %.3f",
-            GetScreenWidth() or 0, GetScreenHeight() or 0, UIParent:GetEffectiveScale() or 0))
-        print("")
-        
-        local applied = 0
-        local failed = 0
-        
-        for _, key in ipairs(keys) do
-            local frame = GetFrameByKey(key)
-            local data = db.frames[key]
-            
-            print(string.format("|cFFFFFFFF[%s]|r", key))
-            
-            if not frame then
-                print("  |cFFFF6060✗ Фрейм не найден в игре|r")
-                failed = failed + 1
-                print("")
-            elseif not data or not data.geometry then
-                print("  |cFFFF6060✗ Нет сохранённой геометрии|r")
-                failed = failed + 1
-                print("")
-            else
-                local saved = data.geometry
-                print(string.format("  Сохранено: x=%.1f y=%.1f scale=%.2f", 
-                    saved.x or 0, saved.y or 0, saved.scale or 1))
-                
-                -- Применяем
-                local ok = ApplyGeometry(frame, saved)
-                
-                if ok then
-                    -- Читаем что получилось
-                    local after = CaptureGeometry(frame)
-                    if after then
-                        local dx = math.abs((after.x or 0) - (saved.x or 0))
-                        local dy = math.abs((after.y or 0) - (saved.y or 0))
-                        
-                        print(string.format("  После:     x=%.1f y=%.1f scale=%.2f",
-                            after.x or 0, after.y or 0, after.scale or 1))
-                        print(string.format("  Разница:   dx=%.2f dy=%.2f", dx, dy))
-                        
-                        if dx < 1 and dy < 1 then
-                            print("  |cFF00FF00✓ Применено точно|r")
-                            applied = applied + 1
-                        else
-                            print("  |cFFFFFF00⚠ Применено с отклонением|r")
-                            applied = applied + 1
-                        end
-                    else
-                        print("  |cFFFF6060⚠ Применено, но не удалось прочитать координаты|r")
-                        applied = applied + 1
-                    end
-                    HookOnShow(frame, key)
-                else
-                    print("  |cFFFF6060✗ Не удалось применить|r")
-                    failed = failed + 1
-                end
-                print("")
-            end
-        end
-        
-        print(string.format("|cFF00FF00===== РЕЗУЛЬТАТ =====|r"))
-        print(string.format("Применено: %d, Ошибок: %d", applied, failed))
-        print("|cFF00FF00=====================|r")
     end
 
     -- ========================================================================
@@ -767,7 +742,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
         applyBtn:SetPoint("LEFT", addBtn, "RIGHT", 5, 0)
         applyBtn:SetText("Применить")
         applyBtn:SetScript("OnClick", function()
-            VerifyAndApplyAll()
+            Msg("позиции применены, не найдено: " .. ApplyAllSaved())
         end)
         local resetBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
         resetBtn:SetWidth(130)
@@ -905,7 +880,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
             StopCountdown()
             StopMoveMode()
         elseif cmd == "apply" or cmd == "applynow" then
-            VerifyAndApplyAll()
+            Msg("позиции применены, не найдено: " .. ApplyAllSaved())
         elseif cmd == "reset" then
             if arg ~= "" then ResetFrameByKey(arg) else ResetAll() end
         elseif cmd == "delay" then
@@ -922,6 +897,8 @@ NSQC4.RegisterModule("ui_frames_move", function()
             Msg("возврат при показе: " .. (db.reapplyOnShow and "вкл" or "выкл"))
         elseif cmd == "debug" or cmd == "verify" or cmd == "list" then
             ReportAll()
+        elseif cmd == "check" then
+            CheckPositions("ручная проверка")
         elseif cmd == "on" then
             debugEnabled = true
             Msg("отладка включена.")
@@ -931,7 +908,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
         else
             print(LOG_PREFIX .. "/nsfcm — окно, add — захват мышью")
             print(LOG_PREFIX .. "move <Имя> | stop | apply | reset [Имя]")
-            print(LOG_PREFIX .. "delay <3-15> | guard on/off | debug | on/off")
+            print(LOG_PREFIX .. "delay <3-15> | guard on/off | debug | check | on/off")
         end
     end
 
@@ -942,31 +919,53 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- Восстановление при входе + смена масштаба/разрешения
+    -- Восстановление при входе + смена масштаба/разрешения + таймер 10 сек
     -- ========================================================================
     local restoreFrame = CreateFrame("Frame")
     restoreFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     restoreFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+
+    local checkTimerAcc = 0
+    local CHECK_INTERVAL = 10  -- каждые 10 секунд
+
     restoreFrame:SetScript("OnEvent", function(_, event)
         if event == "PLAYER_ENTERING_WORLD" then
             ScheduleRestore()
+            -- Сразу после применения проверяем результат
+            After(1, function()
+                CheckPositions("вход в игру")
+            end)
         else
             RetryPending()
         end
     end)
-    local watchAcc, lastScale, lastW, lastH = 0, nil, nil, nil
+
     restoreFrame:SetScript("OnUpdate", function(_, elapsed)
-        watchAcc = watchAcc + elapsed
-        if watchAcc < 0.5 then return end
-        watchAcc = 0
-        local scale = UIParent:GetEffectiveScale()
-        local w, h = GetScreenWidth(), GetScreenHeight()
-        if lastScale and (math.abs(scale - lastScale) > 0.0001 or w ~= lastW or h ~= lastH) then
-            L("смена масштаба/разрешения, применяю позиции")
-            After(0.2, ApplyAllSaved)
+        -- Мониторинг смены масштаба/разрешения
+        local watchAcc_local = (restoreFrame._watchAcc or 0) + elapsed
+        restoreFrame._watchAcc = watchAcc_local
+        if watchAcc_local >= 0.5 then
+            restoreFrame._watchAcc = 0
+            local scale = UIParent:GetEffectiveScale()
+            local w, h = GetScreenWidth(), GetScreenHeight()
+            local lastScale = restoreFrame._lastScale
+            local lastW = restoreFrame._lastW
+            local lastH = restoreFrame._lastH
+            if lastScale and (math.abs(scale - lastScale) > 0.0001 or w ~= lastW or h ~= lastH) then
+                L("смена масштаба/разрешения, применяю позиции")
+                After(0.2, ApplyAllSaved)
+            end
+            restoreFrame._lastScale, restoreFrame._lastW, restoreFrame._lastH = scale, w, h
         end
-        lastScale, lastW, lastH = scale, w, h
+
+        -- Таймер проверки каждые 10 секунд
+        checkTimerAcc = checkTimerAcc + elapsed
+        if checkTimerAcc >= CHECK_INTERVAL then
+            checkTimerAcc = checkTimerAcc - CHECK_INTERVAL
+            CheckPositions("таймер 10с")
+        end
     end)
+
     ScheduleRestore()
 
     NSQC4.SetModuleMeta("ui_frames_move", {
