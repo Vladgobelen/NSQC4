@@ -58,7 +58,7 @@ NSQC4.RegisterModule("compat", function()
         func = function(words, sender, text, channel, prefix)
             local target, part = text:match("^([^|]+)|(.+)$")
             if not target or part == nil then return end
-            if target ~= UnitName("player") then return end
+            if target ~= UnitName("player") and target ~= "*" then return end
             NSQC4.SafeGetUnixTime(part, sender, false)
         end,
         stopOnMatch = true,
@@ -68,7 +68,7 @@ NSQC4.RegisterModule("compat", function()
         func = function(words, sender, text, channel, prefix)
             local target, part = text:match("^([^|]+)|(.+)$")
             if not target or part == nil then return end
-            if target ~= UnitName("player") then return end
+            if target ~= UnitName("player") and target ~= "*" then return end
             NSQC4.SafeGetUnixTime(part, sender, true)
         end,
         stopOnMatch = true,

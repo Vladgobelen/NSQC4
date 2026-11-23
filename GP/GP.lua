@@ -927,7 +927,9 @@ NSQC4.RegisterModule("gp", function()
                     return text
                 end
 
-                local request = processFilterText("", "Кол-во") .. " "
+                -- ИСПРАВЛЕНИЕ: вместо "" (что дает "_" и запрашивает всё) 
+                -- ставим "10", чтобы просить только 10 последних
+                local request = "10 " 
                     .. processFilterText("", "День") .. " "
                     .. processFilterText("", "РЛ") .. " "
                     .. processFilterText("", "Рейд") .. " "
