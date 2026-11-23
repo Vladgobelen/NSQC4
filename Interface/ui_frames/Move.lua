@@ -1,5 +1,7 @@
 -- ============================================================================
 -- NSQC4 / Interface / ui_frames / Move
+-- Перемещение фреймов. Модуль "ui_frames_move".
+-- Сохраняет и восстанавливает полную геометрию фрейма.
 -- ============================================================================
 
 SLASH_NS_FCMOVE1 = "/ns_fcmove"
@@ -63,7 +65,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
             local name = frame:GetName()
             if name and name ~= "" then return name end
         end
-        return nil -- Если нет имени, не сохраняем (чтобы не ломать)
+        return nil
     end
 
     local function GetFrameByKey(key)
@@ -127,7 +129,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
         local wasMovable = frame.IsMovable and frame:IsMovable()
         if frame.SetMovable then frame:SetMovable(true) end
 
-        -- Жестко ставим по координатам
         frame:ClearAllPoints()
         frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", g.x, g.y)
 
@@ -175,7 +176,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- ОТЛАДКА (Выводит только то, что нужно)
+    -- ОТЛАДКА (Выводит только то, что нужно по /nsfcm debug)
     -- ========================================================================
     local function ReportAll()
         local keys = {}
@@ -357,6 +358,12 @@ NSQC4.RegisterModule("ui_frames_move", function()
         closeBtn:SetPoint("TOPRIGHT", -5, -5)
         closeBtn:SetScript("OnClick", function() f:Hide() end)
 
+        local settingsBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+        settingsBtn:SetSize(24, 24)
+        settingsBtn:SetPoint("RIGHT", closeBtn, "LEFT", -5, 0)
+        settingsBtn:SetText("*")
+        settingsBtn:SetScript("OnClick", function() NSQC4.FramesMove_OpenSettings() end)
+
         local addBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
         addBtn:SetSize(160, 22)
         addBtn:SetPoint("TOPLEFT", 20, -45)
@@ -427,12 +434,41 @@ NSQC4.RegisterModule("ui_frames_move", function()
             moveBtn:SetText("Двигать")
             moveBtn:SetScript("OnClick", function() if frame then StartMoveForFrame(frame) end end)
 
+            local upBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+            upBtn:SetSize(24, 22)
+            upBtn:SetPoint("RIGHT", moveBtn, "LEFT", -5, 0)
+            upBtn:SetText("^")
+            upBtn:SetScript("OnClick", function()
+                local base = frame or GetFrameByKey(key)
+                local parent = base and base.GetParent and base:GetParent()
+                if not parent or parent == UIParent or parent == WorldFrame then
+                    print("|cFFFFFF00NSQC4:|r у объекта нет подходящего родителя.")
+                    return
+                end
+                local pkey = GetObjectKey(parent)
+                if not pkey then
+                    print("|cFFFFFF00NSQC4:|r родитель без имени — не сохранить.")
+                    return
+                end
+                db.frames[pkey] = db.frames[pkey] or {}
+                local pdata = db.frames[pkey]
+                if not pdata.defaultGeometry then
+                    pdata.defaultGeometry = CaptureGeometry(parent)
+                end
+                print("|cFF00FF00NSQC4:|r родитель добавлен: " .. NameOf(parent))
+                StartMoveForFrame(parent)
+                NSQC4.FramesMove_RefreshList()
+            end)
+
             row:SetScript("OnEnter", function()
                 nameLbl:SetTextColor(1, 1, 0)
                 GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
                 GameTooltip:SetText("Объект: " .. key, 1, 1, 1)
                 if data and data.geometry then
                     GameTooltip:AddLine("Сохранено: " .. FormatGeometry(data.geometry), 0, 1, 0)
+                end
+                if data and data.defaultGeometry then
+                    GameTooltip:AddLine("По умолчанию: " .. FormatGeometry(data.defaultGeometry), 0.7, 0.7, 1)
                 end
                 GameTooltip:Show()
             end)
@@ -445,7 +481,72 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- Диспетчер команд
+    -- Настройки
+    -- ========================================================================
+    local settingsFrame
+
+    function NSQC4.FramesMove_OpenSettings()
+        if settingsFrame then
+            settingsFrame:Raise()
+            settingsFrame:Show()
+            return
+        end
+
+        local f = CreateFrame("Frame", "NSQC4FramesMoveSettings", UIParent)
+        f:SetSize(320, 180)
+        f:SetPoint("CENTER")
+        f:SetMovable(true)
+        f:EnableMouse(true)
+        f:SetFrameStrata("FULLSCREEN_DIALOG")
+        f:SetBackdrop({
+            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+            tile = true, tileSize = 16, edgeSize = 16,
+            insets = { left = 4, right = 4, top = 4, bottom = 4 },
+        })
+        f:SetScript("OnMouseDown", function(self, button) if button == "LeftButton" then self:StartMoving() end end)
+        f:SetScript("OnMouseUp", function(self, button) if button == "LeftButton" then self:StopMovingOrSizing() end end)
+
+        local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        title:SetPoint("TOP", 0, -15)
+        title:SetText("Настройки: Перемещение")
+
+        local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+        closeBtn:SetPoint("TOPRIGHT", -5, -5)
+        closeBtn:SetScript("OnClick", function() f:Hide() end)
+
+        local lbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        lbl:SetPoint("TOPLEFT", 20, -50)
+        lbl:SetText("Время до применения: " .. (db.captureDelay or 5) .. " сек")
+
+        local slider = CreateFrame("Slider", "NSQC4MoveSettingsSlider", f, "OptionsSliderTemplate")
+        slider:SetPoint("TOPLEFT", 20, -80)
+        slider:SetWidth(250)
+        slider:SetHeight(20)
+        slider:SetMinMaxValues(3, 15)
+        slider:SetValueStep(1)
+        slider:SetValue(db.captureDelay or 5)
+        slider:SetScript("OnValueChanged", function(_, value)
+            value = math.floor(value)
+            lbl:SetText("Время до применения: " .. value .. " сек")
+        end)
+
+        local saveBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+        saveBtn:SetSize(100, 22)
+        saveBtn:SetPoint("BOTTOM", 0, 15)
+        saveBtn:SetText("Сохранить")
+        saveBtn:SetScript("OnClick", function()
+            db.captureDelay = math.floor(slider:GetValue())
+            f:Hide()
+        end)
+
+        settingsFrame = f
+        f:Raise()
+        f:Show()
+    end
+
+    -- ========================================================================
+    -- Диспетчер команд и кнопка на панели
     -- ========================================================================
     NSQC4._FramesMoveDispatch = function(msg)
         msg = (msg or ""):lower()
@@ -471,6 +572,12 @@ NSQC4.RegisterModule("ui_frames_move", function()
         end
     end
 
+    if NSQC4.SlashPanel_RegisterButton then
+        NSQC4.SlashPanel_RegisterButton("M", "/ns_fcmove", "Перемещение фреймов", function()
+            SlashCmdList["NS_FCMOVE"]("")
+        end)
+    end
+
     -- ========================================================================
     -- Восстановление при входе
     -- ========================================================================
@@ -491,9 +598,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
     local scaleWatch = CreateFrame("Frame")
     scaleWatch:RegisterEvent("UI_SCALE_CHANGED")
     scaleWatch:RegisterEvent("DISPLAY_SIZE_CHANGED")
-    scaleWatch:SetScript("OnEvent", function()
-        DelayedApply(1)
-    end)
+    scaleWatch:SetScript("OnEvent", function() DelayedApply(1) end)
 
     NSQC4.SetModuleMeta("ui_frames_move", {
         label   = "Перемещение",
