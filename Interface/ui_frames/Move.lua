@@ -2,6 +2,7 @@
 -- NSQC4 / Interface / ui_frames / Move
 -- Перемещение фреймов. Модуль "ui_frames_move".
 -- Клиент: WoW 3.3.5a (12340). Без C_Timer и retail-API.
+-- ПРИНУДИТЕЛЬНО держим фреймы на наших координатах.
 -- ============================================================================
 SLASH_NS_FCMOVE1 = "/ns_fcmove"
 SLASH_NS_FCMOVE2 = "/nsfcm"
@@ -15,7 +16,7 @@ end
 
 NSQC4.RegisterModule("ui_frames_move", function()
     -- ========================================================================
-    -- Хранилище (персональное для персонажа)
+    -- Хранилище
     -- ========================================================================
     if type(nsDbc4) ~= "table" then nsDbc4 = {} end
     nsDbc4.settings = nsDbc4.settings or {}
@@ -29,9 +30,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
     db.captureDelay = tonumber(db.captureDelay) or 5
     if db.reapplyOnShow == nil then db.reapplyOnShow = true end
 
-    -- ========================================================================
-    -- Лог
-    -- ========================================================================
     local debugEnabled = false
     local LOG_PREFIX = "|cFF66CCFF[FCMOVE]|r "
 
@@ -44,16 +42,11 @@ NSQC4.RegisterModule("ui_frames_move", function()
         end
     end
 
-    local function Msg(text)
-        print("|cFF00FF00NSQC4:|r " .. text)
-    end
-
-    local function Warn(text)
-        print("|cFFFFFF00NSQC4:|r " .. text)
-    end
+    local function Msg(text) print("|cFF00FF00NSQC4:|r " .. text) end
+    local function Warn(text) print("|cFFFFFF00NSQC4:|r " .. text) end
 
     -- ========================================================================
-    -- Планировщик на фрейме (замена C_Timer.After)
+    -- Планировщик
     -- ========================================================================
     local scheduler = CreateFrame("Frame")
     local queue = {}
@@ -87,7 +80,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- Утилиты поиска
+    -- Утилиты
     -- ========================================================================
     local own = {}
     local mainFrame, settingsFrame
@@ -151,7 +144,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- Геометрия: X/Y в единицах UIParent от его левого верхнего угла
+    -- Геометрия
     -- ========================================================================
     local function OffsetRatio(frame)
         local fs = frame:GetEffectiveScale()
@@ -180,7 +173,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
             g.x or 0, g.y or 0, g.width or 0, g.height or 0, g.scale or 1)
     end
 
-    -- Размер намеренно не применяется: SetSize ломает чужую авто-раскладку.
     local function ApplyGeometry(frame, g)
         if not frame or not g or not g.x then return false end
         if InCombatLockdown() and frame.IsProtected and frame:IsProtected() then
@@ -197,55 +189,32 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- ПРОВЕРКА: применились ли координаты
+    -- ПРИНУДИТЕЛЬНАЯ КОРРЕКЦИЯ: если фрейм ушёл — возвращаем обратно
     -- ========================================================================
-    local function CheckPositions(context)
-        local keys = SortedKeys()
-        if #keys == 0 then
-            if context then
-                print("|cFF66CCFF[FCMOVE]|r |cFFFFFFFF[" .. context .. "]|r Нет сохранённых фреймов")
-            end
-            return
-        end
+    local FORCE_CHECK_INTERVAL = 0.1  -- каждые 0.1 секунды проверяем
+    local DRIFT_THRESHOLD = 2.0       -- допустимое отклонение в пикселях
 
-        print("|cFF66CCFF[FCMOVE]|r |cFFFFFFFF[" .. (context or "проверка") .. "]|r Проверяю " .. #keys .. " фреймов:")
-
-        local ok_count = 0
-        local fail_count = 0
-
-        for _, key in ipairs(keys) do
-            local frame = GetFrameByKey(key)
+    local function ForceCorrectPositions()
+        for key in pairs(db.frames) do
             local data = db.frames[key]
-
-            if not frame then
-                print("|cFF66CCFF  " .. key .. "|r |cFFFF6060✗ нет в игре|r")
-                fail_count = fail_count + 1
-            elseif not data or not data.geometry then
-                print("|cFF66CCFF  " .. key .. "|r |cFFFF6060✗ нет сохранённых данных|r")
-                fail_count = fail_count + 1
-            else
-                local cur = CaptureGeometry(frame)
-                local saved = data.geometry
-                if cur and saved then
-                    local dx = math.abs((cur.x or 0) - (saved.x or 0))
-                    local dy = math.abs((cur.y or 0) - (saved.y or 0))
-                    local drift = math.sqrt(dx*dx + dy*dy)
-
-                    if drift < 2 then
-                        print("|cFF66CCFF  " .. key .. "|r |cFF00FF00✓ OK|r pos=(" .. string.format("%.0f,%.0f", cur.x, cur.y) .. ") drift=" .. string.format("%.1f", drift))
-                        ok_count = ok_count + 1
-                    else
-                        print("|cFF66CCFF  " .. key .. "|r |cFFFFFF00⚠ смещён|r saved=(" .. string.format("%.0f,%.0f", saved.x, saved.y) .. ") now=(" .. string.format("%.0f,%.0f", cur.x, cur.y) .. ") drift=" .. string.format("%.1f", drift))
-                        fail_count = fail_count + 1
+            if data and data.geometry then
+                local frame = GetFrameByKey(key)
+                if frame then
+                    local cur = CaptureGeometry(frame)
+                    local saved = data.geometry
+                    if cur and saved then
+                        local dx = math.abs((cur.x or 0) - (saved.x or 0))
+                        local dy = math.abs((cur.y or 0) - (saved.y or 0))
+                        local drift = math.sqrt(dx*dx + dy*dy)
+                        
+                        -- Если ушёл больше чем на DRIFT_THRESHOLD — возвращаем
+                        if drift > DRIFT_THRESHOLD then
+                            ApplyGeometry(frame, saved)
+                        end
                     end
-                else
-                    print("|cFF66CCFF  " .. key .. "|r |cFFFF6060✗ не удалось прочитать координаты|r")
-                    fail_count = fail_count + 1
                 end
             end
         end
-
-        print("|cFF66CCFF[FCMOVE]|r |cFFFFFFFFИтого:|r |cFF00FF00OK=" .. ok_count .. "|r |cFFFF6060FAIL=" .. fail_count .. "|r")
     end
 
     -- ========================================================================
@@ -359,7 +328,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- ОТЛАДКА: /nsfcm debug
+    -- ОТЛАДКА
     -- ========================================================================
     local function ReportAll()
         local keys = SortedKeys()
@@ -386,7 +355,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- Режим перемещения (один переиспользуемый оверлей)
+    -- Режим перемещения
     -- ========================================================================
     StopMoveMode = function(quiet)
         if moveOverlay then
@@ -507,7 +476,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- Счётчик захвата (один фрейм, без C_Timer)
+    -- Счётчик захвата
     -- ========================================================================
     local countdownFrame, countdownLeft, countdownAcc, countdownCallback, countdownActive
 
@@ -856,7 +825,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- Диспетчер команд и кнопка на панели
+    -- Диспетчер команд
     -- ========================================================================
     NSQC4._FramesMoveDispatch = function(msg)
         local raw = (msg or ""):match("^%s*(.-)%s*$")
@@ -897,8 +866,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
             Msg("возврат при показе: " .. (db.reapplyOnShow and "вкл" or "выкл"))
         elseif cmd == "debug" or cmd == "verify" or cmd == "list" then
             ReportAll()
-        elseif cmd == "check" then
-            CheckPositions("ручная проверка")
         elseif cmd == "on" then
             debugEnabled = true
             Msg("отладка включена.")
@@ -908,7 +875,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
         else
             print(LOG_PREFIX .. "/nsfcm — окно, add — захват мышью")
             print(LOG_PREFIX .. "move <Имя> | stop | apply | reset [Имя]")
-            print(LOG_PREFIX .. "delay <3-15> | guard on/off | debug | check | on/off")
+            print(LOG_PREFIX .. "delay <3-15> | guard on/off | debug | on/off")
         end
     end
 
@@ -919,33 +886,35 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- Восстановление при входе + смена масштаба/разрешения + таймер 10 сек
+    -- ПРИНУДИТЕЛЬНЫЙ КОНТРОЛЬ ПОЗИЦИЙ + восстановление при входе
     -- ========================================================================
     local restoreFrame = CreateFrame("Frame")
     restoreFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     restoreFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 
-    local checkTimerAcc = 0
-    local CHECK_INTERVAL = 10  -- каждые 10 секунд
+    local forceCheckAcc = 0
+    local watchAcc = 0
 
     restoreFrame:SetScript("OnEvent", function(_, event)
         if event == "PLAYER_ENTERING_WORLD" then
             ScheduleRestore()
-            -- Сразу после применения проверяем результат
-            After(1, function()
-                CheckPositions("вход в игру")
-            end)
         else
             RetryPending()
         end
     end)
 
     restoreFrame:SetScript("OnUpdate", function(_, elapsed)
+        -- ПРИНУДИТЕЛЬНАЯ КОРРЕКЦИЯ каждые 0.1 секунды
+        forceCheckAcc = forceCheckAcc + elapsed
+        if forceCheckAcc >= FORCE_CHECK_INTERVAL then
+            forceCheckAcc = forceCheckAcc - FORCE_CHECK_INTERVAL
+            ForceCorrectPositions()
+        end
+
         -- Мониторинг смены масштаба/разрешения
-        local watchAcc_local = (restoreFrame._watchAcc or 0) + elapsed
-        restoreFrame._watchAcc = watchAcc_local
-        if watchAcc_local >= 0.5 then
-            restoreFrame._watchAcc = 0
+        watchAcc = watchAcc + elapsed
+        if watchAcc >= 0.5 then
+            watchAcc = 0
             local scale = UIParent:GetEffectiveScale()
             local w, h = GetScreenWidth(), GetScreenHeight()
             local lastScale = restoreFrame._lastScale
@@ -956,13 +925,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
                 After(0.2, ApplyAllSaved)
             end
             restoreFrame._lastScale, restoreFrame._lastW, restoreFrame._lastH = scale, w, h
-        end
-
-        -- Таймер проверки каждые 10 секунд
-        checkTimerAcc = checkTimerAcc + elapsed
-        if checkTimerAcc >= CHECK_INTERVAL then
-            checkTimerAcc = checkTimerAcc - CHECK_INTERVAL
-            CheckPositions("таймер 10с")
         end
     end)
 
