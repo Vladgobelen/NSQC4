@@ -1,12 +1,10 @@
 -- ============================================================================
 -- NSQC4 / Interface / ui_frames / Move
 -- Перемещение фреймов. Модуль "ui_frames_move".
--- Клиент: WoW 3.3.5a (12340). Таймеры только на фреймах, без C_Timer.
+-- Клиент: WoW 3.3.5a (12340). Без C_Timer и retail-API.
 -- ============================================================================
-
 SLASH_NS_FCMOVE1 = "/ns_fcmove"
 SLASH_NS_FCMOVE2 = "/nsfcm"
-
 SlashCmdList["NS_FCMOVE"] = function(msg)
     if not NSQC4 or not NSQC4._FramesMoveDispatch then
         print("|cFFFFFF00NSQC4:|r модуль перемещения ещё не инициализирован.")
@@ -17,25 +15,22 @@ end
 
 NSQC4.RegisterModule("ui_frames_move", function()
     -- ========================================================================
-    -- 1. База персонажа
+    -- Хранилище (персональное для персонажа)
     -- ========================================================================
     if type(nsDbc4) ~= "table" then nsDbc4 = {} end
     nsDbc4.settings = nsDbc4.settings or {}
     nsDbc4.settings.framesMove = nsDbc4.settings.framesMove or {}
-
     local globalMove = nsDbc4.settings.framesMove
     globalMove.chars = globalMove.chars or {}
-
     local charKey = (UnitName("player") or "Unknown") .. " - " .. (GetRealmName() or "Unknown")
     globalMove.chars[charKey] = globalMove.chars[charKey] or {}
-
     local db = globalMove.chars[charKey]
     db.frames = db.frames or {}
     db.captureDelay = tonumber(db.captureDelay) or 5
     if db.reapplyOnShow == nil then db.reapplyOnShow = true end
 
     -- ========================================================================
-    -- 2. Лог
+    -- Лог
     -- ========================================================================
     local debugEnabled = false
     local LOG_PREFIX = "|cFF66CCFF[FCMOVE]|r "
@@ -58,7 +53,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- 3. Планировщик на фреймах (замена C_Timer.After)
+    -- Планировщик на фрейме (замена C_Timer.After)
     -- ========================================================================
     local scheduler = CreateFrame("Frame")
     local queue = {}
@@ -92,9 +87,12 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- 4. Утилиты работы с объектами
+    -- Утилиты поиска
     -- ========================================================================
-    local ownFrames = {}
+    local own = {}
+    local mainFrame, settingsFrame
+    local moveOverlay, moveTarget, moveKey, moveWasMovable, moveWasMouse
+    local RefreshList, StartMoveForFrame, StopMoveMode
 
     local function NameOf(obj)
         if not obj then return "nil" end
@@ -105,26 +103,31 @@ NSQC4.RegisterModule("ui_frames_move", function()
         return "<без имени>"
     end
 
-    local function GetObjectKey(frame)
-        if frame and frame.GetName then
-            local name = frame:GetName()
-            if name and name ~= "" then return name end
+    local function NormalizeToFrame(region)
+        local guard = 0
+        while type(region) == "table" and guard < 32 do
+            if region == UIParent or region == WorldFrame then return nil end
+            if region.IsObjectType and region:IsObjectType("Frame") then return region end
+            region = region.GetParent and region:GetParent() or nil
+            guard = guard + 1
         end
         return nil
     end
 
-    local function NormalizeToFrame(region)
-        if type(region) ~= "table" then return nil end
+    local function IsOwnFrame(obj)
         local guard = 0
-        while region and guard < 32 do
+        while type(obj) == "table" and guard < 32 do
+            if own[obj] then return true end
+            obj = obj.GetParent and obj:GetParent() or nil
             guard = guard + 1
-            if region == UIParent or region == WorldFrame then return nil end
-            if region.IsObjectType then
-                if region:IsObjectType("Frame") then return region end
-            elseif region.StartMoving then
-                return region
-            end
-            region = region.GetParent and region:GetParent() or nil
+        end
+        return false
+    end
+
+    local function GetObjectKey(frame)
+        if frame and frame.GetName then
+            local name = frame:GetName()
+            if name and name ~= "" then return name end
         end
         return nil
     end
@@ -134,22 +137,9 @@ NSQC4.RegisterModule("ui_frames_move", function()
         return NormalizeToFrame(_G[key])
     end
 
-    local function IsOwnFrame(frame)
-        local f = frame
-        local guard = 0
-        while f and guard < 32 do
-            if ownFrames[f] then return true end
-            f = f.GetParent and f:GetParent() or nil
-            guard = guard + 1
-        end
-        return false
-    end
-
     local function GetMouseFrame()
-        local focus = GetMouseFocus and GetMouseFocus() or nil
-        local frame = NormalizeToFrame(focus)
-        if not frame then return nil end
-        if IsOwnFrame(frame) then return nil end
+        local frame = NormalizeToFrame(GetMouseFocus and GetMouseFocus() or nil)
+        if not frame or IsOwnFrame(frame) then return nil end
         return frame
     end
 
@@ -161,310 +151,278 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- 5. Геометрия
-    -- x, y хранятся в системе координат UIParent (от левого верхнего угла).
-    -- При применении пересчитываются в собственную систему фрейма.
+    -- Геометрия: МИНИМАЛИСТИЧНАЯ - абсолютные координаты
     -- ========================================================================
-    local function OffsetRatio(frame)
-        local fs = frame:GetEffectiveScale()
-        local us = UIParent:GetEffectiveScale()
-        if not fs or fs <= 0 or not us or us <= 0 then return 1 end
-        return us / fs
-    end
-
     local function CaptureGeometry(frame)
         if not frame then return nil end
-        local left, top = frame:GetLeft(), frame:GetTop()
-        local uiLeft, uiTop = UIParent:GetLeft(), UIParent:GetTop()
-        if not left or not top or not uiLeft or not uiTop then return nil end
+        local left = frame:GetLeft()
+        local top = frame:GetTop()
+        local width = frame:GetWidth()
+        local height = frame:GetHeight()
+        local scale = frame:GetScale()
+        
+        if not left or not top or not width or not height then return nil end
+        
         return {
-            x = left - uiLeft,
-            y = top - uiTop,
-            width = frame:GetWidth(),
-            height = frame:GetHeight(),
-            scale = frame:GetScale(),
+            left = left,
+            top = top,
+            width = width,
+            height = height,
+            scale = scale or 1
         }
     end
 
     local function FormatGeometry(g)
-        if not g then return "|cFFFF6060нет данных|r" end
-        return string.format("x=%.1f y=%.1f size=%.0fx%.0f scale=%.2f",
-            g.x or 0, g.y or 0, g.width or 0, g.height or 0, g.scale or 1)
+        if not g then return "нет данных" end
+        return string.format("pos(%.1f, %.1f) size=%.0fx%.0f scale=%.2f",
+            g.left or 0, g.top or 0, g.width or 0, g.height or 0, g.scale or 1)
     end
 
-    -- Размер НЕ восстанавливаем: у半数 фреймов он задан якорями, SetSize ломает вёрстку.
     local function ApplyGeometry(frame, g)
-        if not frame or not g then return false end
-        if not frame.SetPoint or not frame.ClearAllPoints then return false end
+        if not frame or not g or not g.left or not g.top then return false end
+        
+        -- Проверяем бой для защищенных фреймов
         if InCombatLockdown() and frame.IsProtected and frame:IsProtected() then
-            L("бой: применение %s отложено", NameOf(frame))
+            L("бой: отложено применение %s", NameOf(frame))
             return false
         end
-
-        if g.scale and frame.SetScale then
-            local cur = frame:GetScale()
-            if not cur or math.abs(cur - g.scale) > 0.001 then
-                frame:SetScale(g.scale)
-            end
+        
+        -- Устанавливаем масштаб если нужно
+        if g.scale and g.scale ~= frame:GetScale() then
+            frame:SetScale(g.scale)
         end
-
-        local k = OffsetRatio(frame)
+        
+        -- Очищаем все точки и устанавливаем новую позицию
         frame:ClearAllPoints()
-        frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", (g.x or 0) * k, (g.y or 0) * k)
-        L("применено %s -> x=%.1f y=%.1f (k=%.3f)", NameOf(frame), g.x or 0, g.y or 0, k)
+        frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", g.left, g.top)
+        
+        L("применено: %s -> (%.1f, %.1f)", NameOf(frame), g.left, g.top)
         return true
     end
 
     -- ========================================================================
-    -- 6. Объявления наперёд
+    -- Применение / ожидание / возврат при показе
     -- ========================================================================
-    local RefreshList, StartMoveForFrame, StopMoveMode
-    local moveOverlay, moveTarget, moveKey
-    local moveWasMovable, moveWasMouse
     local pending = {}
     local hooked = {}
 
-    -- ========================================================================
-    -- 7. Применение / восстановление
-    -- ========================================================================
-    local function HookFrame(frame, key)
-        if hooked[frame] then return end
-        if not frame.HookScript then return end
+    local function HookOnShow(frame, key)
+        if not frame or hooked[frame] or not frame.HookScript then return end
         hooked[frame] = true
         frame:HookScript("OnShow", function(self)
             if not db.reapplyOnShow then return end
             if self == moveTarget then return end
             local data = db.frames[key]
             if not data or not data.geometry then return end
-            if InCombatLockdown() and self.IsProtected and self:IsProtected() then return end
             ApplyGeometry(self, data.geometry)
         end)
     end
 
-    local function ApplySavedKey(key)
+    local function ApplyPositionByKey(key)
         local data = db.frames[key]
         if not data or not data.geometry then return true end
         if moveKey and key == moveKey then return true end
+        
         local frame = GetFrameByKey(key)
-        if not frame then
-            L("фрейм %s ещё не создан", key)
-            return false
-        end
+        if not frame then return false end
+        
         local ok = ApplyGeometry(frame, data.geometry)
-        if ok then HookFrame(frame, key) end
+        if ok then HookOnShow(frame, key) end
         return ok
     end
 
     local function ApplyAllSaved()
-        pending = {}
-        local total, done = 0, 0
+        for k in pairs(pending) do pending[k] = nil end
+        local left = 0
         for key in pairs(db.frames) do
-            total = total + 1
-            if ApplySavedKey(key) then
-                done = done + 1
-            else
+            if not ApplyPositionByKey(key) then
                 pending[key] = true
+                left = left + 1
             end
         end
-        L("применено %d из %d", done, total)
-        return done, total
+        L("применение: осталось %d", left)
+        return left
     end
 
     local function RetryPending()
+        local left = 0
         for key in pairs(pending) do
-            if ApplySavedKey(key) then pending[key] = nil end
+            if ApplyPositionByKey(key) then
+                pending[key] = nil
+            else
+                left = left + 1
+            end
         end
+        return left
     end
 
-    local RESTORE_WAVES = { 0.5, 1, 2, 5, 10, 20, 30 }
-
     local function ScheduleRestore()
+        -- Сначала пытаемся применить все сразу
         ApplyAllSaved()
-        for _, delay in ipairs(RESTORE_WAVES) do
-            After(delay, RetryPending)
-        end
+        
+        -- Затем через задержки повторяем для тех, что не применились
+        After(0.5, RetryPending)
+        After(2, RetryPending)
+        After(5, RetryPending)
     end
 
     -- ========================================================================
-    -- 8. Сохранение / сброс
+    -- Сохранение / сброс
     -- ========================================================================
     local function SaveCurrentPosition(frame, key)
         if not frame or not key then return false end
+        
         local g = CaptureGeometry(frame)
         if not g then
             Warn("не удалось прочитать координаты " .. key)
             return false
         end
+        
         local data = db.frames[key]
         if not data then
             data = {}
             db.frames[key] = data
         end
         data.geometry = g
-        pending[key] = nil
-        HookFrame(frame, key)
+        
+        HookOnShow(frame, key)
         L("сохранено %s: %s", key, FormatGeometry(g))
-        RefreshList()
+        
+        if RefreshList then RefreshList() end
         return true
     end
 
     local function ResetFrameByKey(key)
-        if not key then return end
-        local data = db.frames[key]
         local frame = GetFrameByKey(key)
+        local data = db.frames[key]
         if frame and data and data.defaultGeometry then
             ApplyGeometry(frame, data.defaultGeometry)
         end
         db.frames[key] = nil
         pending[key] = nil
-        RefreshList()
-        Msg("сброшено: " .. key)
+        if RefreshList then RefreshList() end
     end
 
     local function ResetAll()
         local keys = SortedKeys()
         for _, key in ipairs(keys) do
-            local data = db.frames[key]
             local frame = GetFrameByKey(key)
+            local data = db.frames[key]
             if frame and data and data.defaultGeometry then
                 ApplyGeometry(frame, data.defaultGeometry)
             end
             db.frames[key] = nil
             pending[key] = nil
         end
-        RefreshList()
+        if RefreshList then RefreshList() end
         Msg("сброшено фреймов: " .. #keys)
     end
 
-    local function CleanMissing()
-        local removed = 0
-        for key in pairs(db.frames) do
-            if not GetFrameByKey(key) then
-                db.frames[key] = nil
-                pending[key] = nil
-                removed = removed + 1
-            end
-        end
-        RefreshList()
-        Msg("удалено записей без фрейма: " .. removed)
-    end
-
     -- ========================================================================
-    -- 9. Отладка
+    -- ОТЛАДКА: /nsfcm debug
     -- ========================================================================
     local function ReportAll()
         local keys = SortedKeys()
-        local wait = 0
-        for _ in pairs(pending) do wait = wait + 1 end
-
         print(LOG_PREFIX .. "===== ОТЧЁТ: " .. #keys .. " фреймов =====")
-        print(LOG_PREFIX .. string.format("экран %.0fx%.0f, UIParent scale=%.3f, задержка=%d сек",
-            GetScreenWidth() or 0, GetScreenHeight() or 0,
-            UIParent:GetEffectiveScale() or 0, db.captureDelay or 5))
-
+        print(LOG_PREFIX .. string.format("экран %.0fx%.0f, UIParent scale %.3f",
+            GetScreenWidth() or 0, GetScreenHeight() or 0, UIParent:GetEffectiveScale() or 0))
+        print(LOG_PREFIX .. string.format("задержка %d c, возврат при показе: %s, лог: %s",
+            db.captureDelay or 5, tostring(db.reapplyOnShow), tostring(debugEnabled)))
+        
         for _, key in ipairs(keys) do
-            local data = db.frames[key]
             local frame = GetFrameByKey(key)
-            print(LOG_PREFIX .. "|cFFFFFFFF" .. key .. "|r")
+            local data = db.frames[key]
+            print(LOG_PREFIX .. "|cFFFFFFFF" .. key .. "|r" .. (frame and "" or " |cFFFF6060(нет в игре)|r"))
             if frame then
-                print(LOG_PREFIX .. "  в игре: " .. FormatGeometry(CaptureGeometry(frame))
-                    .. string.format(" movable=%s protected=%s",
-                        tostring(frame.IsMovable and frame:IsMovable() or false),
-                        tostring(frame.IsProtected and frame:IsProtected() or false)))
-            else
-                print(LOG_PREFIX .. "  в игре: |cFFFF6060НЕ НАЙДЕН|r")
+                print(LOG_PREFIX .. "  сейчас:    " .. FormatGeometry(CaptureGeometry(frame))
+                    .. string.format(" eff=%.2f", frame:GetEffectiveScale() or 0))
             end
-            print(LOG_PREFIX .. "  в базе: " .. FormatGeometry(data and data.geometry))
-            print(LOG_PREFIX .. "  исходно: " .. FormatGeometry(data and data.defaultGeometry))
+            print(LOG_PREFIX .. "  сохранено: " .. FormatGeometry(data and data.geometry))
+            print(LOG_PREFIX .. "  исходное:  " .. FormatGeometry(data and data.defaultGeometry))
         end
-
-        print(LOG_PREFIX .. string.format("ожидают применения: %d, OnShow-возврат: %s, лог: %s",
-            wait, db.reapplyOnShow and "вкл" or "выкл", debugEnabled and "вкл" or "выкл"))
+        
+        local left = 0
+        for _ in pairs(pending) do left = left + 1 end
+        print(LOG_PREFIX .. "не применено: " .. left)
         print(LOG_PREFIX .. "===== КОНЕЦ =====")
     end
 
     -- ========================================================================
-    -- 10. Режим перемещения (один переиспользуемый оверлей)
+    -- Режим перемещения (один переиспользуемый оверлей)
     -- ========================================================================
-    StopMoveMode = function(silent)
+    StopMoveMode = function(quiet)
         if moveOverlay then
             moveOverlay:Hide()
+            moveOverlay:EnableMouse(false)
         end
         if moveTarget then
-            if moveTarget.StopMovingOrSizing then moveTarget:StopMovingOrSizing() end
-            if moveTarget.SetMovable and moveWasMovable ~= nil then
-                moveTarget:SetMovable(moveWasMovable)
-            end
-            if moveTarget.EnableMouse and moveWasMouse ~= nil then
-                moveTarget:EnableMouse(moveWasMouse)
-            end
+            moveTarget:StopMovingOrSizing()
+            if moveWasMovable ~= nil then moveTarget:SetMovable(moveWasMovable) end
+            if moveWasMouse ~= nil then moveTarget:EnableMouse(moveWasMouse) end
         end
-        moveTarget, moveKey = nil, nil
-        moveWasMovable, moveWasMouse = nil, nil
-        if not silent then Msg("режим перемещения выключен.") end
+        moveTarget, moveKey, moveWasMovable, moveWasMouse = nil, nil, nil, nil
+        if not quiet then Msg("режим перемещения выключен.") end
     end
 
     local function CancelMove()
         local target, key = moveTarget, moveKey
-        if target and target.StopMovingOrSizing then target:StopMovingOrSizing() end
-        if target and key then
-            local data = db.frames[key]
-            local g = data and (data.geometry or data.defaultGeometry)
-            if g then ApplyGeometry(target, g) end
-            if data and not data.geometry then
-                db.frames[key] = nil
-                pending[key] = nil
+        if target then
+            target:StopMovingOrSizing()
+            local data = key and db.frames[key]
+            if data then
+                if data.geometry then
+                    ApplyGeometry(target, data.geometry)
+                else
+                    ApplyGeometry(target, data.defaultGeometry)
+                    db.frames[key] = nil
+                    pending[key] = nil
+                end
             end
         end
         StopMoveMode(true)
-        RefreshList()
-        Msg("перемещение отменено, позиция возвращена.")
+        if RefreshList then RefreshList() end
+        Msg("перемещение отменено.")
     end
 
     local function GetMoveOverlay()
         if moveOverlay then return moveOverlay end
-
         local ov = CreateFrame("Frame", "NSQC4MoveOverlay", UIParent)
         ov:SetFrameStrata("TOOLTIP")
         ov:SetFrameLevel(10)
-        ov:EnableMouse(true)
         ov:Hide()
-
+        
         local hl = ov:CreateTexture(nil, "OVERLAY")
         hl:SetAllPoints(ov)
         hl:SetTexture(0.2, 1, 0.2, 0.25)
-
+        
         local label = ov:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         label:SetPoint("CENTER", ov, "CENTER", 0, 0)
-        label:SetTextColor(1, 1, 1)
         ov.label = label
-
-        ov:SetScript("OnMouseDown", function(self, button)
-            local target = moveTarget
-            if not target then return end
+        
+        ov:SetScript("OnMouseDown", function(_, button)
+            if not moveTarget then return end
             if button == "LeftButton" then
-                if InCombatLockdown() and target.IsProtected and target:IsProtected() then
-                    Warn("фрейм защищён: перемещение в бою запрещено.")
+                if InCombatLockdown() and moveTarget.IsProtected and moveTarget:IsProtected() then
+                    Warn("защищённый фрейм, в бою двигать нельзя.")
                     return
                 end
-                target:StartMoving()
+                moveTarget:StartMoving()
             elseif button == "RightButton" then
                 CancelMove()
             end
         end)
-
-        ov:SetScript("OnMouseUp", function(self, button)
-            if button ~= "LeftButton" then return end
-            local target, key = moveTarget, moveKey
-            if not target or not key then return end
-            target:StopMovingOrSizing()
-            if SaveCurrentPosition(target, key) then
-                Msg("сохранено: " .. key)
+        
+        ov:SetScript("OnMouseUp", function(_, button)
+            if button ~= "LeftButton" or not moveTarget then return end
+            moveTarget:StopMovingOrSizing()
+            local name = moveKey
+            if SaveCurrentPosition(moveTarget, name) then
+                Msg("сохранено: " .. name)
             end
             StopMoveMode(true)
         end)
-
-        ownFrames[ov] = true
+        
+        own[ov] = true
         moveOverlay = ov
         return ov
     end
@@ -476,22 +434,21 @@ NSQC4.RegisterModule("ui_frames_move", function()
             return
         end
         if IsOwnFrame(frame) then
-            Warn("окна самого NSQC4 перемещать нельзя.")
+            Warn("окна самого NSQC4 не перемещаем.")
+            return
+        end
+        local key = GetObjectKey(frame)
+        if not key then
+            Warn("у фрейма нет имени — сохранить некуда.")
             return
         end
         if InCombatLockdown() and frame.IsProtected and frame:IsProtected() then
-            Warn("защищённый фрейм нельзя двигать в бою.")
+            Warn("защищённый фрейм, в бою двигать нельзя.")
             return
         end
-
-        local key = GetObjectKey(frame)
-        if not key then
-            Warn("у фрейма нет имени — сохранить позицию нельзя.")
-            return
-        end
-
+        
         StopMoveMode(true)
-
+        
         local data = db.frames[key]
         if not data then
             data = {}
@@ -500,13 +457,13 @@ NSQC4.RegisterModule("ui_frames_move", function()
         if not data.defaultGeometry then
             data.defaultGeometry = CaptureGeometry(frame)
         end
-
+        
         moveTarget, moveKey = frame, key
-        moveWasMovable = frame.IsMovable and frame:IsMovable() or false
-        moveWasMouse = frame.IsMouseEnabled and frame:IsMouseEnabled() or false
-        if frame.SetMovable then frame:SetMovable(true) end
-        if frame.EnableMouse then frame:EnableMouse(true) end
-
+        moveWasMovable = frame:IsMovable() and true or false
+        moveWasMouse = frame:IsMouseEnabled() and true or false
+        frame:SetMovable(true)
+        frame:EnableMouse(true)
+        
         local ov = GetMoveOverlay()
         ov:SetParent(frame)
         ov:SetFrameStrata("TOOLTIP")
@@ -514,18 +471,17 @@ NSQC4.RegisterModule("ui_frames_move", function()
         ov:ClearAllPoints()
         ov:SetAllPoints(frame)
         ov.label:SetText(key)
+        ov:EnableMouse(true)
         ov:Show()
-
-        RefreshList()
-        Msg("перемещение " .. key .. ": ЛКМ — тянуть, ПКМ — отмена.")
+        
+        if RefreshList then RefreshList() end
+        Msg(key .. ": тяни ЛКМ, ПКМ — отмена.")
     end
 
     -- ========================================================================
-    -- 11. Захват фрейма под мышью (счётчик на фрейме)
+    -- Счётчик захвата (один фрейм, без C_Timer)
     -- ========================================================================
-    local countdownFrame
-    local countdownValue, countdownElapsed = 0, 0
-    local countdownCallback, countdownActive = nil, false
+    local countdownFrame, countdownLeft, countdownAcc, countdownCallback, countdownActive
 
     local function StopCountdown()
         countdownActive = false
@@ -537,242 +493,205 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     local function StartCountdown(callback)
-        StopCountdown()
-
-        local delay = math.floor(tonumber(db.captureDelay) or 5)
-        delay = math.max(3, math.min(15, delay))
-
-        local f = countdownFrame
-        if not f then
-            f = CreateFrame("Frame", "NSQC4MoveCountdown", UIParent)
+        if not countdownFrame then
+            local f = CreateFrame("Frame", "NSQC4MoveCountdown", UIParent)
             f:SetWidth(460)
-            f:SetHeight(64)
+            f:SetHeight(56)
             f:SetPoint("CENTER", UIParent, "CENTER", 0, 200)
             f:SetFrameStrata("TOOLTIP")
-            f:SetFrameLevel(20)
             f:SetBackdrop({
                 bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
                 edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-                tile = true, tileSize = 16, edgeSize = 16,
-                insets = { left = 4, right = 4, top = 4, bottom = 4 },
+                tile = true, tileSize = 16, edgeSize = 12,
+                insets = { left = 3, right = 3, top = 3, bottom = 3 },
             })
-
             f.text = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-            f.text:SetPoint("TOP", f, "TOP", 0, -12)
-
-            f.hint = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            f.hint:SetPoint("TOP", f.text, "BOTTOM", 0, -6)
-            f.hint:SetWidth(430)
-            f.hint:SetJustifyH("CENTER")
-
-            f.acc = 0
-            ownFrames[f] = true
+            f.text:SetPoint("TOP", 0, -10)
+            f.hint = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            f.hint:SetPoint("TOP", f.text, "BOTTOM", 0, -4)
+            own[f] = true
             countdownFrame = f
         end
-
-        countdownValue = delay
-        countdownElapsed = 0
+        
+        StopCountdown()
+        local f = countdownFrame
+        countdownLeft = math.max(1, math.min(30, math.floor(db.captureDelay or 5)))
+        countdownAcc = 0
         countdownCallback = callback
         countdownActive = true
         f.acc = 0
-        f.text:SetText("Наведите мышь на фрейм: " .. delay)
+        f.text:SetText("Наведите мышь: " .. countdownLeft)
         f.hint:SetText("Под курсором: —")
         f:Show()
-
+        
         f:SetScript("OnUpdate", function(self, elapsed)
-            countdownElapsed = countdownElapsed + elapsed
             self.acc = self.acc + elapsed
-
             if self.acc >= 0.25 then
                 self.acc = 0
                 local hover = GetMouseFrame()
                 self.hint:SetText("Под курсором: " .. (hover and NameOf(hover) or "—"))
             end
-
-            if countdownElapsed < 1 then return end
-            countdownElapsed = countdownElapsed - 1
-            countdownValue = countdownValue - 1
-
-            if countdownValue > 0 then
-                self.text:SetText("Наведите мышь на фрейм: " .. countdownValue)
+            
+            countdownAcc = countdownAcc + elapsed
+            if countdownAcc < 1 then return end
+            countdownAcc = countdownAcc - 1
+            countdownLeft = countdownLeft - 1
+            
+            if countdownLeft > 0 then
+                self.text:SetText("Наведите мышь: " .. countdownLeft)
                 return
             end
-
+            
             self:SetScript("OnUpdate", nil)
             countdownActive = false
-
+            
             local frame = GetMouseFrame()
             local cb = countdownCallback
             countdownCallback = nil
-
+            
             if frame then
                 self.text:SetText("Захвачено: " .. NameOf(frame))
                 self.hint:SetText("")
-                After(1.2, function()
-                    if countdownFrame == self and not countdownActive then self:Hide() end
-                end)
                 if cb then cb(frame) end
             else
                 self.text:SetText("Фрейм не найден!")
-                self.hint:SetText("Курсор был над пустым местом или окном NSQC4.")
-                After(1.5, function()
-                    if countdownFrame == self and not countdownActive then self:Hide() end
-                end)
+                self.hint:SetText("Курсор был над пустотой или окном NSQC4.")
             end
+            
+            After(1.5, function()
+                if not countdownActive then countdownFrame:Hide() end
+            end)
         end)
     end
 
     -- ========================================================================
-    -- 12. Главное окно (строки списка переиспользуются)
+    -- Главное окно
     -- ========================================================================
-    local mainFrame
     local rows = {}
     local ENTRY_H = 26
-    local LIST_W = 440
+    local LIST_W = 420
 
     local function ScrollWheel(self, delta)
-        if not self or not self.GetScrollChild then return end
         local child = self:GetScrollChild()
-        if not child then return end
-        local maxScroll = math.max(0, (child:GetHeight() or 0) - (self:GetHeight() or 0))
-        local new = math.max(0, math.min(maxScroll, (self:GetVerticalScroll() or 0) - delta * ENTRY_H * 3))
-        self:SetVerticalScroll(new)
-        local bar = _G[(self:GetName() or "") .. "ScrollBar"]
-        if bar then bar:SetValue(new) end
+        local maxv = math.max(0, (child and child:GetHeight() or 0) - self:GetHeight())
+        local value = math.max(0, math.min(maxv, self:GetVerticalScroll() - delta * ENTRY_H * 3))
+        self:SetVerticalScroll(value)
+        local bar = _G[self:GetName() .. "ScrollBar"]
+        if bar then bar:SetValue(value) end
     end
 
     local function GetRow(i)
-        local row = rows[i]
-        if row then return row end
-
-        local parent = mainFrame.list
-        row = CreateFrame("Frame", nil, parent)
+        if rows[i] then return rows[i] end
+        
+        local row = CreateFrame("Frame", nil, mainFrame.list)
         row:SetWidth(LIST_W)
         row:SetHeight(ENTRY_H)
+        row:SetPoint("TOPLEFT", 0, -((i - 1) * ENTRY_H))
         row:EnableMouse(true)
         row:EnableMouseWheel(true)
+        
         row:SetScript("OnMouseWheel", function(_, delta)
             ScrollWheel(mainFrame.scroll, delta)
         end)
-
-        local bg = row:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints(row)
-        bg:SetTexture(1, 1, 1, 0.04)
-        row.bg = bg
-
+        
         local nameLbl = row:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-        nameLbl:SetPoint("LEFT", row, "LEFT", 5, 0)
-        nameLbl:SetWidth(290)
+        nameLbl:SetPoint("LEFT", 5, 0)
+        nameLbl:SetWidth(275)
         nameLbl:SetJustifyH("LEFT")
-        nameLbl:SetWordWrap(false)
         row.name = nameLbl
-
+        
         local xBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
         xBtn:SetWidth(24)
         xBtn:SetHeight(22)
-        xBtn:SetPoint("RIGHT", row, "RIGHT", -5, 0)
+        xBtn:SetPoint("RIGHT", -5, 0)
         xBtn:SetText("X")
         xBtn:SetScript("OnClick", function(self)
             local key = self:GetParent().key
             if key then ResetFrameByKey(key) end
         end)
-
+        
         local moveBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
         moveBtn:SetWidth(66)
         moveBtn:SetHeight(22)
         moveBtn:SetPoint("RIGHT", xBtn, "LEFT", -5, 0)
         moveBtn:SetText("Двигать")
         moveBtn:SetScript("OnClick", function(self)
-            local key = self:GetParent().key
-            if key then StartMoveForFrame(GetFrameByKey(key)) end
+            StartMoveForFrame(GetFrameByKey(self:GetParent().key))
         end)
-        row.moveBtn = moveBtn
-
+        row.move = moveBtn
+        
         local upBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
         upBtn:SetWidth(24)
         upBtn:SetHeight(22)
         upBtn:SetPoint("RIGHT", moveBtn, "LEFT", -5, 0)
         upBtn:SetText("^")
         upBtn:SetScript("OnClick", function(self)
-            local key = self:GetParent().key
-            local base = key and GetFrameByKey(key)
-            local parentFrame = base and base.GetParent and base:GetParent()
-            if not parentFrame or parentFrame == UIParent or parentFrame == WorldFrame then
+            local base = GetFrameByKey(self:GetParent().key)
+            local parent = base and base:GetParent()
+            if not parent or parent == UIParent or parent == WorldFrame then
                 Warn("у объекта нет подходящего родителя.")
                 return
             end
-            StartMoveForFrame(parentFrame)
+            StartMoveForFrame(parent)
         end)
-
+        
         row:SetScript("OnEnter", function(self)
             self.name:SetTextColor(1, 1, 0)
             local key = self.key
             local data = key and db.frames[key]
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:SetText("Объект: " .. tostring(key), 1, 1, 1)
+            GameTooltip:AddLine("Сейчас: " .. FormatGeometry(CaptureGeometry(GetFrameByKey(key))), 1, 1, 1)
             if data and data.geometry then
                 GameTooltip:AddLine("Сохранено: " .. FormatGeometry(data.geometry), 0, 1, 0)
-            else
-                GameTooltip:AddLine("Позиция ещё не сохранена", 1, 0.8, 0)
             end
             if data and data.defaultGeometry then
-                GameTooltip:AddLine("Исходно: " .. FormatGeometry(data.defaultGeometry), 0.7, 0.7, 1)
-            end
-            if key and not GetFrameByKey(key) then
-                GameTooltip:AddLine("Фрейм сейчас не существует", 1, 0.4, 0.4)
+                GameTooltip:AddLine("Исходное: " .. FormatGeometry(data.defaultGeometry), 0.7, 0.7, 1)
             end
             GameTooltip:Show()
         end)
-
+        
         row:SetScript("OnLeave", function(self)
             self.name:SetTextColor(1, 1, 1)
             GameTooltip:Hide()
         end)
-
+        
         rows[i] = row
         return row
     end
 
     RefreshList = function()
-        local f = mainFrame
-        if not f or not f.list then return end
-
+        if not mainFrame or not mainFrame.list then return end
         local keys = SortedKeys()
+        
         for i = 1, #rows do rows[i]:Hide() end
-
+        
         for i, key in ipairs(keys) do
             local row = GetRow(i)
-            row.key = key
-            row:ClearAllPoints()
-            row:SetPoint("TOPLEFT", f.list, "TOPLEFT", 0, -((i - 1) * ENTRY_H))
-
             local frame = GetFrameByKey(key)
             local data = db.frames[key]
-            local text = key
-            if not frame then
-                text = "|cFFFF6060" .. key .. "|r"
-            elseif not data or not data.geometry then
-                text = "|cFFFFFF00" .. key .. "|r"
-            end
-            row.name:SetText(text)
-            row.moveBtn:SetEnabled(frame ~= nil)
+            row.key = key
+            row.name:SetText((frame and "|cFFFFFFFF" or "|cFFFF6060") .. key .. "|r"
+                .. ((data and data.geometry) and "" or " |cFFFFFF00*|r"))
+            if frame then row.move:Enable() else row.move:Disable() end
             row:Show()
         end
-
-        f.list:SetHeight(math.max(#keys * ENTRY_H, 10))
-        f.scroll:UpdateScrollChildRect()
-        f.count:SetText("Фреймов: " .. #keys)
+        
+        mainFrame.list:SetHeight(math.max(#keys * ENTRY_H, 10))
+        mainFrame.scroll:UpdateScrollChildRect()
+        mainFrame.count:SetText("Фреймов: " .. #keys .. "   (* — позиция не сохранена)")
     end
 
-    NSQC4.FramesMove_RefreshList = RefreshList
-    NSQC4.FramesMove_ApplyAll = ApplyAllSaved
+    NSQC4.FramesMove_RefreshList = function()
+        if RefreshList then RefreshList() end
+    end
 
     local function CreateMainFrame()
         if mainFrame then return mainFrame end
-
+        
         local f = CreateFrame("Frame", "NSQC4FramesMoveFrame", UIParent)
-        f:SetWidth(500)
-        f:SetHeight(440)
+        f:SetWidth(480)
+        f:SetHeight(420)
         f:SetPoint("CENTER")
         f:SetMovable(true)
         f:EnableMouse(true)
@@ -784,97 +703,89 @@ NSQC4.RegisterModule("ui_frames_move", function()
             tile = true, tileSize = 16, edgeSize = 16,
             insets = { left = 4, right = 4, top = 4, bottom = 4 },
         })
+        
         f:SetScript("OnMouseDown", function(self, button)
             if button == "LeftButton" then self:StartMoving() end
         end)
-        f:SetScript("OnMouseUp", function(self)
-            self:StopMovingOrSizing()
-        end)
+        f:SetScript("OnMouseUp", function(self) self:StopMovingOrSizing() end)
         f:Hide()
-        ownFrames[f] = true
-
+        own[f] = true
+        
         local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-        title:SetPoint("TOP", f, "TOP", 0, -15)
+        title:SetPoint("TOP", 0, -15)
         title:SetText("Перемещение (" .. (UnitName("player") or "?") .. ")")
-
+        
         local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-        closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -5, -5)
+        closeBtn:SetPoint("TOPRIGHT", -5, -5)
         closeBtn:SetScript("OnClick", function() f:Hide() end)
-
+        
         local settingsBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
         settingsBtn:SetWidth(24)
-        settingsBtn:SetHeight(22)
+        settingsBtn:SetHeight(24)
         settingsBtn:SetPoint("RIGHT", closeBtn, "LEFT", -5, 0)
         settingsBtn:SetText("*")
         settingsBtn:SetScript("OnClick", function() NSQC4.FramesMove_OpenSettings() end)
-
+        
         local addBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
         addBtn:SetWidth(150)
         addBtn:SetHeight(22)
-        addBtn:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -45)
+        addBtn:SetPoint("TOPLEFT", 20, -45)
         addBtn:SetText("Добавить фрейм")
         addBtn:SetScript("OnClick", function()
             StartCountdown(function(frame) StartMoveForFrame(frame) end)
         end)
-
+        
         local applyBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
         applyBtn:SetWidth(110)
         applyBtn:SetHeight(22)
         applyBtn:SetPoint("LEFT", addBtn, "RIGHT", 5, 0)
         applyBtn:SetText("Применить")
         applyBtn:SetScript("OnClick", function()
-            local done, total = ApplyAllSaved()
-            Msg(string.format("применено %d из %d.", done, total))
+            Msg("позиции применены, не найдено: " .. ApplyAllSaved())
         end)
-
+        
         local resetBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
         resetBtn:SetWidth(130)
         resetBtn:SetHeight(22)
         resetBtn:SetPoint("LEFT", applyBtn, "RIGHT", 5, 0)
         resetBtn:SetText("Сбросить всё")
         resetBtn:SetScript("OnClick", function() ResetAll() end)
-
-        local count = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        count:SetPoint("TOPLEFT", f, "TOPLEFT", 22, -74)
-        count:SetJustifyH("LEFT")
-        f.count = count
-
+        
+        f.count = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        f.count:SetPoint("TOPLEFT", 20, -74)
+        f.count:SetText("Фреймов: 0")
+        
         local scroll = CreateFrame("ScrollFrame", "NSQC4FramesMoveScroll", f, "UIPanelScrollFrameTemplate")
-        scroll:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -95)
-        scroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -40, 20)
+        scroll:SetPoint("TOPLEFT", 20, -92)
+        scroll:SetPoint("BOTTOMRIGHT", -40, 20)
         scroll:EnableMouseWheel(true)
         scroll:SetScript("OnMouseWheel", ScrollWheel)
-
+        
         local child = CreateFrame("Frame", "NSQC4FramesMoveList", scroll)
         child:SetWidth(LIST_W)
         child:SetHeight(10)
         scroll:SetScrollChild(child)
-
-        f.scroll = scroll
-        f.list = child
+        
+        f.scroll, f.list = scroll, child
         mainFrame = f
-
-        if UISpecialFrames then
-            table.insert(UISpecialFrames, "NSQC4FramesMoveFrame")
-        end
+        
+        if UISpecialFrames then table.insert(UISpecialFrames, "NSQC4FramesMoveFrame") end
         return f
     end
 
     -- ========================================================================
-    -- 13. Настройки
+    -- Настройки
     -- ========================================================================
-    local settingsFrame
-
     function NSQC4.FramesMove_OpenSettings()
         if settingsFrame then
-            settingsFrame.slider:SetValue(db.captureDelay or 5)
-            settingsFrame.label:SetText("Время до захвата: " .. (db.captureDelay or 5) .. " сек")
+            settingsFrame.slider:SetValue(db.captureDelay)
+            settingsFrame.label:SetText("Время до захвата: " .. db.captureDelay .. " сек")
             settingsFrame.check:SetChecked(db.reapplyOnShow and true or false)
             settingsFrame:Raise()
             settingsFrame:Show()
             return
         end
-
+        
         local f = CreateFrame("Frame", "NSQC4FramesMoveSettings", UIParent)
         f:SetWidth(340)
         f:SetHeight(230)
@@ -889,116 +800,88 @@ NSQC4.RegisterModule("ui_frames_move", function()
             tile = true, tileSize = 16, edgeSize = 16,
             insets = { left = 4, right = 4, top = 4, bottom = 4 },
         })
+        
         f:SetScript("OnMouseDown", function(self, button)
             if button == "LeftButton" then self:StartMoving() end
         end)
-        f:SetScript("OnMouseUp", function(self)
-            self:StopMovingOrSizing()
-        end)
-        ownFrames[f] = true
-
+        f:SetScript("OnMouseUp", function(self) self:StopMovingOrSizing() end)
+        own[f] = true
+        
         local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-        title:SetPoint("TOP", f, "TOP", 0, -15)
+        title:SetPoint("TOP", 0, -15)
         title:SetText("Настройки: Перемещение")
-
+        
         local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-        closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -5, -5)
+        closeBtn:SetPoint("TOPRIGHT", -5, -5)
         closeBtn:SetScript("OnClick", function() f:Hide() end)
-
+        
         local lbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        lbl:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -50)
-        lbl:SetText("Время до захвата: " .. (db.captureDelay or 5) .. " сек")
+        lbl:SetPoint("TOPLEFT", 20, -50)
+        lbl:SetText("Время до захвата: " .. db.captureDelay .. " сек")
         f.label = lbl
-
+        
         local slider = CreateFrame("Slider", "NSQC4MoveSettingsSlider", f, "OptionsSliderTemplate")
-        slider:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -80)
-        slider:SetWidth(290)
+        slider:SetPoint("TOPLEFT", 25, -85)
+        slider:SetWidth(280)
         slider:SetHeight(18)
         slider:SetMinMaxValues(3, 15)
         slider:SetValueStep(1)
-        slider:SetValue(db.captureDelay or 5)
+        slider:SetValue(db.captureDelay)
+        
+        local sname = slider:GetName()
+        if _G[sname .. "Text"] then _G[sname .. "Text"]:SetText("Задержка захвата") end
+        if _G[sname .. "Low"] then _G[sname .. "Low"]:SetText("3") end
+        if _G[sname .. "High"] then _G[sname .. "High"]:SetText("15") end
+        
         slider:SetScript("OnValueChanged", function(_, value)
-            value = math.floor(value + 0.5)
-            lbl:SetText("Время до захвата: " .. value .. " сек")
+            lbl:SetText("Время до захвата: " .. math.floor(value) .. " сек")
         end)
         f.slider = slider
-
-        local sname = slider:GetName()
-        if sname then
-            local t = _G[sname .. "Text"]
-            if t then t:SetText("Захват фрейма под мышью") end
-            local lo = _G[sname .. "Low"]
-            if lo then lo:SetText("3") end
-            local hi = _G[sname .. "High"]
-            if hi then hi:SetText("15") end
-        end
-
+        
         local check = CreateFrame("CheckButton", "NSQC4MoveGuardCheck", f, "UICheckButtonTemplate")
         check:SetWidth(24)
         check:SetHeight(24)
-        check:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -120)
+        check:SetPoint("TOPLEFT", 20, -130)
         check:SetChecked(db.reapplyOnShow and true or false)
         check:SetScript("OnClick", function(self)
             db.reapplyOnShow = self:GetChecked() and true or false
-            L("OnShow-возврат: %s", tostring(db.reapplyOnShow))
+            L("reapplyOnShow = %s", tostring(db.reapplyOnShow))
         end)
         f.check = check
-
-        local checkLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        
+        local checkLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         checkLbl:SetPoint("LEFT", check, "RIGHT", 6, 0)
         checkLbl:SetWidth(270)
         checkLbl:SetJustifyH("LEFT")
         checkLbl:SetText("Возвращать позицию при показе фрейма")
-
-        local hint = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        hint:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -152)
-        hint:SetWidth(300)
-        hint:SetJustifyH("LEFT")
-        hint:SetText("Спасает, если аддон сам переставляет свой фрейм.")
-
+        
         local saveBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
         saveBtn:SetWidth(110)
         saveBtn:SetHeight(22)
-        saveBtn:SetPoint("BOTTOM", f, "BOTTOM", 0, 15)
+        saveBtn:SetPoint("BOTTOM", 0, 15)
         saveBtn:SetText("Сохранить")
         saveBtn:SetScript("OnClick", function()
-            db.captureDelay = math.max(3, math.min(15, math.floor(slider:GetValue() + 0.5)))
+            db.captureDelay = math.max(3, math.min(15, math.floor(slider:GetValue())))
             Msg("задержка захвата: " .. db.captureDelay .. " сек")
             f:Hide()
         end)
-
+        
         settingsFrame = f
-        if UISpecialFrames then
-            table.insert(UISpecialFrames, "NSQC4FramesMoveSettings")
-        end
+        
+        if UISpecialFrames then table.insert(UISpecialFrames, "NSQC4FramesMoveSettings") end
         f:Raise()
         f:Show()
     end
 
     -- ========================================================================
-    -- 14. Диспетчер команд
+    -- Диспетчер команд и кнопка на панели
     -- ========================================================================
-    local function PrintHelp()
-        print("|cFF66CCFF[FCMOVE]|r команды:")
-        print("  /nsfcm — окно списка")
-        print("  /nsfcm add — захват фрейма под мышью")
-        print("  /nsfcm move <Имя> — двигать фрейм по имени")
-        print("  /nsfcm stop — выйти из режима перемещения")
-        print("  /nsfcm apply — применить сохранённые позиции")
-        print("  /nsfcm reset [Имя] — сброс одного или всех")
-        print("  /nsfcm clean — удалить записи отсутствующих фреймов")
-        print("  /nsfcm delay <3-15> — задержка захвата")
-        print("  /nsfcm guard on|off — возврат позиции при показе")
-        print("  /nsfcm debug — полный отчёт по геометрии")
-        print("  /nsfcm on|off — лог отладки")
-    end
-
     NSQC4._FramesMoveDispatch = function(msg)
-        local raw = tostring(msg or ""):match("^%s*(.-)%s*$")
-        local cmd, arg = raw:match("^(%S+)%s*(.-)$")
-        cmd = string.lower(cmd or "")
+        local raw = (msg or ""):match("^%s*(.-)%s*$")
+        local cmd, arg = raw:match("^(%S*)%s*(.-)$")
+        cmd = (cmd or ""):lower()
         arg = arg or ""
-
+        
         if cmd == "" then
             local f = CreateMainFrame()
             if f:IsShown() then
@@ -1008,73 +891,41 @@ NSQC4.RegisterModule("ui_frames_move", function()
                 f:Show()
                 RefreshList()
             end
-
-        elseif cmd == "help" or cmd == "?" then
-            PrintHelp()
-
-        elseif cmd == "debug" or cmd == "verify" or cmd == "list" then
-            ReportAll()
-
-        elseif cmd == "on" then
-            debugEnabled = true
-            Msg("отладка включена.")
-
-        elseif cmd == "off" then
-            debugEnabled = false
-            Msg("отладка выключена.")
-
-        elseif cmd == "apply" or cmd == "applynow" then
-            local done, total = ApplyAllSaved()
-            Msg(string.format("применено %d из %d.", done, total))
-
-        elseif cmd == "add" or cmd == "capture" then
+        elseif cmd == "add" then
             StartCountdown(function(frame) StartMoveForFrame(frame) end)
-
+        elseif cmd == "move" then
+            StartMoveForFrame(_G[arg])
         elseif cmd == "stop" then
             StopCountdown()
             StopMoveMode()
-
-        elseif cmd == "move" then
-            if arg == "" then
-                Warn("usage: /nsfcm move <ИмяФрейма>")
-                return
-            end
-            StartMoveForFrame(GetFrameByKey(arg))
-
+        elseif cmd == "apply" or cmd == "applynow" then
+            Msg("позиции применены, не найдено: " .. ApplyAllSaved())
         elseif cmd == "reset" then
-            if arg == "" then
-                ResetAll()
-            elseif db.frames[arg] then
-                ResetFrameByKey(arg)
-            else
-                Warn("нет записи: " .. arg)
-            end
-
-        elseif cmd == "clean" then
-            CleanMissing()
-
+            if arg ~= "" then ResetFrameByKey(arg) else ResetAll() end
         elseif cmd == "delay" then
-            local n = tonumber(arg)
-            if not n then
-                Warn("usage: /nsfcm delay <3-15>")
-                return
-            end
-            db.captureDelay = math.max(3, math.min(15, math.floor(n)))
+            db.captureDelay = math.max(3, math.min(15, math.floor(tonumber(arg) or 5)))
             Msg("задержка захвата: " .. db.captureDelay .. " сек")
-
         elseif cmd == "guard" then
             if arg == "on" then
                 db.reapplyOnShow = true
             elseif arg == "off" then
                 db.reapplyOnShow = false
             else
-                Warn("usage: /nsfcm guard on|off")
-                return
+                db.reapplyOnShow = not db.reapplyOnShow
             end
             Msg("возврат при показе: " .. (db.reapplyOnShow and "вкл" or "выкл"))
-
+        elseif cmd == "debug" or cmd == "verify" or cmd == "list" then
+            ReportAll()
+        elseif cmd == "on" then
+            debugEnabled = true
+            Msg("отладка включена.")
+        elseif cmd == "off" then
+            debugEnabled = false
+            Msg("отладка выключена.")
         else
-            Warn("неизвестная команда: " .. cmd .. " (см. /nsfcm help)")
+            print(LOG_PREFIX .. "/nsfcm — окно, add — захват мышью")
+            print(LOG_PREFIX .. "move <Имя> | stop | apply | reset [Имя]")
+            print(LOG_PREFIX .. "delay <3-15> | guard on/off | debug | on/off")
         end
     end
 
@@ -1085,33 +936,39 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- 15. Восстановление при входе, после боя и при смене масштаба
+    -- Восстановление при входе + смена масштаба/разрешения
     -- ========================================================================
     local restoreFrame = CreateFrame("Frame")
     restoreFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     restoreFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-    restoreFrame:SetScript("OnEvent", function(self, event)
-        if event == "PLAYER_REGEN_ENABLED" then
-            RetryPending()
-        else
+    
+    restoreFrame:SetScript("OnEvent", function(_, event)
+        if event == "PLAYER_ENTERING_WORLD" then
             ScheduleRestore()
+        else
+            RetryPending()
         end
     end)
-
+    
+    -- Простой мониторинг смены разрешения/масштаба
     local watchAcc, lastScale, lastW, lastH = 0, nil, nil, nil
-    restoreFrame:SetScript("OnUpdate", function(self, elapsed)
+    restoreFrame:SetScript("OnUpdate", function(_, elapsed)
         watchAcc = watchAcc + elapsed
         if watchAcc < 0.5 then return end
         watchAcc = 0
-
-        local scale = UIParent:GetEffectiveScale() or 0
-        local w, h = GetScreenWidth() or 0, GetScreenHeight() or 0
+        
+        local scale = UIParent:GetEffectiveScale()
+        local w, h = GetScreenWidth(), GetScreenHeight()
+        
         if lastScale and (math.abs(scale - lastScale) > 0.0001 or w ~= lastW or h ~= lastH) then
-            L("смена масштаба/разрешения: переприменяю позиции")
+            L("смена масштаба/разрешения, применяю позиции")
             After(0.2, ApplyAllSaved)
         end
+        
         lastScale, lastW, lastH = scale, w, h
     end)
+    
+    ScheduleRestore()
 
     NSQC4.SetModuleMeta("ui_frames_move", {
         label   = "Перемещение",
