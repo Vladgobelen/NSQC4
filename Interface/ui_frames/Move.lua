@@ -201,48 +201,44 @@ NSQC4.RegisterModule("ui_frames_move", function()
     local function CaptureGeometry(frame)
         if not frame then return nil end
         local g = { points = {} }
-        local n = frame.GetNumPoints and frame:GetNumPoints() or 0
-        for i = 1, n do
-            local p, relTo, rp, x, y = frame:GetPoint(i)
-            if p then
-                local relToName = (relTo and relTo.GetName and relTo:GetName()) or nil
-                local relToKey  = relTo and GetObjectKey(relTo) or nil
-                local relToType = (relTo and relTo.GetObjectType and relTo:GetObjectType()) or nil
-                if IsProtectedFrame(relTo) then
-                    relToKey = nil
-                    relToName = "UIParent"
-                    relToType = "Frame"
-                end
-                table.insert(g.points, {
-                    point      = p,
-                    relToName  = relToName,
-                    relToKey   = relToKey,
-                    relToType  = relToType,
-                    relPoint   = rp or "CENTER",
-                    x          = x or 0,
-                    y          = y or 0,
-                })
-            end
+        
+        -- Получаем абсолютную позицию на экране
+        local left = frame:GetLeft()
+        local top = frame:GetTop()
+        local width = frame:GetWidth()
+        local height = frame:GetHeight()
+        
+        -- Пересчитываем в координаты от TOPLEFT UIParent
+        local uiLeft = UIParent:GetLeft()
+        local uiTop = UIParent:GetTop()
+        
+        local absX = 0
+        local absY = 0
+        
+        if left and top and uiLeft and uiTop then
+            absX = left - uiLeft
+            absY = top - uiTop
         end
-        local first = g.points[1]
-        if first then
-            g.point     = first.point
-            g.relToName = first.relToName
-            g.relToKey  = first.relToKey
-            g.relPoint  = first.relPoint
-            g.x         = first.x
-            g.y         = first.y
-        end
-        g.width  = frame.GetWidth  and math.floor(frame:GetWidth()  + 0.5) or nil
-        g.height = frame.GetHeight and math.floor(frame:GetHeight() + 0.5) or nil
+        
+        -- Если фрейм не отображается на экране, берем сохраненные данные
+        -- Но для этого метода мы сохраняем только абсолютные координаты от UIParent
+        table.insert(g.points, {
+            point = "TOPLEFT",
+            relToKey = "UIParent",
+            relToName = "UIParent",
+            relToType = "Frame",
+            relPoint = "TOPLEFT",
+            x = absX,
+            y = absY,
+        })
+
+        g.width  = frame.GetWidth  and math.floor(width  + 0.5) or nil
+        g.height = frame.GetHeight and math.floor(height + 0.5) or nil
         g.scale  = frame.GetScale  and frame:GetScale()
-        L("CAPTURE %s -> %d point(s), size=%sx%s scale=%s",
-            NameOf(frame), #g.points, tostring(g.width), tostring(g.height), tostring(g.scale))
-        for i, pt in ipairs(g.points) do
-            L("  pt[%d] %s -> name=%s key=%s.%s (%.1f, %.1f)",
-                i, pt.point, tostring(pt.relToName), tostring(pt.relToKey),
-                tostring(pt.relPoint), pt.x, pt.y)
-        end
+        
+        L("CAPTURE %s -> absolute TOPLEFT UIParent (%f, %f), size=%sx%s",
+            NameOf(frame), absX, absY, tostring(g.width), tostring(g.height))
+            
         return g
     end
 
@@ -308,66 +304,44 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     local function ApplyGeometry(frame, g, ctx)
-        if not frame or not g then
-            L("APPLY[%s] frame/g nil (frame=%s g=%s)",
-                tostring(ctx), tostring(frame ~= nil), tostring(g ~= nil))
+        if not frame or not g then return false end
+        
+        L("APPLY[%s] START for %s", tostring(ctx), NameOf(frame))
+        
+        -- Защита от боя: если в бою, двигаем только безопасные фреймы
+        if InCombatLockdown() and frame.IsProtected and frame:IsProtected() then
+            L("  !! abort: protected frame in combat")
             return false
         end
-        L("APPLY[%s] START for %s", tostring(ctx), NameOf(frame))
 
-        -- Проверяем, что все relTo резолвятся, ДО того как что-то менять.
-        local resolved = {}
-        for i, pt in ipairs(g.points or {}) do
-            local relTo = ResolveRelTo(pt)
-            if not relTo then
-                L("  !! abort: point[%d] relTo unresolved (key=%s name=%s)",
-                    i, tostring(pt.relToKey), tostring(pt.relToName))
-                return false
-            end
-            resolved[i] = relTo
+        local wasMovable = frame.IsMovable and frame:IsMovable()
+        if frame.SetMovable and not InCombatLockdown() then 
+            frame:SetMovable(true) 
         end
 
-        -- Для защищённых фреймов SetPoint вне боя обязателен.
-        local wasMovable = frame.IsMovable and frame:IsMovable()
-        if not InCombatLockdown() then
-            if frame.SetMovable then frame:SetMovable(true) end
-
-            if g.points and #g.points > 0 and frame.ClearAllPoints and frame.SetPoint then
-                frame:ClearAllPoints()
-                for i, pt in ipairs(g.points) do
-                    local relTo = resolved[i]
+        if g.points and #g.points > 0 and frame.ClearAllPoints and frame.SetPoint then
+            frame:ClearAllPoints()
+            for i, pt in ipairs(g.points) do
+                local relTo = _G[pt.relToName] or UIParent -- fallback
+                if pt.relToKey == "UIParent" then relTo = UIParent end
+                
+                if relTo then
                     frame:SetPoint(pt.point, relTo, pt.relPoint, pt.x, pt.y)
-                    L("  SetPoint[%d] %s -> %s.%s (%.1f, %.1f)",
-                        i, pt.point, NameOf(relTo), pt.relPoint, pt.x, pt.y)
-                end
-            elseif g.point and frame.ClearAllPoints and frame.SetPoint then
-                local relTo = resolved[1] or UIParent
-                frame:ClearAllPoints()
-                frame:SetPoint(g.point, relTo, g.relPoint, g.x, g.y)
-                L("  SetPoint (legacy) %s -> %s.%s (%.1f, %.1f)",
-                    g.point, NameOf(relTo), g.relPoint, g.x, g.y)
-            end
-
-            if g.width and g.height and frame.SetSize then
-                frame:SetSize(g.width, g.height)
-            end
-
-            if g.scale and frame.SetScale and frame:GetScale() ~= g.scale then
-                frame:SetScale(g.scale)
-            end
-
-            if frame.SetMovable and wasMovable ~= nil then
-                frame:SetMovable(wasMovable)
-            end
-        else
-            L("  !! in combat, applying only position (size/scale/movable skipped)")
-            if g.points and #g.points > 0 and frame.ClearAllPoints and frame.SetPoint then
-                frame:ClearAllPoints()
-                for i, pt in ipairs(g.points) do
-                    local relTo = resolved[i]
-                    frame:SetPoint(pt.point, relTo, pt.relPoint, pt.x, pt.y)
+                    L("  SetPoint[%d] %s -> %s.%s (%.1f, %.1f)", i, pt.point, NameOf(relTo), pt.relPoint, pt.x, pt.y)
                 end
             end
+        end
+
+        if g.width and g.height and frame.SetSize then
+            frame:SetSize(g.width, g.height)
+        end
+
+        if g.scale and frame.SetScale and frame:GetScale() ~= g.scale then
+            frame:SetScale(g.scale)
+        end
+
+        if frame.SetMovable and wasMovable ~= nil and not InCombatLockdown() then
+            frame:SetMovable(wasMovable)
         end
 
         L("APPLY[%s] DONE", tostring(ctx))
