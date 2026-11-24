@@ -5,6 +5,13 @@
 -- БЕЗ ЛЮБЫХ РАСЧЁТОВ. Сохраняем сырой GetPoint(i) как есть.
 -- Применяем сырой SetPoint(point, relativeTo, relativePoint, x, y) как есть.
 -- relativeTo сохраняем по имени, если есть имя; иначе UIParent (фолбэк).
+--
+-- Сброс ("X" в строке и "Сбросить всё"):
+--   1) применяем дефолтный снимок (если он есть),
+--   2) удаляем запись из db.frames,
+--   3) для protected-фреймов зовём штатные Blizzard-функции
+--      (MainMenuBar_UpdatePosition / PetActionBar_Update / MultiActionBar_Update),
+--      чтобы панель встала туда, куда её ставит сам клиент.
 -- ============================================================================
 SLASH_NS_FCMOVE1 = "/ns_fcmove"
 SLASH_NS_FCMOVE2 = "/nsfcm"
@@ -113,6 +120,25 @@ NSQC4.RegisterModule("ui_frames_move", function()
     local function EnsureAllDefaults()
         for key in pairs(db.frames) do
             EnsureDefault(key)
+        end
+    end
+
+    -- ========================================================================
+    -- Штатные Blizzard-функции возврата protected-фреймов.
+    -- Вызываем только если они есть; ничего не считаем сами.
+    -- ========================================================================
+    local function CallBlizzardReset(frameName)
+        if frameName == "MainMenuBar" then
+            if type(MainMenuBar_UpdatePosition) == "function" then
+                MainMenuBar_UpdatePosition()
+            end
+            if type(MultiActionBar_Update) == "function" then
+                MultiActionBar_Update()
+            end
+        elseif frameName == "PetActionBarFrame" then
+            if type(PetActionBar_Update) == "function" then
+                PetActionBar_Update()
+            end
         end
     end
 
@@ -378,10 +404,15 @@ NSQC4.RegisterModule("ui_frames_move", function()
         return true
     end
 
+    -- Сброс одного фрейма:
+    --   1) применить дефолтный снимок (если есть),
+    --   2) удалить запись из db.frames,
+    --   3) для protected-фреймов вызвать штатные Blizzard-функции.
     local function ResetFrameByKey(key)
         local restored = ApplyDefaultByKey(key)
         db.frames[key] = nil
         pending[key] = nil
+        CallBlizzardReset(key)
         if RefreshList then RefreshList() end
         if restored then
             Msg("сброшено: " .. key)
@@ -390,11 +421,15 @@ NSQC4.RegisterModule("ui_frames_move", function()
         end
     end
 
+    -- Сброс всего: то же для каждого ключа + очистка списка.
     local function ResetAll()
         local keys = SortedKeys()
         local restored = 0
         for _, key in ipairs(keys) do
             if ApplyDefaultByKey(key) then restored = restored + 1 end
+        end
+        for _, key in ipairs(keys) do
+            CallBlizzardReset(key)
         end
         for k in pairs(db.frames) do db.frames[k] = nil end
         for k in pairs(pending) do pending[k] = nil end
@@ -663,8 +698,8 @@ NSQC4.RegisterModule("ui_frames_move", function()
         end)
         xBtn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText("Сбросить фрейм")
-            GameTooltip:AddLine("Возвращает фрейм в дефолтную привязку и удаляет строку из списка.", 1, 1, 1, true)
+            GameTooltip:SetText("Сбросить позицию")
+            GameTooltip:AddLine("Возвращает фрейм в дефолтную привязку, удаляет запись и зовёт штатный Blizzard-сброс для protected-фреймов.", 1, 1, 1, true)
             GameTooltip:Show()
         end)
         xBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -818,7 +853,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
         resetBtn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:SetText("Сбросить всё")
-            GameTooltip:AddLine("Возвращает все фреймы в дефолтные привязки и полностью очищает список.", 1, 1, 1, true)
+            GameTooltip:AddLine("Возвращает все фреймы в дефолтные привязки, удаляет записи и зовёт штатный Blizzard-сброс для protected-фреймов.", 1, 1, 1, true)
             GameTooltip:Show()
         end)
         resetBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
