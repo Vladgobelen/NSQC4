@@ -2,7 +2,8 @@
 -- NSQC4 / Interface / ui_frames / Move
 -- Перемещение фреймов. Модуль "ui_frames_move".
 -- Клиент: WoW 3.3.5a (12340). Без C_Timer и retail-API.
--- Сохранение/восстановление: GetPoint(1) -> SetPoint, без вычислений.
+-- Принудительная привязка всех сохранённых/применяемых точек к UIParent.
+-- Сохраняем/применяем ВСЕ точки фрейма (GetNumPoints / GetPoint(i)).
 -- ============================================================================
 SLASH_NS_FCMOVE1 = "/ns_fcmove"
 SLASH_NS_FCMOVE2 = "/nsfcm"
@@ -46,7 +47,69 @@ NSQC4.RegisterModule("ui_frames_move", function()
     local function Warn(text) print("|cFFFFFF00NSQC4:|r " .. text) end
 
     -- ========================================================================
-    -- Фиксация дефолтной привязки (до любых наших SetPoint)
+    -- Работа с точками привязки.
+    -- ВСЕГДА relativeTo = UIParent. Всегда сохраняем ВСЕ точки.
+    -- Координаты точки берём через GetPoint(i): x,y уже в системе родителя
+    -- (UIParent), поэтому при принудительной привязке к UIParent значения
+    -- корректны, если relativeTo исходно был UIParent. Для прочих родителей
+    -- пересчитываем через эффективный масштаб, чтобы SetPoint к UIParent дал
+    -- ту же экранную позицию.
+    -- ========================================================================
+    local function CapturePoints(frame)
+        local n = frame.GetNumPoints and frame:GetNumPoints() or 0
+        if n <= 0 then return nil end
+
+        local frameScale = frame:GetEffectiveScale() or 1
+        local uiScale    = UIParent:GetEffectiveScale() or 1
+        local ratio      = frameScale / uiScale
+
+        local pts = {}
+        for i = 1, n do
+            local point, relativeTo, relativePoint, x, y = frame:GetPoint(i)
+            if not point then return nil end
+            relativeTo = relativeTo or UIParent
+            x = x or 0
+            y = y or 0
+
+            local nx, ny = x, y
+            if relativeTo ~= UIParent then
+                -- Приводим смещение к системе UIParent.
+                nx = x * ratio
+                ny = y * ratio
+            end
+
+            pts[#pts + 1] = {
+                point         = point,
+                relativePoint = relativePoint,
+                x             = nx,
+                y             = ny,
+            }
+        end
+        return pts
+    end
+
+    local function ApplyPoints(frame, pts)
+        if not frame or not pts or #pts == 0 then return false end
+        frame:ClearAllPoints()
+        for _, p in ipairs(pts) do
+            frame:SetPoint(p.point, UIParent, p.relativePoint, p.x, p.y)
+        end
+        return true
+    end
+
+    local function FormatPoints(pts)
+        if not pts or #pts == 0 then return "нет данных" end
+        local parts = {}
+        for _, p in ipairs(pts) do
+            parts[#parts + 1] = string.format("%s -> UIParent.%s ofs(%.1f, %.1f)",
+                tostring(p.point), tostring(p.relativePoint), p.x or 0, p.y or 0)
+        end
+        return table.concat(parts, "; ")
+    end
+
+    -- ========================================================================
+    -- Фиксация дефолтной привязки (до любых наших SetPoint).
+    -- Дефолт фиксируется один раз и больше не перезаписывается.
     -- ========================================================================
     local function EnsureDefault(frameName)
         local frame = _G[frameName]
@@ -56,22 +119,13 @@ NSQC4.RegisterModule("ui_frames_move", function()
             data = {}
             db.frames[frameName] = data
         end
-        if data.defaultPoint then return end
-        local point, relativeTo, relativePoint, x, y = frame:GetPoint(1)
-        if not point then return end
-        relativeTo = relativeTo or UIParent
-        local relName = (relativeTo.GetName and relativeTo:GetName()) or nil
-        data.defaultPoint         = point
-        data.defaultRelativeTo    = relName
-        data.defaultRelativePoint = relativePoint
-        data.defaultX             = x
-        data.defaultY             = y
-        L("дефолт зафиксирован для %s: %s -> %s.%s ofs(%.1f, %.1f)",
-            frameName, tostring(point), tostring(relName or "UIParent"),
-            tostring(relativePoint), x or 0, y or 0)
+        if data.defaultPoints then return end
+        local pts = CapturePoints(frame)
+        if not pts then return end
+        data.defaultPoints = pts
+        L("дефолт зафиксирован для %s: %s", frameName, FormatPoints(pts))
     end
 
-    -- Фиксируем дефолт у всех известных фреймов, которые сейчас в игре
     local function EnsureAllDefaults()
         for key in pairs(db.frames) do
             EnsureDefault(key)
@@ -79,7 +133,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
     end
 
     -- ========================================================================
-    -- Сохранение / применение (без вычислений)
+    -- Сохранение / применение
     -- ========================================================================
     function NSQC4.MoveSave(frameName)
         if not frameName or frameName == "" then
@@ -92,28 +146,20 @@ NSQC4.RegisterModule("ui_frames_move", function()
             return false
         end
 
-        -- Дефолт фиксируем ДО того, как что-либо меняем.
         EnsureDefault(frameName)
 
-        local point, relativeTo, relativePoint, x, y = frame:GetPoint(1)
-        if not point then
+        local pts = CapturePoints(frame)
+        if not pts then
             print("|cFFFF0000[FCMOVE]|r у фрейма нет точки привязки")
             return false
         end
-        relativeTo = relativeTo or UIParent
-        local relName = (relativeTo.GetName and relativeTo:GetName()) or nil
 
         local data = db.frames[frameName]
-        data.point         = point
-        data.relativeTo    = relName
-        data.relativePoint = relativePoint
-        data.x             = x
-        data.y             = y
+        data.points = pts
+        data.point, data.relativePoint = pts[1].point, pts[1].relativePoint
+        data.x, data.y = pts[1].x, pts[1].y
 
-        print("|cFF00FF00[FCMOVE]|r сохранено " .. frameName ..
-              ": " .. tostring(point) ..
-              " -> " .. tostring(relName or "UIParent") .. ":" .. tostring(relativePoint) ..
-              " (" .. tostring(x) .. ", " .. tostring(y) .. ")")
+        print("|cFF00FF00[FCMOVE]|r сохранено " .. frameName .. ": " .. FormatPoints(pts))
         return true
     end
 
@@ -128,36 +174,24 @@ NSQC4.RegisterModule("ui_frames_move", function()
             return false
         end
 
-        -- До применения сохранёнки фиксируем дефолт, если его ещё нет.
         EnsureDefault(frameName)
 
         local saved = db.frames and db.frames[frameName]
-        if not saved or not saved.point then
+        if not saved or not saved.points or #saved.points == 0 then
             print("|cFFFF0000[FCMOVE]|r нет данных для '" .. frameName .. "'")
             return false
         end
 
-        local rel = (saved.relativeTo and _G[saved.relativeTo]) or UIParent
-
-        frame:ClearAllPoints()
-        frame:SetPoint(saved.point, rel, saved.relativePoint, saved.x, saved.y)
-
-        print("|cFF00FF00[FCMOVE]|r применено " .. frameName ..
-              ": " .. tostring(saved.point) ..
-              " -> " .. tostring(saved.relativeTo or "UIParent") .. ":" .. tostring(saved.relativePoint) ..
-              " (" .. tostring(saved.x) .. ", " .. tostring(saved.y) .. ")")
+        ApplyPoints(frame, saved.points)
+        print("|cFF00FF00[FCMOVE]|r применено " .. frameName .. ": " .. FormatPoints(saved.points))
         return true
     end
 
-    -- Применить дефолтную привязку к фрейму (той же SetPoint-операцией).
     local function ApplyDefaultByKey(frameName)
         local frame = _G[frameName]
         local data = db.frames and db.frames[frameName]
-        if not frame or not data or not data.defaultPoint then return false end
-        local rel = (data.defaultRelativeTo and _G[data.defaultRelativeTo]) or UIParent
-        frame:ClearAllPoints()
-        frame:SetPoint(data.defaultPoint, rel, data.defaultRelativePoint, data.defaultX, data.defaultY)
-        return true
+        if not frame or not data or not data.defaultPoints then return false end
+        return ApplyPoints(frame, data.defaultPoints)
     end
 
     -- ========================================================================
@@ -258,9 +292,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
         return keys
     end
 
-    -- ========================================================================
-    -- Геометрия: только для отладочного вывода
-    -- ========================================================================
     local function CaptureGeometry(frame)
         if not frame then return nil end
         local left = frame:GetLeft()
@@ -281,20 +312,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
             g.x or 0, g.y or 0, g.width or 0, g.height or 0, g.scale or 1)
     end
 
-    local function FormatSaved(s)
-        if not s or not s.point then return "нет данных" end
-        return string.format("%s -> %s.%s ofs(%.1f, %.1f)",
-            tostring(s.point), tostring(s.relativeTo or "UIParent"),
-            tostring(s.relativePoint), s.x or 0, s.y or 0)
-    end
-
-    local function FormatDefault(s)
-        if not s or not s.defaultPoint then return "нет данных" end
-        return string.format("%s -> %s.%s ofs(%.1f, %.1f)",
-            tostring(s.defaultPoint), tostring(s.defaultRelativeTo or "UIParent"),
-            tostring(s.defaultRelativePoint), s.defaultX or 0, s.defaultY or 0)
-    end
-
     -- ========================================================================
     -- Применение / ожидание / возврат при показе
     -- ========================================================================
@@ -308,14 +325,14 @@ NSQC4.RegisterModule("ui_frames_move", function()
             if not db.reapplyOnShow then return end
             if self == moveTarget then return end
             local data = db.frames[key]
-            if not data or not data.point then return end
+            if not data or not data.points then return end
             NSQC4.MoveApply(key)
         end)
     end
 
     local function ApplyPositionByKey(key)
         local data = db.frames[key]
-        if not data or not data.point then return true end
+        if not data or not data.points then return true end
         if moveKey and key == moveKey then return true end
         local frame = GetFrameByKey(key)
         if not frame then return false end
@@ -379,7 +396,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
         return true
     end
 
-    -- Сброс одного фрейма: применить дефолт и удалить запись целиком.
     local function ResetFrameByKey(key)
         local restored = ApplyDefaultByKey(key)
         db.frames[key] = nil
@@ -392,7 +408,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
         end
     end
 
-    -- Сброс всего: применить дефолты ко всем и очистить список.
     local function ResetAll()
         local keys = SortedKeys()
         local restored = 0
@@ -420,16 +435,12 @@ NSQC4.RegisterModule("ui_frames_move", function()
             local data = db.frames[key]
             print(LOG_PREFIX .. "|cFFFFFFFF" .. key .. "|r" .. (frame and "" or " |cFFFF6060(нет в игре)|r"))
             if frame then
-                local cur = CaptureGeometry(frame)
-                local numPts = frame.GetNumPoints and frame:GetNumPoints() or 0
-                local pt, rt, rp, xo, yo = numPts > 0 and frame:GetPoint(1) or nil
-                print(LOG_PREFIX .. "  сейчас:    " .. FormatGeometry(cur))
-                print(LOG_PREFIX .. string.format("  привязка: %d точек, %s -> %s.%s ofs(%.1f, %.1f)",
-                    numPts, tostring(pt), NameOf(rt), tostring(rp), xo or 0, yo or 0))
+                print(LOG_PREFIX .. "  сейчас:    " .. FormatGeometry(CaptureGeometry(frame)))
+                print(LOG_PREFIX .. "  привязки: " .. FormatPoints(CapturePoints(frame)))
                 print(LOG_PREFIX .. string.format("  eff=%.2f", frame:GetEffectiveScale() or 0))
             end
-            print(LOG_PREFIX .. "  сохранено: " .. FormatSaved(data))
-            print(LOG_PREFIX .. "  исходное:  " .. FormatDefault(data))
+            print(LOG_PREFIX .. "  сохранено: " .. FormatPoints(data and data.points))
+            print(LOG_PREFIX .. "  исходное:  " .. FormatPoints(data and data.defaultPoints))
         end
         local left = 0
         for _ in pairs(pending) do left = left + 1 end
@@ -458,7 +469,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
         local target, key = moveTarget, moveKey
         if target then
             target:StopMovingOrSizing()
-            if key and db.frames[key] and db.frames[key].point then
+            if key and db.frames[key] and db.frames[key].points then
                 NSQC4.MoveApply(key)
             else
                 ApplyDefaultByKey(key)
@@ -528,7 +539,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
         end
         StopMoveMode(true)
 
-        -- До включения режима фиксируем дефолт, если его ещё нет.
         EnsureDefault(key)
 
         if not db.frames[key] then db.frames[key] = {} end
@@ -717,12 +727,16 @@ NSQC4.RegisterModule("ui_frames_move", function()
             self.name:SetTextColor(1, 1, 0)
             local key = self.key
             local data = key and db.frames[key]
+            local fr = GetFrameByKey(key)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:SetText("Объект: " .. tostring(key), 1, 1, 1)
-            GameTooltip:AddLine("Сейчас: " .. FormatGeometry(CaptureGeometry(GetFrameByKey(key))), 1, 1, 1)
+            GameTooltip:AddLine("Сейчас: " .. FormatGeometry(CaptureGeometry(fr)), 1, 1, 1)
+            if fr then
+                GameTooltip:AddLine("Привязки: " .. FormatPoints(CapturePoints(fr)), 0.7, 1, 0.7)
+            end
             if data then
-                GameTooltip:AddLine("Сохранено: " .. FormatSaved(data), 0, 1, 0)
-                GameTooltip:AddLine("Исходное: " .. FormatDefault(data), 0.7, 0.7, 1)
+                GameTooltip:AddLine("Сохранено: " .. FormatPoints(data.points), 0, 1, 0)
+                GameTooltip:AddLine("Исходное: " .. FormatPoints(data.defaultPoints), 0.7, 0.7, 1)
             end
             GameTooltip:Show()
         end)
@@ -744,7 +758,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
             local data = db.frames[key]
             row.key = key
             row.name:SetText((frame and "|cFFFFFFFF" or "|cFFFF6060") .. key .. "|r"
-                .. ((data and data.point) and "" or " |cFFFFFF00*|r"))
+                .. ((data and data.points) and "" or " |cFFFFFF00*|r"))
             if frame then row.move:Enable() else row.move:Disable() end
             row:Show()
         end
