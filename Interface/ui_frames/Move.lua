@@ -6,9 +6,9 @@
 -- Применяем сырой SetPoint(point, relativeTo, relativePoint, x, y) как есть.
 -- relativeTo сохраняем по имени, если есть имя; иначе UIParent (фолбэк).
 --
--- ВАЖНО: на OnShow фрейма применяем сохранённую позицию ПОВТОРНО
--- (несколько раз с задержкой), чтобы перебить Blizzard/Bartender,
--- которые до-привязывают фрейм ПОСЛЕ OnShow.
+-- На OnShow фрейма применяем сохранённую позицию ПОВТОРНО несколько раз
+-- с задержкой, чтобы перебить Blizzard/Bartender, которые до-привязывают
+-- фрейм ПОСЛЕ OnShow.
 -- ============================================================================
 SLASH_NS_FCMOVE1 = "/ns_fcmove"
 SLASH_NS_FCMOVE2 = "/nsfcm"
@@ -35,18 +35,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
     db.frames = db.frames or {}
     db.captureDelay = tonumber(db.captureDelay) or 5
     if db.reapplyOnShow == nil then db.reapplyOnShow = true end
-
-    local debugEnabled = false
-    local LOG_PREFIX = "|cFF66CCFF[FCMOVE]|r "
-
-    local function L(fmt, ...)
-        if not debugEnabled then return end
-        if select("#", ...) > 0 then
-            print(LOG_PREFIX .. string.format(fmt, ...))
-        else
-            print(LOG_PREFIX .. tostring(fmt))
-        end
-    end
 
     local function Msg(text) print("|cFF00FF00NSQC4:|r " .. text) end
     local function Warn(text) print("|cFFFFFF00NSQC4:|r " .. text) end
@@ -111,7 +99,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
         local pts = CapturePoints(frame)
         if not pts then return end
         data.defaultPoints = pts
-        L("дефолт зафиксирован для %s: %s", frameName, FormatPoints(pts))
     end
 
     local function EnsureAllDefaults()
@@ -141,12 +128,12 @@ NSQC4.RegisterModule("ui_frames_move", function()
     -- ========================================================================
     function NSQC4.MoveSave(frameName)
         if not frameName or frameName == "" then
-            print("|cFFFF0000[FCMOVE]|r укажи имя фрейма")
+            Warn("укажи имя фрейма")
             return false
         end
         local frame = _G[frameName]
         if not frame then
-            print("|cFFFF0000[FCMOVE]|r фрейм '" .. frameName .. "' не найден")
+            Warn("фрейм '" .. frameName .. "' не найден")
             return false
         end
 
@@ -154,25 +141,25 @@ NSQC4.RegisterModule("ui_frames_move", function()
 
         local pts = CapturePoints(frame)
         if not pts then
-            print("|cFFFF0000[FCMOVE]|r у фрейма нет точки привязки")
+            Warn("у фрейма нет точки привязки")
             return false
         end
 
         local data = db.frames[frameName]
         data.points = pts
 
-        print("|cFF00FF00[FCMOVE]|r сохранено " .. frameName .. ": " .. FormatPoints(pts))
+        Msg("сохранено " .. frameName .. ": " .. FormatPoints(pts))
         return true
     end
 
     function NSQC4.MoveApply(frameName)
         if not frameName or frameName == "" then
-            print("|cFFFF0000[FCMOVE]|r укажи имя фрейма")
+            Warn("укажи имя фрейма")
             return false
         end
         local frame = _G[frameName]
         if not frame then
-            print("|cFFFF0000[FCMOVE]|r фрейм '" .. frameName .. "' не найден")
+            Warn("фрейм '" .. frameName .. "' не найден")
             return false
         end
 
@@ -180,12 +167,11 @@ NSQC4.RegisterModule("ui_frames_move", function()
 
         local saved = db.frames and db.frames[frameName]
         if not saved or not saved.points or #saved.points == 0 then
-            print("|cFFFF0000[FCMOVE]|r нет данных для '" .. frameName .. "'")
+            Warn("нет данных для '" .. frameName .. "'")
             return false
         end
 
         ApplyPoints(frame, saved.points)
-        print("|cFF00FF00[FCMOVE]|r применено " .. frameName .. ": " .. FormatPoints(saved.points))
         return true
     end
 
@@ -295,36 +281,12 @@ NSQC4.RegisterModule("ui_frames_move", function()
         return keys
     end
 
-    local function CaptureGeometry(frame)
-        if not frame then return nil end
-        local left = frame:GetLeft()
-        local bottom = frame:GetBottom()
-        if not left or not bottom then return nil end
-        return {
-            x = left,
-            y = bottom,
-            width = frame:GetWidth(),
-            height = frame:GetHeight(),
-            scale = frame:GetScale(),
-        }
-    end
-
-    local function FormatGeometry(g)
-        if not g then return "нет данных" end
-        return string.format("pos(%.1f, %.1f) size=%.0fx%.0f scale=%.2f",
-            g.x or 0, g.y or 0, g.width or 0, g.height or 0, g.scale or 1)
-    end
-
     -- ========================================================================
     -- Применение / ожидание / возврат при показе
     -- ========================================================================
     local pending = {}
     local hooked = {}
 
-    -- ВАЖНО: на OnShow применяем позицию ПОВТОРНО несколько раз,
-    -- чтобы перебить Blizzard/Bartender, которые до-привязывают фрейм
-    -- ПОСЛЕ OnShow (например, PetActionBarFrame получает
-    -- TOPLEFT -> MainMenuBar.BOTTOMLEFT после показа).
     local function HookOnShow(frame, key)
         if not frame or hooked[frame] or not frame.HookScript then return end
         hooked[frame] = true
@@ -334,14 +296,11 @@ NSQC4.RegisterModule("ui_frames_move", function()
             local data = db.frames[key]
             if not data or not data.points then return end
 
-            -- Немедленно
             ApplyPositionByKey(key)
-            -- Повторно, чтобы перебить Blizzard, который ставит свои точки
-            -- сразу после OnShow.
-            After(0,    function() ApplyPositionByKey(key) end)
-            After(0.1,  function() ApplyPositionByKey(key) end)
-            After(0.5,  function() ApplyPositionByKey(key) end)
-            After(1.0,  function() ApplyPositionByKey(key) end)
+            After(0,   function() ApplyPositionByKey(key) end)
+            After(0.1, function() ApplyPositionByKey(key) end)
+            After(0.5, function() ApplyPositionByKey(key) end)
+            After(1.0, function() ApplyPositionByKey(key) end)
         end)
     end
 
@@ -352,7 +311,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
         local frame = GetFrameByKey(key)
         if not frame then return false end
         if InCombatLockdown() and frame.IsProtected and frame:IsProtected() then
-            L("бой: отложено применение %s", NameOf(frame))
             return false
         end
         local ok = NSQC4.MoveApply(key)
@@ -369,7 +327,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
                 left = left + 1
             end
         end
-        L("применение: осталось %d", left)
         return left
     end
 
@@ -437,34 +394,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
         for k in pairs(pending) do pending[k] = nil end
         if RefreshList then RefreshList() end
         Msg("сброшено фреймов: " .. restored .. " из " .. #keys .. ", список очищен")
-    end
-
-    -- ========================================================================
-    -- ОТЛАДКА
-    -- ========================================================================
-    local function ReportAll()
-        local keys = SortedKeys()
-        print(LOG_PREFIX .. "===== ОТЧЁТ: " .. #keys .. " фреймов =====")
-        print(LOG_PREFIX .. string.format("экран %.0fx%.0f, UIParent scale %.3f",
-            GetScreenWidth() or 0, GetScreenHeight() or 0, UIParent:GetEffectiveScale() or 0))
-        print(LOG_PREFIX .. string.format("задержка %d c, возврат при показе: %s, лог: %s",
-            db.captureDelay or 5, tostring(db.reapplyOnShow), tostring(debugEnabled)))
-        for _, key in ipairs(keys) do
-            local frame = GetFrameByKey(key)
-            local data = db.frames[key]
-            print(LOG_PREFIX .. "|cFFFFFFFF" .. key .. "|r" .. (frame and "" or " |cFFFF6060(нет в игре)|r"))
-            if frame then
-                print(LOG_PREFIX .. "  сейчас:    " .. FormatGeometry(CaptureGeometry(frame)))
-                print(LOG_PREFIX .. "  привязки: " .. FormatPoints(CapturePoints(frame)))
-                print(LOG_PREFIX .. string.format("  eff=%.2f", frame:GetEffectiveScale() or 0))
-            end
-            print(LOG_PREFIX .. "  сохранено: " .. FormatPoints(data and data.points))
-            print(LOG_PREFIX .. "  исходное:  " .. FormatPoints(data and data.defaultPoints))
-        end
-        local left = 0
-        for _ in pairs(pending) do left = left + 1 end
-        print(LOG_PREFIX .. "не применено: " .. left)
-        print(LOG_PREFIX .. "===== КОНЕЦ =====")
     end
 
     -- ========================================================================
@@ -701,7 +630,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
         xBtn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:SetText("Сбросить позицию")
-            GameTooltip:AddLine("Возвращает фрейм в дефолтную привязку, удаляет запись и зовёт штатный Blizzard-сброс для protected-фреймов.", 1, 1, 1, true)
+            GameTooltip:AddLine("Возвращает фрейм в дефолтную привязку и удаляет запись.", 1, 1, 1, true)
             GameTooltip:Show()
         end)
         xBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -716,7 +645,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
         moveBtn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:SetText("Двигать фрейм")
-            GameTooltip:AddLine("Включает режим перемещения: тяни ЛКМ, ПКМ — отмена. По отпусканию ЛКМ позиция сохраняется.", 1, 1, 1, true)
+            GameTooltip:AddLine("Тяни ЛКМ, ПКМ — отмена. По отпусканию ЛКМ позиция сохраняется.", 1, 1, 1, true)
             GameTooltip:Show()
         end)
         moveBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -738,7 +667,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
         upBtn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:SetText("Двигать родителя")
-            GameTooltip:AddLine("Позволяет двигать родительский контейнер этого фрейма (например, всю панель Bartender).", 1, 1, 1, true)
+            GameTooltip:AddLine("Позволяет двигать родительский контейнер этого фрейма.", 1, 1, 1, true)
             GameTooltip:Show()
         end)
         upBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -746,16 +675,15 @@ NSQC4.RegisterModule("ui_frames_move", function()
             self.name:SetTextColor(1, 1, 0)
             local key = self.key
             local data = key and db.frames[key]
-            local fr = GetFrameByKey(key)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:SetText("Объект: " .. tostring(key), 1, 1, 1)
-            GameTooltip:AddLine("Сейчас: " .. FormatGeometry(CaptureGeometry(fr)), 1, 1, 1)
-            if fr then
-                GameTooltip:AddLine("Привязки: " .. FormatPoints(CapturePoints(fr)), 0.7, 1, 0.7)
-            end
             if data then
-                GameTooltip:AddLine("Сохранено: " .. FormatPoints(data.points), 0, 1, 0)
-                GameTooltip:AddLine("Исходное: " .. FormatPoints(data.defaultPoints), 0.7, 0.7, 1)
+                if data.points then
+                    GameTooltip:AddLine("Сохранено: " .. FormatPoints(data.points), 0, 1, 0)
+                end
+                if data.defaultPoints then
+                    GameTooltip:AddLine("Исходное: " .. FormatPoints(data.defaultPoints), 0.7, 0.7, 1)
+                end
             end
             GameTooltip:Show()
         end)
@@ -842,7 +770,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
         addBtn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:SetText("Добавить фрейм")
-            GameTooltip:AddLine("Запускает отсчёт: наведи мышь на нужный фрейм и подожди. После захвата включится режим перемещения.", 1, 1, 1, true)
+            GameTooltip:AddLine("Наведи мышь на нужный фрейм и подожди. После захвата включится режим перемещения.", 1, 1, 1, true)
             GameTooltip:Show()
         end)
         addBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -855,7 +783,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
         resetBtn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:SetText("Сбросить всё")
-            GameTooltip:AddLine("Возвращает все фреймы в дефолтные привязки, удаляет записи и зовёт штатный Blizzard-сброс для protected-фреймов.", 1, 1, 1, true)
+            GameTooltip:AddLine("Возвращает все фреймы в дефолтные привязки и очищает список.", 1, 1, 1, true)
             GameTooltip:Show()
         end)
         resetBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -940,7 +868,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
         check:SetChecked(db.reapplyOnShow and true or false)
         check:SetScript("OnClick", function(self)
             db.reapplyOnShow = self:GetChecked() and true or false
-            L("reapplyOnShow = %s", tostring(db.reapplyOnShow))
         end)
         f.check = check
         local checkLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -958,12 +885,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
             Msg("задержка захвата: " .. db.captureDelay .. " сек")
             f:Hide()
         end)
-        saveBtn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText("Сохранить настройки")
-            GameTooltip:Show()
-        end)
-        saveBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
         settingsFrame = f
         if UISpecialFrames then table.insert(UISpecialFrames, "NSQC4FramesMoveSettings") end
         f:Raise()
@@ -1010,18 +931,10 @@ NSQC4.RegisterModule("ui_frames_move", function()
                 db.reapplyOnShow = not db.reapplyOnShow
             end
             Msg("возврат при показе: " .. (db.reapplyOnShow and "вкл" or "выкл"))
-        elseif cmd == "debug" or cmd == "verify" or cmd == "list" then
-            ReportAll()
-        elseif cmd == "on" then
-            debugEnabled = true
-            Msg("отладка включена.")
-        elseif cmd == "off" then
-            debugEnabled = false
-            Msg("отладка выключена.")
         else
-            print(LOG_PREFIX .. "/nsfcm — окно, add — захват мышью")
-            print(LOG_PREFIX .. "move <Имя> | stop | apply | reset [Имя]")
-            print(LOG_PREFIX .. "delay <3-15> | guard on/off | debug | on/off")
+            print("|cFF66CCFF[FCMOVE]|r /nsfcm — окно, add — захват мышью")
+            print("|cFF66CCFF[FCMOVE]|r move <Имя> | stop | apply | reset [Имя]")
+            print("|cFF66CCFF[FCMOVE]|r delay <3-15> | guard on/off")
         end
     end
 
@@ -1053,7 +966,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
         local scale = UIParent:GetEffectiveScale()
         local w, h = GetScreenWidth(), GetScreenHeight()
         if lastScale and (math.abs(scale - lastScale) > 0.0001 or w ~= lastW or h ~= lastH) then
-            L("смена масштаба/разрешения, применяю позиции")
             After(0.2, ApplyAllSaved)
         end
         lastScale, lastW, lastH = scale, w, h
