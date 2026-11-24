@@ -6,12 +6,9 @@
 -- Применяем сырой SetPoint(point, relativeTo, relativePoint, x, y) как есть.
 -- relativeTo сохраняем по имени, если есть имя; иначе UIParent (фолбэк).
 --
--- Сброс ("X" в строке и "Сбросить всё"):
---   1) применяем дефолтный снимок (если он есть),
---   2) удаляем запись из db.frames,
---   3) для protected-фреймов зовём штатные Blizzard-функции
---      (MainMenuBar_UpdatePosition / PetActionBar_Update / MultiActionBar_Update),
---      чтобы панель встала туда, куда её ставит сам клиент.
+-- ВАЖНО: на OnShow фрейма применяем сохранённую позицию ПОВТОРНО
+-- (несколько раз с задержкой), чтобы перебить Blizzard/Bartender,
+-- которые до-привязывают фрейм ПОСЛЕ OnShow.
 -- ============================================================================
 SLASH_NS_FCMOVE1 = "/ns_fcmove"
 SLASH_NS_FCMOVE2 = "/nsfcm"
@@ -69,7 +66,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
             local relName = (relativeTo.GetName and relativeTo:GetName()) or nil
             pts[#pts + 1] = {
                 point         = point,
-                relativeTo    = relName,      -- nil допустим, при применении фолбэк UIParent
+                relativeTo    = relName,
                 relativePoint = relativePoint,
                 x             = x or 0,
                 y             = y or 0,
@@ -125,13 +122,10 @@ NSQC4.RegisterModule("ui_frames_move", function()
 
     -- ========================================================================
     -- Штатные Blizzard-функции возврата protected-фреймов.
-    -- Вызываем только если они есть; ничего не считаем сами.
+    -- MainMenuBar_UpdatePosition в 3.3.5a НЕТ — не вызывать.
     -- ========================================================================
     local function CallBlizzardReset(frameName)
         if frameName == "MainMenuBar" then
-            if type(MainMenuBar_UpdatePosition) == "function" then
-                MainMenuBar_UpdatePosition()
-            end
             if type(MultiActionBar_Update) == "function" then
                 MultiActionBar_Update()
             end
@@ -243,6 +237,7 @@ NSQC4.RegisterModule("ui_frames_move", function()
     local mainFrame, settingsFrame
     local moveOverlay, moveTarget, moveKey, moveWasMovable, moveWasMouse
     local RefreshList, StartMoveForFrame, StopMoveMode
+    local ApplyPositionByKey
 
     local function NameOf(obj)
         if not obj then return "nil" end
@@ -326,6 +321,10 @@ NSQC4.RegisterModule("ui_frames_move", function()
     local pending = {}
     local hooked = {}
 
+    -- ВАЖНО: на OnShow применяем позицию ПОВТОРНО несколько раз,
+    -- чтобы перебить Blizzard/Bartender, которые до-привязывают фрейм
+    -- ПОСЛЕ OnShow (например, PetActionBarFrame получает
+    -- TOPLEFT -> MainMenuBar.BOTTOMLEFT после показа).
     local function HookOnShow(frame, key)
         if not frame or hooked[frame] or not frame.HookScript then return end
         hooked[frame] = true
@@ -334,11 +333,19 @@ NSQC4.RegisterModule("ui_frames_move", function()
             if self == moveTarget then return end
             local data = db.frames[key]
             if not data or not data.points then return end
-            NSQC4.MoveApply(key)
+
+            -- Немедленно
+            ApplyPositionByKey(key)
+            -- Повторно, чтобы перебить Blizzard, который ставит свои точки
+            -- сразу после OnShow.
+            After(0,    function() ApplyPositionByKey(key) end)
+            After(0.1,  function() ApplyPositionByKey(key) end)
+            After(0.5,  function() ApplyPositionByKey(key) end)
+            After(1.0,  function() ApplyPositionByKey(key) end)
         end)
     end
 
-    local function ApplyPositionByKey(key)
+    ApplyPositionByKey = function(key)
         local data = db.frames[key]
         if not data or not data.points then return true end
         if moveKey and key == moveKey then return true end
@@ -404,10 +411,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
         return true
     end
 
-    -- Сброс одного фрейма:
-    --   1) применить дефолтный снимок (если есть),
-    --   2) удалить запись из db.frames,
-    --   3) для protected-фреймов вызвать штатные Blizzard-функции.
     local function ResetFrameByKey(key)
         local restored = ApplyDefaultByKey(key)
         db.frames[key] = nil
@@ -421,7 +424,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
         end
     end
 
-    -- Сброс всего: то же для каждого ключа + очистка списка.
     local function ResetAll()
         local keys = SortedKeys()
         local restored = 0
