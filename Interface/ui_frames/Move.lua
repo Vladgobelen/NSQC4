@@ -2,8 +2,9 @@
 -- NSQC4 / Interface / ui_frames / Move
 -- Перемещение фреймов. Модуль "ui_frames_move".
 -- Клиент: WoW 3.3.5a (12340). Без C_Timer и retail-API.
--- Принудительная привязка всех сохранённых/применяемых точек к UIParent.
--- Сохраняем/применяем ВСЕ точки фрейма (GetNumPoints / GetPoint(i)).
+-- БЕЗ ЛЮБЫХ РАСЧЁТОВ. Сохраняем сырой GetPoint(i) как есть.
+-- Применяем сырой SetPoint(point, relativeTo, relativePoint, x, y) как есть.
+-- relativeTo сохраняем по имени, если есть имя; иначе UIParent (фолбэк).
 -- ============================================================================
 SLASH_NS_FCMOVE1 = "/ns_fcmove"
 SLASH_NS_FCMOVE2 = "/nsfcm"
@@ -47,42 +48,24 @@ NSQC4.RegisterModule("ui_frames_move", function()
     local function Warn(text) print("|cFFFFFF00NSQC4:|r " .. text) end
 
     -- ========================================================================
-    -- Работа с точками привязки.
-    -- ВСЕГДА relativeTo = UIParent. Всегда сохраняем ВСЕ точки.
-    -- Координаты точки берём через GetPoint(i): x,y уже в системе родителя
-    -- (UIParent), поэтому при принудительной привязке к UIParent значения
-    -- корректны, если relativeTo исходно был UIParent. Для прочих родителей
-    -- пересчитываем через эффективный масштаб, чтобы SetPoint к UIParent дал
-    -- ту же экранную позицию.
+    -- Сырое снятие/применение точек. Никаких расчётов.
+    -- relativeTo храним по имени; если имени нет — фолбэк UIParent.
     -- ========================================================================
     local function CapturePoints(frame)
         local n = frame.GetNumPoints and frame:GetNumPoints() or 0
         if n <= 0 then return nil end
-
-        local frameScale = frame:GetEffectiveScale() or 1
-        local uiScale    = UIParent:GetEffectiveScale() or 1
-        local ratio      = frameScale / uiScale
-
         local pts = {}
         for i = 1, n do
             local point, relativeTo, relativePoint, x, y = frame:GetPoint(i)
             if not point then return nil end
             relativeTo = relativeTo or UIParent
-            x = x or 0
-            y = y or 0
-
-            local nx, ny = x, y
-            if relativeTo ~= UIParent then
-                -- Приводим смещение к системе UIParent.
-                nx = x * ratio
-                ny = y * ratio
-            end
-
+            local relName = (relativeTo.GetName and relativeTo:GetName()) or nil
             pts[#pts + 1] = {
                 point         = point,
+                relativeTo    = relName,      -- nil допустим, при применении фолбэк UIParent
                 relativePoint = relativePoint,
-                x             = nx,
-                y             = ny,
+                x             = x or 0,
+                y             = y or 0,
             }
         end
         return pts
@@ -92,7 +75,8 @@ NSQC4.RegisterModule("ui_frames_move", function()
         if not frame or not pts or #pts == 0 then return false end
         frame:ClearAllPoints()
         for _, p in ipairs(pts) do
-            frame:SetPoint(p.point, UIParent, p.relativePoint, p.x, p.y)
+            local rel = (p.relativeTo and _G[p.relativeTo]) or UIParent
+            frame:SetPoint(p.point, rel, p.relativePoint, p.x, p.y)
         end
         return true
     end
@@ -101,15 +85,15 @@ NSQC4.RegisterModule("ui_frames_move", function()
         if not pts or #pts == 0 then return "нет данных" end
         local parts = {}
         for _, p in ipairs(pts) do
-            parts[#parts + 1] = string.format("%s -> UIParent.%s ofs(%.1f, %.1f)",
-                tostring(p.point), tostring(p.relativePoint), p.x or 0, p.y or 0)
+            parts[#parts + 1] = string.format("%s -> %s.%s ofs(%.1f, %.1f)",
+                tostring(p.point), tostring(p.relativeTo or "UIParent"),
+                tostring(p.relativePoint), p.x or 0, p.y or 0)
         end
         return table.concat(parts, "; ")
     end
 
     -- ========================================================================
-    -- Фиксация дефолтной привязки (до любых наших SetPoint).
-    -- Дефолт фиксируется один раз и больше не перезаписывается.
+    -- Дефолт: сырой снимок всех точек, один раз.
     -- ========================================================================
     local function EnsureDefault(frameName)
         local frame = _G[frameName]
@@ -156,8 +140,6 @@ NSQC4.RegisterModule("ui_frames_move", function()
 
         local data = db.frames[frameName]
         data.points = pts
-        data.point, data.relativePoint = pts[1].point, pts[1].relativePoint
-        data.x, data.y = pts[1].x, pts[1].y
 
         print("|cFF00FF00[FCMOVE]|r сохранено " .. frameName .. ": " .. FormatPoints(pts))
         return true
