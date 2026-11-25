@@ -204,7 +204,8 @@ NSQC4.RegisterModule("ui_ao", function()
                             local gd = GetGuildData(name)
                             local repNum = nsDbc4 and nsDbc4.reputation and nsDbc4.reputation[name]
 
-                            local color = "|cffffffff"
+                            -- Фолбэк — серый (DEFAULT_COLOR), а не белый.
+                            local color = A.DEFAULT_COLOR
                             if gd and gd.classFile and CLASS_COLORS[gd.classFile] then
                                 color = CLASS_COLORS[gd.classFile]
                             end
